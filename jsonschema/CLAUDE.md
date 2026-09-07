@@ -108,8 +108,12 @@ is the only one that imports the parent package.
 - `TestIsTrueSchemaRejectsEverySetField`, `TestSchemaSerializableFieldCoverage`
   (schema_test.go): each zero predicate reads its field; each field round-trips.
 - `TestKeywordMetaCoversSchemaFields`, `TestKeywordMetaColumnsConsistent`,
-  `TestKeywordMetaCoversConstants`, `TestKeywordMetaDerivedSets` (keywordmeta):
-  every field is claimed, no wrapper-scoped keyword replaces, sets derive.
+  `TestKeywordMetaCoversConstants`, `TestKeywordMetaDerivedSets`,
+  `TestKeywordMetaApplicatorsMatchSubschemaFields` (keywordmeta): every field
+  is claimed, no wrapper-scoped keyword replaces, sets derive, and the
+  applicator column matches the sub-schema shapes.
+- `TestApplicatorFalseSubschemaKeyword` (validate_keywords_test.go): every
+  applicator's false subschema leaf carries the applying keyword.
 - `TestReconcileSplitConsistency`, `TestReconcileSplitCoversAuthored`: a `T`
   and a `*T` field accept the same non-null instances, over every keyword.
 - `TestAssertionKeywordsCoverage`, `TestDispatchDraftGating`,

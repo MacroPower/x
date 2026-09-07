@@ -122,8 +122,10 @@ type evalContext struct {
 	schema       *Schema
 	ann          *annotations.Set
 	instancePath instanceLocation
-	schemaPath   schemaLocation
-	instance     jsonvalue.Value
+	// The schemaPath addresses schema itself, so its keyword names the
+	// applicator schema sits under, not the keyword an eval step is checking.
+	schemaPath schemaLocation
+	instance   jsonvalue.Value
 	// The nodeID is schema's node id, or -1 when schema is outside the
 	// index (a fallback target reached only at validation time). The
 	// per-node cache accessors index their slices by it and recompute on -1. It

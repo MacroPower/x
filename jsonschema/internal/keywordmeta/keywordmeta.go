@@ -241,6 +241,15 @@ type Keyword struct {
 	// row gates on one vocabulary while the keyword itself belongs to another,
 	// so its eval step re-checks the finer gate inline.
 	VocabRefined bool
+
+	// Applicator reports whether the keyword's eval step descends into a
+	// subschema: one it holds in a sub-schema field, or one a reference
+	// resolves to. The parent's false-subschema guard derives its case list
+	// from this column, so an applicator added later fails that guard until
+	// it has a case. The keywordmeta guard cross-checks the column against
+	// the sub-schema shapes schemafield declares, with $ref and $dynamicRef
+	// the two applicators whose field is a string.
+	Applicator bool
 }
 
 // Set reports whether the keyword is set on s, by comparing s against an empty
@@ -340,6 +349,15 @@ func structural(name string, drafts DraftRange, vocab VocabGroup, fields ...stri
 		Vocab:    vocab,
 		Asserted: true,
 	}
+}
+
+// applicator builds a structural row whose eval step descends into a
+// subschema.
+func applicator(name string, drafts DraftRange, vocab VocabGroup, fields ...string) Keyword {
+	k := structural(name, drafts, vocab, fields...)
+	k.Applicator = true
+
+	return k
 }
 
 var (
@@ -450,13 +468,14 @@ var (
 		// Not compares by pointer identity: the split only needs to know a hook
 		// swapped the sub-schema in, not whether its contents are equivalent.
 		valueKeyword(Keyword{
-			Fields:   []string{"Not"},
-			Name:     keyword.Not,
-			Drafts:   DraftsAll,
-			Merge:    MergeIntersect,
-			Scope:    ScopeWrapper,
-			Vocab:    VocabApplicator,
-			Asserted: true,
+			Fields:     []string{"Not"},
+			Name:       keyword.Not,
+			Drafts:     DraftsAll,
+			Merge:      MergeIntersect,
+			Scope:      ScopeWrapper,
+			Vocab:      VocabApplicator,
+			Asserted:   true,
+			Applicator: true,
 		},
 			func(s *Schema) *Schema { return s.Not },
 			func(s, v *Schema) { s.Not = v }),
@@ -535,26 +554,26 @@ var (
 		// carry no closures. The sub-schema-bearing ones are re-rendered from the
 		// value node instead of copied.
 		structural(keyword.Type, DraftsAll, VocabValidation, "Type", "Types"),
-		structural(keyword.Ref, DraftsAll, VocabCore, "Ref"),
-		structural(keyword.DynamicRef, Drafts2020Up, VocabCore, "DynamicRef"),
+		applicator(keyword.Ref, DraftsAll, VocabCore, "Ref"),
+		applicator(keyword.DynamicRef, Drafts2020Up, VocabCore, "DynamicRef"),
 		// The reusable-schema containers assert nothing themselves (their members
 		// are reached through $ref), so no dispatch row owns them.
 		{Name: keyword.Defs, Fields: []string{"Defs"}, Drafts: DraftsAll},
 		{Name: keyword.Definitions, Fields: []string{"Definitions"}, Drafts: DraftsAll},
 		structural(keyword.Required, DraftsAll, VocabValidation, "Required"),
 		structural(keyword.DependentRequired, Drafts2020Up, VocabValidation, "DependentRequired"),
-		structural(keyword.DependentSchemas, Drafts2020Up, VocabApplicator, "DependentSchemas"),
+		applicator(keyword.DependentSchemas, Drafts2020Up, VocabApplicator, "DependentSchemas"),
 		// The legacy dependencies form spans two Schema fields (the sub-schema map
 		// and the required-property map) and, in this implementation, is evaluated
 		// under Draft 2020-12 too, so it declares every draft.
-		structural(keyword.Dependencies, DraftsAll, VocabCore,
+		applicator(keyword.Dependencies, DraftsAll, VocabCore,
 			"DependencySchemas", "DependencyStrings"),
-		structural(keyword.PrefixItems, Drafts2020Up, VocabApplicator, "PrefixItems"),
+		applicator(keyword.PrefixItems, Drafts2020Up, VocabApplicator, "PrefixItems"),
 		// Items spans both Schema fields: the single-schema form and the Draft-07
 		// array (tuple) form.
-		structural(keyword.Items, DraftsAll, VocabApplicator, "Items", "ItemsArray"),
-		structural(keyword.AdditionalItems, DraftsThrough7, VocabApplicator, "AdditionalItems"),
-		structural(keyword.Contains, DraftsAll, VocabApplicator, "Contains"),
+		applicator(keyword.Items, DraftsAll, VocabApplicator, "Items", "ItemsArray"),
+		applicator(keyword.AdditionalItems, DraftsThrough7, VocabApplicator, "AdditionalItems"),
+		applicator(keyword.Contains, DraftsAll, VocabApplicator, "Contains"),
 		// The two contains counts belong to the validation vocabulary yet ride the
 		// applicator-gated contains row, so they declare the refinement themselves
 		// instead of the dispatch table carrying a list of exceptions:
@@ -578,19 +597,19 @@ var (
 			Asserted:     true,
 			VocabRefined: true,
 		},
-		structural(keyword.UnevaluatedItems, Drafts2020Up, VocabUnevaluated, "UnevaluatedItems"),
-		structural(keyword.Properties, DraftsAll, VocabApplicator, "Properties"),
-		structural(keyword.PatternProperties, DraftsAll, VocabApplicator, "PatternProperties"),
-		structural(keyword.AdditionalProperties, DraftsAll, VocabApplicator, "AdditionalProperties"),
-		structural(keyword.PropertyNames, DraftsAll, VocabApplicator, "PropertyNames"),
-		structural(keyword.UnevaluatedProperties, Drafts2020Up, VocabUnevaluated,
+		applicator(keyword.UnevaluatedItems, Drafts2020Up, VocabUnevaluated, "UnevaluatedItems"),
+		applicator(keyword.Properties, DraftsAll, VocabApplicator, "Properties"),
+		applicator(keyword.PatternProperties, DraftsAll, VocabApplicator, "PatternProperties"),
+		applicator(keyword.AdditionalProperties, DraftsAll, VocabApplicator, "AdditionalProperties"),
+		applicator(keyword.PropertyNames, DraftsAll, VocabApplicator, "PropertyNames"),
+		applicator(keyword.UnevaluatedProperties, Drafts2020Up, VocabUnevaluated,
 			"UnevaluatedProperties"),
-		structural(keyword.AllOf, DraftsAll, VocabApplicator, "AllOf"),
-		structural(keyword.AnyOf, DraftsAll, VocabApplicator, "AnyOf"),
-		structural(keyword.OneOf, DraftsAll, VocabApplicator, "OneOf"),
-		structural(keyword.If, DraftsAll, VocabApplicator, "If"),
-		structural(keyword.Then, DraftsAll, VocabApplicator, "Then"),
-		structural(keyword.Else, DraftsAll, VocabApplicator, "Else"),
+		applicator(keyword.AllOf, DraftsAll, VocabApplicator, "AllOf"),
+		applicator(keyword.AnyOf, DraftsAll, VocabApplicator, "AnyOf"),
+		applicator(keyword.OneOf, DraftsAll, VocabApplicator, "OneOf"),
+		applicator(keyword.If, DraftsAll, VocabApplicator, "If"),
+		applicator(keyword.Then, DraftsAll, VocabApplicator, "Then"),
+		applicator(keyword.Else, DraftsAll, VocabApplicator, "Else"),
 	}
 
 	// Movable is the wrapper-scoped, authorable subset: the keywords the nullable
@@ -621,6 +640,10 @@ var (
 	// Asserted is every keyword a dispatch row owns, for the cross-checks against
 	// that table.
 	Asserted = derive(func(k *Keyword) bool { return k.Asserted })
+
+	// Applicators is every keyword whose eval step descends into a subschema.
+	// The parent's false-subschema guard pins its case list to this set.
+	Applicators = derive(func(k *Keyword) bool { return k.Applicator })
 
 	// ByName indexes [Keywords] by keyword name, for the cross-checks the parent
 	// package runs against its dispatch table at load.

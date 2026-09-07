@@ -323,3 +323,44 @@ func TestKeywordMetaDerivedSets(t *testing.T) {
 		Names(derive(func(k *Keyword) bool { return k.VocabRefined })),
 		"only the contains counts opt out of the row vocabulary cross-check")
 }
+
+// TestKeywordMetaApplicatorsMatchSubschemaFields pins the Applicator column
+// against the sub-schema shapes schemafield declares: every asserted keyword
+// owning a field that holds sub-schemas is an applicator, and every applicator
+// is asserted. The two reference keywords descend through a string field, so
+// they are the one listed exception, and a string-valued applicator added
+// later fails here until it joins that list.
+func TestKeywordMetaApplicatorsMatchSubschemaFields(t *testing.T) {
+	t.Parallel()
+
+	stringApplicators := []string{keyword.DynamicRef, keyword.Ref}
+
+	holdsSubschemas := map[string]bool{}
+
+	for i := range schemafield.Fields {
+		f := &schemafield.Fields[i]
+		if f.Shape != schemafield.None {
+			holdsSubschemas[f.Name] = true
+		}
+	}
+
+	for i := range Keywords {
+		k := &Keywords[i]
+
+		t.Run(k.Name, func(t *testing.T) {
+			t.Parallel()
+
+			descends := slices.ContainsFunc(k.Fields, func(name string) bool { return holdsSubschemas[name] })
+
+			if slices.Contains(stringApplicators, k.Name) {
+				assert.False(t, descends, "a reference keyword descends through a string field, not a sub-schema field")
+				assert.True(t, k.Applicator, "a reference keyword resolves to a subschema, so it is an applicator")
+
+				return
+			}
+
+			assert.Equal(t, k.Asserted && descends, k.Applicator,
+				"Applicator is exactly the asserted keywords holding sub-schemas, plus the reference keywords")
+		})
+	}
+}

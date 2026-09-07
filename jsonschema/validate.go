@@ -186,16 +186,26 @@ func (l instanceLocation) index(i int) instanceLocation {
 type schemaLocation struct {
 	// The RFC 6901-encoded JSON Pointer.
 	ptr jsontext.Pointer
-	// One typed [Segment] per reference token of ptr.
+	// The applicator keyword the location descended through most recently:
+	// the keyword whose subschema the walk is inside, not the keyword the
+	// walk is evaluating. It is empty at the root and set by every kw call,
+	// and key and idx carry it forward, so the false-schema short-circuit in
+	// [validator.validate] reads the applying keyword off the location
+	// instead of every applicator stamping it after the fact. Every
+	// subschema descent goes through kw, so no descent can leave it unset.
+	keyword string
+	// One typed [Segment] per reference token of ptr. It trails the strings
+	// so the slice's capacity word ends the pointer-bearing prefix.
 	segs []Segment
 }
 
 // kw returns the location of the keyword token named keyword, extending both
-// representations.
+// representations and recording keyword as the applicator in force.
 func (l schemaLocation) kw(keyword string) schemaLocation {
 	return schemaLocation{
-		ptr:  jsonptr.AppendToken(l.ptr, keyword),
-		segs: append(l.segs, Segment{Key: keyword}),
+		ptr:     jsonptr.AppendToken(l.ptr, keyword),
+		segs:    append(l.segs, Segment{Key: keyword}),
+		keyword: keyword,
 	}
 }
 
@@ -204,8 +214,9 @@ func (l schemaLocation) kw(keyword string) schemaLocation {
 // representations.
 func (l schemaLocation) key(name string) schemaLocation {
 	return schemaLocation{
-		ptr:  jsonptr.AppendToken(l.ptr, name),
-		segs: append(l.segs, Segment{Key: name}),
+		ptr:     jsonptr.AppendToken(l.ptr, name),
+		segs:    append(l.segs, Segment{Key: name}),
+		keyword: l.keyword,
 	}
 }
 
@@ -213,8 +224,9 @@ func (l schemaLocation) key(name string) schemaLocation {
 // (allOf, anyOf, oneOf, prefixItems, ...), extending both representations.
 func (l schemaLocation) idx(i int) schemaLocation {
 	return schemaLocation{
-		ptr:  jsonptr.AppendToken(l.ptr, strconv.Itoa(i)),
-		segs: append(l.segs, Segment{Index: i, IsIndex: true}),
+		ptr:     jsonptr.AppendToken(l.ptr, strconv.Itoa(i)),
+		segs:    append(l.segs, Segment{Index: i, IsIndex: true}),
+		keyword: l.keyword,
 	}
 }
 
@@ -1783,13 +1795,14 @@ func (v *validator) validate(
 	// that vocabulary is disabled, which is worse than ignoring the much rarer
 	// explicit `{"not":{}}` under the same configuration.
 	if isFalseSchema(schema) {
-		// Keyword is left empty here: this point cannot know which applicator
-		// (if any) handed it the false schema. The applicator call sites stamp
-		// it via labelFalseSchemaKeyword. The schema location is bare (no keyword
-		// token) for the same reason, so the error is built through newError
+		// The leaf carries the applicator the location descended through,
+		// which is the keyword that handed this walk the false schema. A root
+		// or standalone false schema sits at the root location, whose keyword
+		// is empty, so its leaf carries none. The location already addresses
+		// the false schema itself, so the error is built through newError
 		// directly rather than the keyword-appending leafError.
 		return []*ValidationError{
-			newError(instancePath, schemaPath, "", "value is not allowed", nil),
+			newError(instancePath, schemaPath, schemaPath.keyword, "value is not allowed", nil),
 		}
 	}
 
@@ -1904,7 +1917,6 @@ func evalUnevaluatedProperties(ctx evalContext) []*ValidationError {
 
 		childPath := ctx.instancePath.key(propName)
 		childErrs := v.validate(schema.UnevaluatedProperties, val, childPath, childSchemaPath, nil)
-		labelFalseSchemaKeyword(childErrs, schema.UnevaluatedProperties, KeywordUnevaluatedProperties)
 
 		if len(childErrs) == 0 {
 			ann.RecordProperty(propName)
@@ -1961,7 +1973,6 @@ func evalUnevaluatedItems(ctx evalContext) []*ValidationError {
 
 		childPath := ctx.instancePath.index(i)
 		childErrs := v.validate(schema.UnevaluatedItems, item, childPath, childSchemaPath, nil)
-		labelFalseSchemaKeyword(childErrs, schema.UnevaluatedItems, KeywordUnevaluatedItems)
 
 		if len(childErrs) == 0 {
 			ann.RecordItem(i)
@@ -1975,25 +1986,6 @@ func evalUnevaluatedItems(ctx evalContext) []*ValidationError {
 	}
 
 	return errs
-}
-
-// labelFalseSchemaKeyword stamps keyword on the leaf error a false subschema
-// emitted, so a consumer can tell an additionalProperties:false violation (or
-// a false property/item subschema) apart from other failures without parsing
-// SchemaPath. The false-schema short-circuit in [validator.validate] cannot
-// know which applicator handed it the schema, so the applicator call sites
-// label the result; a root or standalone boolean false schema has no
-// applicator context and its leaf keeps an empty Keyword.
-func labelFalseSchemaKeyword(errs []*ValidationError, sub *Schema, keyword string) {
-	if !isFalseSchema(sub) {
-		return
-	}
-
-	for _, e := range errs {
-		if e.Keyword == "" {
-			e.Keyword = keyword
-		}
-	}
 }
 
 // isFalseSchema reports whether a schema is equivalent to boolean false (rejects
@@ -2593,7 +2585,6 @@ func evalArrayItems(ctx evalContext) []*ValidationError {
 		childPath := instancePath.index(i)
 		childSchemaPath := schemaPath.kw(plan.tupleLabel).idx(i)
 		childErrs := v.validate(ps, arr[i], childPath, childSchemaPath, nil)
-		labelFalseSchemaKeyword(childErrs, ps, plan.tupleLabel)
 
 		errs = append(errs, childErrs...)
 	}
@@ -2617,7 +2608,6 @@ func evalArrayItems(ctx evalContext) []*ValidationError {
 		for i := len(plan.tuple); i < len(arr); i++ {
 			childPath := instancePath.index(i)
 			childErrs := v.validate(plan.rest, arr[i], childPath, childSchemaPath, nil)
-			labelFalseSchemaKeyword(childErrs, plan.rest, plan.restLabel)
 
 			errs = append(errs, childErrs...)
 		}
@@ -2806,7 +2796,6 @@ func evalObjectApplicators(ctx evalContext) []*ValidationError {
 		childPath := instancePath.key(propName)
 		childSchemaPath := propsSchemaPath.key(propName)
 		childErrs := v.validate(propSchema, val, childPath, childSchemaPath, nil)
-		labelFalseSchemaKeyword(childErrs, propSchema, KeywordProperties)
 
 		errs = append(errs, childErrs...)
 	}
@@ -2857,7 +2846,6 @@ func evalObjectApplicators(ctx evalContext) []*ValidationError {
 
 			childPath := instancePath.key(propName)
 			childErrs := v.validate(patternSchema, val, childPath, patternSchemaPath, nil)
-			labelFalseSchemaKeyword(childErrs, patternSchema, KeywordPatternProperties)
 
 			errs = append(errs, childErrs...)
 		}
@@ -2877,7 +2865,6 @@ func evalObjectApplicators(ctx evalContext) []*ValidationError {
 
 			childPath := instancePath.key(propName)
 			childErrs := v.validate(schema.AdditionalProperties, val, childPath, childSchemaPath, nil)
-			labelFalseSchemaKeyword(childErrs, schema.AdditionalProperties, KeywordAdditionalProperties)
 
 			errs = append(errs, childErrs...)
 		}
@@ -2901,7 +2888,6 @@ func evalObjectApplicators(ctx evalContext) []*ValidationError {
 			childErrs := v.validate(
 				schema.PropertyNames, jsonvalue.NewString(propName), childPath, childSchemaPath, nil,
 			)
-			labelFalseSchemaKeyword(childErrs, schema.PropertyNames, KeywordPropertyNames)
 
 			if len(childErrs) > 0 {
 				errs = append(errs, newError(
@@ -3049,10 +3035,6 @@ func (v *validator) validateSchemaDependencies(
 		depAnn := ann.Child()
 		childSchemaPath := schemaPath.kw(keyword).key(prop)
 		childErrs := v.validate(deps[prop], instance, instancePath, childSchemaPath, depAnn)
-		// Stamp the dependency keyword on a boolean-false subschema's leaf,
-		// mirroring the other applicator call sites, so the error contract (a
-		// false subschema failure carries the applying keyword) holds here too.
-		labelFalseSchemaKeyword(childErrs, deps[prop], keyword)
 
 		errs = append(errs, childErrs...)
 
@@ -3119,7 +3101,6 @@ func evalAllOf(ctx evalContext) []*ValidationError {
 		subAnn := ann.Child()
 		childSchemaPath := schemaPath.kw(KeywordAllOf).idx(i)
 		childErrs := v.validate(sub, ctx.instance, instancePath, childSchemaPath, subAnn)
-		labelFalseSchemaKeyword(childErrs, sub, KeywordAllOf)
 
 		if len(childErrs) > 0 {
 			allCauses = append(allCauses, childErrs...)
@@ -3160,7 +3141,6 @@ func evalAnyOf(ctx evalContext) []*ValidationError {
 		subAnn := ann.Child()
 		childSchemaPath := schemaPath.kw(KeywordAnyOf).idx(i)
 		childErrs := v.validate(sub, ctx.instance, instancePath, childSchemaPath, subAnn)
-		labelFalseSchemaKeyword(childErrs, sub, KeywordAnyOf)
 
 		if len(childErrs) == 0 {
 			matched = true
@@ -3202,7 +3182,6 @@ func evalOneOf(ctx evalContext) []*ValidationError {
 		subAnn := ann.Child()
 		childSchemaPath := schemaPath.kw(KeywordOneOf).idx(i)
 		childErrs := v.validate(sub, ctx.instance, instancePath, childSchemaPath, subAnn)
-		labelFalseSchemaKeyword(childErrs, sub, KeywordOneOf)
 
 		if len(childErrs) == 0 {
 			matchCount++
@@ -3272,7 +3251,6 @@ func evalIfThenElse(ctx evalContext) []*ValidationError {
 		if schema.Then != nil {
 			thenAnn := ann.Child()
 			thenErrs := v.validate(schema.Then, instance, instancePath, schemaPath.kw(KeywordThen), thenAnn)
-			labelFalseSchemaKeyword(thenErrs, schema.Then, KeywordThen)
 
 			if len(thenErrs) > 0 {
 				errs = append(errs, wrapError(instancePath, schemaPath, KeywordThen,
@@ -3284,7 +3262,6 @@ func evalIfThenElse(ctx evalContext) []*ValidationError {
 	} else if schema.Else != nil {
 		elseAnn := ann.Child()
 		elseErrs := v.validate(schema.Else, instance, instancePath, schemaPath.kw(KeywordElse), elseAnn)
-		labelFalseSchemaKeyword(elseErrs, schema.Else, KeywordElse)
 
 		if len(elseErrs) > 0 {
 			errs = append(errs, wrapError(instancePath, schemaPath, KeywordElse,
@@ -3431,7 +3408,6 @@ func (v *validator) validateResolvedRef(
 
 	refAnn := ann.Child()
 	childErrs := v.validate(res.Target, instance, instancePath, schemaPath.kw(keyword), refAnn)
-	labelFalseSchemaKeyword(childErrs, res.Target, keyword)
 
 	if len(childErrs) > 0 {
 		return []*ValidationError{

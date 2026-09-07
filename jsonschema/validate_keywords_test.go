@@ -2,6 +2,8 @@ package jsonschema_test
 
 import (
 	"encoding/json/jsontext"
+	"errors"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -10,6 +12,7 @@ import (
 	jsonv1 "encoding/json"
 
 	"go.jacobcolvin.com/x/jsonschema"
+	"go.jacobcolvin.com/x/jsonschema/internal/keywordmeta"
 )
 
 // TestValidateDraft7EmptyItemsArray locks in Draft-07 array-form semantics for
@@ -185,58 +188,6 @@ func TestValidateContainsFloorWithoutValidationVocab(t *testing.T) {
 			require.ErrorAs(t, err, &ve)
 			assert.Equal(t, tc.keyword, ve.Keyword,
 				"a default-floor shortfall is a contains failure, never a skipped minContains violation")
-		})
-	}
-}
-
-// TestValidateDependenciesFalseSchemaKeyword locks in the error contract for a
-// boolean-false dependency subschema: like every other applicator call site,
-// the dependency keywords stamp their keyword on the false-schema leaf, so a
-// consumer branching on ValidationError.Keyword sees dependentSchemas (or the
-// legacy dependencies) rather than an empty keyword.
-func TestValidateDependenciesFalseSchemaKeyword(t *testing.T) {
-	t.Parallel()
-
-	tests := map[string]struct {
-		schema     string
-		keyword    string
-		schemaPath jsontext.Pointer
-	}{
-		"dependentSchemas false subschema": {
-			schema:     `{"dependentSchemas": {"a": false}}`,
-			keyword:    jsonschema.KeywordDependentSchemas,
-			schemaPath: "/dependentSchemas/a",
-		},
-		"legacy dependencies false subschema": {
-			schema:     `{"$schema": "http://json-schema.org/draft-07/schema#", "dependencies": {"a": false}}`,
-			keyword:    jsonschema.KeywordDependencies,
-			schemaPath: "/dependencies/a",
-		},
-	}
-
-	for name, tc := range tests {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			schema, err := jsonschema.ParseSchema([]byte(tc.schema))
-			require.NoError(t, err)
-
-			v, err := jsonschema.Compile(t.Context(), schema)
-			require.NoError(t, err)
-
-			err = v.Validate(t.Context(), map[string]any{"a": 1.0})
-			require.Error(t, err)
-
-			var ve *jsonschema.ValidationError
-
-			require.ErrorAs(t, err, &ve)
-			assert.Equal(t, tc.keyword, ve.Keyword,
-				"the false-schema leaf must carry the applying dependency keyword")
-			assert.Equal(t, tc.schemaPath, ve.SchemaPath)
-			assert.Equal(t, "value is not allowed", ve.Message)
-
-			require.NoError(t, v.Validate(t.Context(), map[string]any{"b": 1.0}),
-				"an absent trigger property leaves the dependency inert")
 		})
 	}
 }
@@ -518,4 +469,275 @@ func TestValidateVocabularyDeclaredOptional(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestApplicatorFalseSubschemaKeyword pins the error contract for a false
+// subschema: the "value is not allowed" leaf carries the applicator keyword
+// that applied it and the schema path of the false schema itself, so a
+// consumer can tell an additionalProperties:false failure from a false
+// property or item subschema without parsing SchemaPath. The walk reads the
+// keyword off the schema location every descent records, so the case list
+// here is the only place an applicator can be missed, and the closing
+// assertion pins that list to the applicators keywordmeta declares. The three
+// applicators that consume their child's verdict instead of surfacing its
+// errors (contains, not, if) are recorded as non-surfacing cases, so a change
+// in how one of them reports is a deliberate edit here. A standalone false
+// root has no applicator and keeps an empty keyword.
+func TestApplicatorFalseSubschemaKeyword(t *testing.T) {
+	t.Parallel()
+
+	const draft7 = `"http://json-schema.org/draft-07/schema#"`
+
+	tests := map[string]struct {
+		keyword      string
+		schema       string
+		instance     string
+		schemaPath   jsontext.Pointer
+		instancePath jsontext.Pointer
+		// The surfaces flag is false for an applicator that consumes the
+		// false subschema's verdict, so no "value is not allowed" leaf reaches
+		// the caller.
+		surfaces bool
+	}{
+		"additionalProperties": {
+			keyword:      jsonschema.KeywordAdditionalProperties,
+			schema:       `{"additionalProperties": false}`,
+			instance:     `{"extra": 1}`,
+			schemaPath:   "/additionalProperties",
+			instancePath: "/extra",
+			surfaces:     true,
+		},
+		"properties": {
+			keyword:      jsonschema.KeywordProperties,
+			schema:       `{"properties": {"forbidden": false}}`,
+			instance:     `{"forbidden": 1}`,
+			schemaPath:   "/properties/forbidden",
+			instancePath: "/forbidden",
+			surfaces:     true,
+		},
+		"patternProperties": {
+			keyword:      jsonschema.KeywordPatternProperties,
+			schema:       `{"patternProperties": {"^x-": false}}`,
+			instance:     `{"x-a": 1}`,
+			schemaPath:   "/patternProperties/^x-",
+			instancePath: "/x-a",
+			surfaces:     true,
+		},
+		"propertyNames": {
+			keyword:      jsonschema.KeywordPropertyNames,
+			schema:       `{"propertyNames": false}`,
+			instance:     `{"k": 1}`,
+			schemaPath:   "/propertyNames",
+			instancePath: "/k",
+			surfaces:     true,
+		},
+		"unevaluatedProperties": {
+			keyword:      jsonschema.KeywordUnevaluatedProperties,
+			schema:       `{"unevaluatedProperties": false}`,
+			instance:     `{"extra": 1}`,
+			schemaPath:   "/unevaluatedProperties",
+			instancePath: "/extra",
+			surfaces:     true,
+		},
+		"items 2020-12": {
+			keyword:      jsonschema.KeywordItems,
+			schema:       `{"items": false}`,
+			instance:     `[1]`,
+			schemaPath:   "/items",
+			instancePath: "/0",
+			surfaces:     true,
+		},
+		"items draft-07 array form": {
+			keyword:      jsonschema.KeywordItems,
+			schema:       `{"$schema": ` + draft7 + `, "items": [false]}`,
+			instance:     `[1]`,
+			schemaPath:   "/items/0",
+			instancePath: "/0",
+			surfaces:     true,
+		},
+		"additionalItems draft-07": {
+			keyword:      jsonschema.KeywordAdditionalItems,
+			schema:       `{"$schema": ` + draft7 + `, "items": [{}], "additionalItems": false}`,
+			instance:     `[1, 2]`,
+			schemaPath:   "/additionalItems",
+			instancePath: "/1",
+			surfaces:     true,
+		},
+		"prefixItems": {
+			keyword:      jsonschema.KeywordPrefixItems,
+			schema:       `{"prefixItems": [false]}`,
+			instance:     `[1]`,
+			schemaPath:   "/prefixItems/0",
+			instancePath: "/0",
+			surfaces:     true,
+		},
+		"unevaluatedItems": {
+			keyword:      jsonschema.KeywordUnevaluatedItems,
+			schema:       `{"unevaluatedItems": false}`,
+			instance:     `[1]`,
+			schemaPath:   "/unevaluatedItems",
+			instancePath: "/0",
+			surfaces:     true,
+		},
+		"contains": {
+			keyword:  jsonschema.KeywordContains,
+			schema:   `{"contains": false}`,
+			instance: `[1]`,
+		},
+		"dependentSchemas": {
+			keyword:    jsonschema.KeywordDependentSchemas,
+			schema:     `{"dependentSchemas": {"a": false}}`,
+			instance:   `{"a": 1}`,
+			schemaPath: "/dependentSchemas/a",
+			surfaces:   true,
+		},
+		"dependencies draft-07": {
+			keyword:    jsonschema.KeywordDependencies,
+			schema:     `{"$schema": ` + draft7 + `, "dependencies": {"a": false}}`,
+			instance:   `{"a": 1}`,
+			schemaPath: "/dependencies/a",
+			surfaces:   true,
+		},
+		"allOf": {
+			keyword:    jsonschema.KeywordAllOf,
+			schema:     `{"allOf": [false]}`,
+			instance:   `1`,
+			schemaPath: "/allOf/0",
+			surfaces:   true,
+		},
+		"anyOf": {
+			keyword:    jsonschema.KeywordAnyOf,
+			schema:     `{"anyOf": [false]}`,
+			instance:   `1`,
+			schemaPath: "/anyOf/0",
+			surfaces:   true,
+		},
+		"oneOf": {
+			keyword:    jsonschema.KeywordOneOf,
+			schema:     `{"oneOf": [false]}`,
+			instance:   `1`,
+			schemaPath: "/oneOf/0",
+			surfaces:   true,
+		},
+		"not": {
+			keyword:  jsonschema.KeywordNot,
+			schema:   `{"not": false}`,
+			instance: `1`,
+		},
+		"if": {
+			keyword:  jsonschema.KeywordIf,
+			schema:   `{"if": false, "else": {"type": "string"}}`,
+			instance: `1`,
+		},
+		"then": {
+			keyword:    jsonschema.KeywordThen,
+			schema:     `{"if": {}, "then": false}`,
+			instance:   `1`,
+			schemaPath: "/then",
+			surfaces:   true,
+		},
+		"else": {
+			keyword:    jsonschema.KeywordElse,
+			schema:     `{"if": {"type": "string"}, "else": false}`,
+			instance:   `1`,
+			schemaPath: "/else",
+			surfaces:   true,
+		},
+		"$ref": {
+			keyword:    jsonschema.KeywordRef,
+			schema:     `{"$ref": "#/$defs/never", "$defs": {"never": false}}`,
+			instance:   `1`,
+			schemaPath: "/$ref",
+			surfaces:   true,
+		},
+		"$dynamicRef": {
+			keyword:    jsonschema.KeywordDynamicRef,
+			schema:     `{"$dynamicRef": "#/$defs/never", "$defs": {"never": false}}`,
+			instance:   `1`,
+			schemaPath: "/$dynamicRef",
+			surfaces:   true,
+		},
+	}
+
+	var covered []string
+
+	for name, tc := range tests {
+		covered = append(covered, tc.keyword)
+
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			schema, err := jsonschema.ParseSchema([]byte(tc.schema))
+			require.NoError(t, err)
+
+			v, err := jsonschema.Compile(t.Context(), schema)
+			require.NoError(t, err)
+
+			var instance any
+
+			require.NoError(t, jsonv1.Unmarshal([]byte(tc.instance), &instance))
+
+			err = v.Validate(t.Context(), instance)
+
+			var (
+				ve     *jsonschema.ValidationError
+				leaves []*jsonschema.ValidationError
+			)
+
+			if errors.As(err, &ve) {
+				leaves = falseSubschemaLeaves(ve)
+			}
+
+			if !tc.surfaces {
+				assert.Empty(t, leaves, "the applicator consumes the false subschema's verdict")
+
+				return
+			}
+
+			require.Error(t, err)
+			require.Len(t, leaves, 1, "exactly one false-subschema leaf surfaces")
+			assert.Equal(t, tc.keyword, leaves[0].Keyword, "the leaf carries the applying keyword")
+			assert.Equal(t, tc.schemaPath, leaves[0].SchemaPath)
+			assert.Equal(t, tc.instancePath, leaves[0].InstancePath)
+			assert.Empty(t, leaves[0].Causes)
+		})
+	}
+
+	t.Run("standalone false root keeps an empty keyword", func(t *testing.T) {
+		t.Parallel()
+
+		schema, err := jsonschema.ParseSchema([]byte(`false`))
+		require.NoError(t, err)
+
+		err = jsonschema.Validate(t.Context(), schema, "anything")
+
+		var ve *jsonschema.ValidationError
+
+		require.ErrorAs(t, err, &ve)
+		assert.Empty(t, ve.Keyword, "a root false schema has no applicator context")
+		assert.Equal(t, "value is not allowed", ve.Message)
+	})
+
+	slices.Sort(covered)
+	assert.Equal(t, keywordmeta.Names(keywordmeta.Applicators), slices.Compact(covered),
+		"every applicator keywordmeta declares needs a false-subschema case")
+}
+
+// falseSubschemaLeaves collects every "value is not allowed" error in the
+// tree under e, descending through causes. It walks the causes itself rather
+// than through [jsonschema.ValidationError.Leaves], which treats a
+// propertyNames error as a leaf and would hide the false-subschema error
+// beneath it.
+func falseSubschemaLeaves(e *jsonschema.ValidationError) []*jsonschema.ValidationError {
+	var out []*jsonschema.ValidationError
+
+	if e.Message == "value is not allowed" {
+		out = append(out, e)
+	}
+
+	for _, cause := range e.Causes {
+		out = append(out, falseSubschemaLeaves(cause)...)
+	}
+
+	return out
 }
