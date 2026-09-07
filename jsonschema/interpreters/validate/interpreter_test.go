@@ -2969,6 +2969,16 @@ func TestValidateInterpreterGoPlaygroundParity(t *testing.T) {
 		s, err := jsonschema.GenerateFor[T](t.Context(), opt)
 		require.NoError(t, err)
 		assert.Contains(t, s.Required, "tags")
+
+		// Go-playground panics on a dive over anything but a slice, array,
+		// or map, trailing or not, so the descent is still an error where
+		// there is nothing to descend into.
+		type S struct {
+			Name string `json:"name" validate:"required,dive"`
+		}
+
+		_, err = jsonschema.GenerateFor[S](t.Context(), opt)
+		require.ErrorContains(t, err, "cannot dive")
 	})
 
 	t.Run("empty first OR alternative is refused", func(t *testing.T) {

@@ -273,8 +273,12 @@
 // conditional validators (eqfield, required_if, skip_unless, ...), control tags
 // that govern when validation runs (omitempty, structonly, ...), and the
 // constraints inside a keys...endkeys block (map-key constraints are not
-// modeled). A trailing dive with nothing after it descends into nothing and
-// is a no-op, as it is in go-playground. The | OR operator is not modeled
+// modeled). A trailing dive with nothing after it applies nothing to the
+// elements and is a no-op, as it is in go-playground, while a dive on a field
+// with no elements to reach is an error whatever follows it, since
+// go-playground panics on a dive over anything but a slice, array, or map. A
+// blank or "-" part is skipped and a part is trimmed of surrounding
+// whitespace, where go-playground refuses the tag. The | OR operator is not modeled
 // either: within a single comma group the pipe separates OR alternatives, of
 // which only the first is interpreted, so later comma-separated constraints
 // still apply; an empty first alternative is an error, since go-playground

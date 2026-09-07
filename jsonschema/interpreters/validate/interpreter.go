@@ -109,15 +109,12 @@ func applyParts(parts []string, field jsonschema.FieldContext) error {
 		// modeled; it must be skipped by the inKeys guard below rather than
 		// treated as a value-element dive. Only handle dive outside the block.
 		if part == "dive" && !inKeys {
-			// Descend into element type. A trailing dive with no subsequent
-			// constraints descends into nothing, which go-playground/validator
-			// accepts as a no-op.
-			remaining := parts[idx+1:]
-			if !hasConstraint(remaining) {
-				return nil
-			}
-
-			return applyDive(remaining, field)
+			// Descend into the element type. A trailing dive applies nothing
+			// to the elements, a no-op as in go-playground, but the descent
+			// itself still needs elements to reach: go-playground panics on a
+			// dive over anything but a slice, array, or map, so a dive on a
+			// field with no elements is an error here whatever follows it.
+			return applyDive(parts[idx+1:], field)
 		}
 
 		key, value, hasValue := strings.Cut(part, "=")

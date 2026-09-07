@@ -20,6 +20,17 @@ import (
 func applyDive(remaining []string, field jsonschema.FieldContext) error {
 	elems := field.ElementContexts()
 	if len(elems) == 0 {
+		// The shape decides whether there is anything to descend into, as it
+		// does for go-playground, which panics on a dive over anything but a
+		// slice, array, or map. A caller-built context supplies no element
+		// canvases even for a collection, so a trailing dive there descends
+		// into nothing and applies nothing, while a dive carrying constraints
+		// it cannot place is still an error rather than a silent drop.
+		form := shapeOf(field).Form
+		if (form == tagmodel.FormArray || form == tagmodel.FormObject) && !hasConstraint(remaining) {
+			return nil
+		}
+
 		return fmt.Errorf("validate tag: cannot dive: %w", noElementsReason(field))
 	}
 
