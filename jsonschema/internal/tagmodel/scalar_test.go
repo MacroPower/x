@@ -287,3 +287,30 @@ func TestShapeParseScalarIntegerGrammar(t *testing.T) {
 		})
 	}
 }
+
+// TestForbidSizeLiteralGrammar pins that the forbidden-size rule, which
+// parses its literal itself rather than through the shared algebra, takes the
+// same JSON integer grammar: ne=08 on a slice is a parse failure in
+// go-playground, not a forbidden length of eight.
+func TestForbidSizeLiteralGrammar(t *testing.T) {
+	t.Parallel()
+
+	target := tagmodel.Target{
+		Shape:  tagmodel.ShapeOf(reflect.TypeFor[[]string](), nil),
+		Canvas: &jsonschema.Schema{},
+	}
+
+	err := tagmodel.Apply(
+		target,
+		tagmodel.Rule{Op: tagmodel.OpForbidSize, Params: tagmodel.ParamsOf("08")},
+		tagmodel.Policy{},
+	)
+	require.ErrorIs(t, err, constraint.ErrIntegerLiteral)
+
+	err = tagmodel.Apply(
+		target,
+		tagmodel.Rule{Op: tagmodel.OpForbidSize, Params: tagmodel.ParamsOf("8")},
+		tagmodel.Policy{},
+	)
+	require.NoError(t, err)
+}

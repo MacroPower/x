@@ -342,3 +342,32 @@ func TestCheckIntegerLiteral(t *testing.T) {
 		})
 	}
 }
+
+// TestParseSizeBoundIntegerGrammar pins that a length or count literal takes
+// the JSON integer grammar the numeric bounds take, since go-playground reads
+// a size parameter in base 0 as well: min=010 on a string is eight there, and
+// min=080 is a parse failure.
+func TestParseSizeBoundIntegerGrammar(t *testing.T) {
+	t.Parallel()
+
+	for _, value := range []string{"+5", "010", "080", "0x10", "1_0", ""} {
+		_, err := constraint.ParseSizeBound(
+			value,
+			constraint.RuleMin,
+			constraint.SizeFold,
+			constraint.Intersect,
+			constraint.Authored,
+		)
+		require.ErrorIs(t, err, constraint.ErrIntegerLiteral, value)
+	}
+
+	got, err := constraint.ParseSizeBound(
+		"10",
+		constraint.RuleMin,
+		constraint.SizeFold,
+		constraint.Intersect,
+		constraint.Authored,
+	)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+}

@@ -43,11 +43,17 @@ func tighten[T cmp.Ordered](field **T, base *T, n T, ceiling bool) {
 	}
 }
 
-// parseSizeLiteral parses a length or count literal, which is always a base-10
-// integer in both dialects. The bound path parses through the shared algebra
-// instead; this serves the forbidden-size rule, which needs the number itself
-// rather than a contribution.
+// parseSizeLiteral parses a length or count literal under the JSON integer
+// grammar every integer literal takes. The bound path parses through the
+// shared algebra instead; this serves the forbidden-size rule, which needs the
+// number itself rather than a contribution.
 func parseSizeLiteral(value string) (int, error) {
+	err := constraint.CheckIntegerLiteral(value)
+	if err != nil {
+		//nolint:wrapcheck // The shared policy owns the spelling and its message.
+		return 0, err
+	}
+
 	n, err := strconv.Atoi(value)
 	if err != nil {
 		return 0, fmt.Errorf("invalid number %q: %w", value, err)

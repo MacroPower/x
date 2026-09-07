@@ -25,8 +25,9 @@ import (
 var (
 	ErrNotRepresentable = errors.New("not exactly representable as a JSON Schema number")
 
-	// ErrIntegerLiteral marks a literal on an integer-kind field that is not a
-	// JSON integer. Every dialect parses such a literal in base ten with no
+	// ErrIntegerLiteral marks an integer literal that is not a JSON integer:
+	// a bound or scalar on an integer-kind field, or a length or count on
+	// any field. Every dialect parses such a literal in base ten with no
 	// sign but a minus, no leading zero, and no base prefix, which is the one
 	// spelling every reader agrees on: go-playground reads its parameter in
 	// base 0, where 010 is eight and 0x10 is sixteen, and refuses a leading
@@ -93,7 +94,8 @@ func ParseNumericBound(value string, kind reflect.Kind) (Endpoint, error) {
 
 // CheckIntegerLiteral reports whether value spells a JSON integer: an optional
 // minus, then a single zero or a digit run with no leading zero. It is the
-// spelling half of every integer-kind parse, bound and scalar alike, so a
+// spelling half of every integer parse, the numeric bounds and scalars of an
+// integer-kind field and the length and count bounds of every field, so a
 // literal reads the same way at every kind and in every dialect. The range
 // check is the caller's.
 func CheckIntegerLiteral(value string) error {
@@ -220,6 +222,11 @@ const (
 func ParseSizeBound(
 	value string, rule SizeRule, domain SizeDomain, mode Mode, prov Provenance,
 ) ([]Bound, error) {
+	err := CheckIntegerLiteral(value)
+	if err != nil {
+		return nil, err
+	}
+
 	n, err := strconv.Atoi(value)
 	if err != nil {
 		return nil, fmt.Errorf("invalid number %q: %w", value, err)
