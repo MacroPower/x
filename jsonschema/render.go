@@ -133,7 +133,7 @@ func (g *run) renderRef(payload *Schema, def *defEntry) *Schema {
 // [run.reconcileField].
 func (g *run) applyNull(n *node, base *Schema) *Schema {
 	if !n.null.admit {
-		if n.nilableContainer() {
+		if n.typeListEncoded() {
 			bareContainerType(base, n.containerType())
 		}
 
@@ -141,17 +141,17 @@ func (g *run) applyNull(n *node, base *Schema) *Schema {
 	}
 
 	hasConstEnum := base.Const != nil || base.Enum != nil
-	if n.nilableContainer() && !hasConstEnum {
+	if n.typeListEncoded() && !hasConstEnum {
 		nullTypeList(base, n.containerType())
 
 		return base
 	}
 
-	if !n.null.wrap || (!n.nilableContainer() && schemashape.IsEmpty(base)) {
+	if !n.null.wrap || (!n.typeListEncoded() && schemashape.IsEmpty(base)) {
 		return base
 	}
 
-	if n.nilableContainer() {
+	if n.typeListEncoded() {
 		// A const/enum cannot ride on a ["null", base] list, so flip to the
 		// anyOf form with the base type on the value branch.
 		bareContainerType(base, n.containerType())

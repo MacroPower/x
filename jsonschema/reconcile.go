@@ -53,7 +53,7 @@ func (g *run) reconcileField(n *node) *Schema {
 	g.resolveBounds(n, &merged, base)
 
 	if !n.null.admit {
-		if n.nilableContainer() {
+		if n.typeListEncoded() {
 			bareContainerType(&merged, n.containerType())
 		}
 
@@ -65,7 +65,7 @@ func (g *run) reconcileField(n *node) *Schema {
 	// yet, so the empty-schema dedup (which treats a typeless payload as
 	// null-admitting) must not run first.
 	hasConstEnum := merged.Const != nil || merged.Enum != nil
-	if n.nilableContainer() && !hasConstEnum {
+	if n.typeListEncoded() && !hasConstEnum {
 		nullTypeList(&merged, n.containerType())
 
 		return &merged
@@ -74,7 +74,7 @@ func (g *run) reconcileField(n *node) *Schema {
 	// A declared null type needs no branch, and an empty merged schema (an
 	// interface field whose canvas constrains nothing) already admits null, so
 	// either returns with its authored keywords inline.
-	if !n.null.wrap || (!n.nilableContainer() && schemashape.IsEmpty(&merged)) {
+	if !n.null.wrap || (!n.typeListEncoded() && schemashape.IsEmpty(&merged)) {
 		return &merged
 	}
 
@@ -85,7 +85,7 @@ func (g *run) reconcileField(n *node) *Schema {
 	// the resolved keywords.
 	wrapper := splitFieldKeywords(&merged, base)
 
-	if n.nilableContainer() {
+	if n.typeListEncoded() {
 		bareContainerType(&merged, n.containerType())
 	}
 

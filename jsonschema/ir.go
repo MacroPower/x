@@ -95,8 +95,9 @@ type node struct {
 	// Occ holds the facts of this occurrence that decide whether it admits
 	// null, and stance the null-admission stance a type-level hook declared
 	// for an inline node (an alias's own stance for a ref). Null is the
-	// decision [run.resolveNullability] derives from them once the
-	// graph is complete; nothing reads it before that pass.
+	// decision [run.resolveNullability] derives from them, and from the def
+	// entry for a reference or a body, once the graph is complete; nothing
+	// reads it before that pass, and no node reads another's.
 	occ    occurrence
 	stance Nullability
 	null   nullDecision
@@ -163,11 +164,13 @@ type nullDecision struct {
 	wrap bool
 }
 
-// nilableContainer reports whether the node is a slice, map, byte slice, or
+// typeListEncoded reports whether the node is a slice, map, byte slice, or
 // ",string" number, whose null render encodes as a ["null", base] type list.
-// Every other node uses the anyOf[base, null] wrapper.
-func (n *node) nilableContainer() bool {
-	return n.occ.container != containerNone
+// Every other node uses the anyOf[base, null] wrapper. A reference is never
+// one: its body's container kind feeds its null admission, and the body's
+// own render carries the type list.
+func (n *node) typeListEncoded() bool {
+	return n.kind != kindRef && n.occ.container != containerNone
 }
 
 // containerType returns the JSON type name a nilable container's schema
@@ -243,6 +246,10 @@ type defEntry struct {
 	body     *node  // bare value node; nil while a cycle placeholder
 	baseName string // namer output, pre-disambiguation; the provisional $ref token
 	name     string // final $defs key; set by assignDefNames before render
+	// Container is the body's nilable container kind, recorded when the body
+	// is defined so every reference reads the fact off the entry rather than
+	// the body's decision. It is containerNone for a hook-declared body.
+	container containerKind
 	// Nullability is the type's declared null-admission stance, recorded once at
 	// definition time and combined with each reference's pointer-ness in
 	// nullableDecision. The stance is a per-type property, so recording it on the
@@ -384,6 +391,7 @@ func (g *run) defineType(t reflect.Type, body *node, stance Nullability, pointer
 
 	if e.body == nil {
 		e.body = body
+		e.container = body.occ.container
 		body.isBody = true
 	}
 
@@ -391,35 +399,27 @@ func (g *run) defineType(t reflect.Type, body *node, stance Nullability, pointer
 }
 
 // resolveNullability decides the null admission of every node in the graph
-// once it is complete, so a hook that reads a field's decision reads the
-// final one. Every def body resolves first, since a reference's own answer
-// reads its body's: a body admits null on its own when it is a nilable
-// container under a format flag its stance does not veto, when its declared
-// type names null, or when it is an unrestricted leaf, and a reference to
-// such a body adds no null branch of its own.
-//
-// An inline occurrence admits null when its stance grants it, or when its
-// stance defers and the position is a pointer, an interface, or a container
-// whose nil the marshal writes as null. A body ignores the pointer-ness of the
-// occurrence that built it and a stance's grant, since each reference carries
-// those, and keeps only the veto. A composed embed branch admits none, and
-// neither does a verbatim leaf, which carries no null encoding at all. A
-// declared null type admits null whatever the occurrence, since the schema
-// names it outright. Render adds a null branch (wrap) to an admitting node
-// unless its declared type already names null or its body already admits.
+// from the facts reflection recorded, in one walk. Each node's facts are
+// read by [run.factsOf] and decided by [admitNull] and [wrapNull], two pure
+// functions over [nullFacts]; a reference reads its body's container kind
+// and stance off the def entry, both recorded when the body was defined, and
+// never the body's own decision, so the walk order does not matter. The
+// occurrence a type= pair replaced is decided too, since the directives
+// before the pair read it.
 func (g *run) resolveNullability(root *node) {
+	entries := make(map[*node]*defEntry, len(g.defs))
 	for _, e := range g.defs {
 		if e.body != nil {
-			g.resolveAdmit(e.body, e)
+			entries[e.body] = e
 		}
 	}
 
 	seen := map[*defEntry]bool{}
 	visit := func(n *node) {
-		g.resolveNode(n)
+		n.null = g.decideNull(n, entries[n])
 
 		if n.overrode != nil {
-			g.resolveNode(n.overrode)
+			n.overrode.null = g.decideNull(n.overrode, nil)
 		}
 	}
 
@@ -433,54 +433,76 @@ func (g *run) resolveNullability(root *node) {
 	}
 }
 
-// resolveNode fills a node's decision. A body was already given its admit;
-// every other node derives it here.
-func (g *run) resolveNode(n *node) {
-	switch {
-	case n.isBody:
-	case n.kind == kindRef:
-		g.resolveAdmit(n, n.def)
-	default:
-		g.resolveAdmit(n, nil)
-	}
+// decideNull reads a node's facts and decides both halves of its null
+// decision. The entry is the one a body node belongs to, nil otherwise.
+func (g *run) decideNull(n *node, bodyOf *defEntry) nullDecision {
+	f := g.factsOf(n, bodyOf)
 
-	n.null.wrap = n.null.admit && !n.verbatim && !g.targetAdmitsNull(n)
+	admit := admitNull(f)
+
+	return nullDecision{admit: admit, wrap: wrapNull(f, admit)}
 }
 
-// resolveAdmit derives a node's admit from its facts; e is the def entry a
-// body or a reference resolves against, nil for an inline node.
-func (g *run) resolveAdmit(n *node, e *defEntry) {
-	switch {
-	case n.composed || n.verbatim:
-		n.null.admit = false
-	case n.isBody:
-		n.null.admit = e.nullability != NullForbidden && g.containerNull(n.occ.container)
-	case n.kind == kindRef:
-		// A reference's occurrence is a pointer or not, but the body it
-		// resolves to may be a nilable container whose null a format option
-		// makes the marshal write; that container fact belongs to the
-		// occurrence too, so the reference reads it off the body. Bodies
-		// resolve before the references that read them.
-		occ := n.occ.pointer || (e.body != nil && g.containerNull(e.body.occ.container))
-		n.null.admit = e.nullability.apply(n.stance.apply(occ))
+// nullRole is the part a node plays in the null decision.
+type nullRole uint8
 
-	default:
-		n.null.admit = n.stance.apply(n.occ.pointer || g.containerNull(n.occ.container))
-	}
+const (
+	// A roleOccurrence node is a position in the graph: a field, an element,
+	// a root, or a reference standing in such a position.
+	roleOccurrence nullRole = iota
+	// A roleBody node is a $defs body, shared by every reference to it.
+	roleBody
+	// A roleComposed node is an embed's allOf branch, composition rather
+	// than an occurrence.
+	roleComposed
+)
 
-	if n.kind != kindRef && schemashape.DeclaresType(n.payload, typename.Null) {
-		n.null.admit = true
-	}
+// nullFacts is everything the null decision reads about one node, all of
+// it recorded by reflection: no fact is another node's decision, so the
+// decision is order-free. [run.factsOf] fills it; [admitNull] and
+// [wrapNull] read it. The cross-product test in ir_internal_test.go
+// enumerates every field, so a fact added here is decided in the open.
+type nullFacts struct {
+	// Container is the nilable container kind of the occurrence, or for a
+	// reference the kind of the body it resolves to, whose nil the marshal
+	// writes as null only under the matching format flag.
+	container containerKind
+	// Stance is the null-admission stance a type-level hook declared for an
+	// inline node, or an alias's own stance for a reference.
+	stance Nullability
+	// DefStance is the stance recorded on the def entry a reference or a
+	// body resolves against, NullFromReflection for an inline node.
+	defStance Nullability
+	// Role is the part the node plays.
+	role nullRole
+	// Pointer reports a *T at any depth or an interface position.
+	pointer bool
+	// Ref reports a reference node, whose container and defStance are the
+	// body's and whose targetNull is the body's own null.
+	ref bool
+	// Verbatim marks a leaf a hook declared verbatim, which carries no null
+	// encoding at all.
+	verbatim bool
+	// DeclaresNull reports that the node's own payload names the null type.
+	declaresNull bool
+	// TargetNull reports, for a reference, that the body's payload names the
+	// null type or is an unrestricted leaf, so the target admits null
+	// without a wrapper.
+	targetNull bool
+	// NilSliceNull and nilMapNull are the run's format flags: whether the
+	// marshal writes null for a nil slice (or byte slice) and a nil map.
+	nilSliceNull bool
+	nilMapNull   bool
 }
 
 // containerNull reports whether the marshal writes null for a nil container
-// of the given kind under the run's WithJSONOptions value.
-func (g *run) containerNull(c containerKind) bool {
-	switch c {
+// of the facts' kind under the run's format flags.
+func (f nullFacts) containerNull() bool {
+	switch f.container {
 	case containerSlice, containerBytes:
-		return g.nilSliceNull
+		return f.nilSliceNull
 	case containerMap:
-		return g.nilMapNull
+		return f.nilMapNull
 	case containerQuoted, containerNone:
 		return false
 	}
@@ -488,22 +510,92 @@ func (g *run) containerNull(c containerKind) bool {
 	return false
 }
 
-// targetAdmitsNull reports whether the schema a node renders already admits
-// null before any wrapper: for a reference its body, otherwise its declared
-// base. A nilable container that admits null carries it in its own type list,
-// which is what a reference to an extracted container reads.
-func (g *run) targetAdmitsNull(n *node) bool {
-	if n.kind == kindRef {
-		body := n.def.body
-		if body == nil {
-			return false
-		}
-
-		return body.null.admit && body.nilableContainer() || schemashape.DeclaresType(body.payload, typename.Null) ||
-			(body.kind == kindValue && !body.verbatim && schemashape.IsEmpty(body.payload))
+// factsOf reads a node's null facts. A reference takes its container kind
+// and stance from the def entry, recorded when the body was defined, and its
+// target null from the body's payload; bodyOf is the entry a body node
+// belongs to, so the body reads the stance the entry holds for it.
+func (g *run) factsOf(n *node, bodyOf *defEntry) nullFacts {
+	f := nullFacts{
+		pointer:      n.occ.pointer,
+		container:    n.occ.container,
+		stance:       n.stance,
+		verbatim:     n.verbatim,
+		nilSliceNull: g.nilSliceNull,
+		nilMapNull:   g.nilMapNull,
 	}
 
-	return schemashape.DeclaresType(n.payload, typename.Null)
+	switch {
+	case n.composed:
+		f.role = roleComposed
+	case n.isBody:
+		f.role = roleBody
+	default:
+		f.role = roleOccurrence
+	}
+
+	if bodyOf != nil {
+		f.defStance = bodyOf.nullability
+	}
+
+	if n.kind == kindRef {
+		f.ref = true
+		f.container = n.def.container
+		f.defStance = n.def.nullability
+
+		if body := n.def.body; body != nil {
+			f.targetNull = schemashape.DeclaresType(body.payload, typename.Null) ||
+				(body.kind == kindValue && !body.verbatim && schemashape.IsEmpty(body.payload))
+		}
+
+		return f
+	}
+
+	f.declaresNull = schemashape.DeclaresType(n.payload, typename.Null)
+
+	return f
+}
+
+// admitNull decides whether a node admits a JSON null.
+//
+// A composed embed branch admits none, and neither does a verbatim leaf,
+// which carries no null encoding at all. A body ignores the pointer-ness of
+// the occurrence that built it and a stance's grant, since each reference
+// carries those, and keeps only the entry's veto over the container null a
+// format option adds; a body whose payload names null admits it outright. An
+// occurrence admits null when its payload names it, and otherwise when the
+// def entry's stance, then its own stance, then the position itself say so:
+// a stance of NullAllowed grants and NullForbidden vetoes, and
+// NullFromReflection defers to a pointer position or a container whose nil
+// the marshal writes as null.
+func admitNull(f nullFacts) bool {
+	switch {
+	case f.role == roleComposed || f.verbatim:
+		return false
+	case f.role == roleBody:
+		return (f.defStance != NullForbidden && f.containerNull()) || f.declaresNull
+	case f.declaresNull:
+		return true
+	default:
+		return f.defStance.apply(f.stance.apply(f.pointer || f.containerNull()))
+	}
+}
+
+// wrapNull decides whether render adds a null branch to a node that admits
+// null. It does not where the node's own payload names null, and for a
+// reference where the body already admits it on its own: a body naming null
+// or an unrestricted leaf, or a container body whose type list carries the
+// null its entry's stance does not veto.
+func wrapNull(f nullFacts, admit bool) bool {
+	switch {
+	case !admit || f.verbatim || f.declaresNull:
+		return false
+	case f.ref && f.targetNull:
+		return false
+	case f.ref && f.defStance != NullForbidden && f.containerNull():
+		return false
+	default:
+		return true
+	}
 }
 
 // apply resolves a [Nullability] stance against an occurrence's own answer:

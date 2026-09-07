@@ -27,7 +27,9 @@ one generation derives from a config. `run.generate` is eight phases, in order:
 2. **Assign def names** (`names.go`): every `$defs` entry gets its final key
    before any `$ref` string is emitted.
 3. **Resolve nullability** (`ir.go`): `resolveNullability` fills `node.null`
-   for every node from its facts, def bodies before the refs that read them.
+   for every node in one walk, from the `nullFacts` reflection recorded (a
+   reference reads its body's container kind and stance off the def entry,
+   never the body's decision), through the pure `admitNull` and `wrapNull`.
    Nothing reads the decision earlier and nothing changes it later.
 4. **Field hooks** (`reflect.go`): the description provider, the rest of the
    jsonschema tag, and the tag interpreters run per field on private
@@ -137,6 +139,9 @@ is the only one that imports the parent package.
 - `TestOverrideTypeClassifiesEveryNodeField`, `TestOverrideTypeMatchesReflection`
   (ir_internal_test.go): every `node` field has a declared fate under a
   `type=` override, and the in-place rewrite honors it for every kind.
+- `TestNullDecisionRules` (ir_internal_test.go): the null decision over the
+  full cross product of `nullFacts` matches an ordered rule list whose every
+  rule fires, and every fact field has an enumerated axis.
 - `TestFieldContextZeroValueSurvives` (interfaces_test.go),
   `TestConstraintsFacadeNilCanvasWrites`, `TestConstraintsFacadeInvalidRule`
   (constraints_test.go): every method on the zero context and facade returns,

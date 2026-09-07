@@ -526,7 +526,7 @@ func (g *run) declaredAdmitsNull(s *Schema, seen map[*Schema]bool) bool {
 		if e, ok := g.payloadRefTargets()[s.Ref]; ok && e.body != nil {
 			body := e.body
 
-			return (body.null.admit && body.nilableContainer()) || g.declaredAdmitsNull(body.payload, seen)
+			return (body.null.admit && body.typeListEncoded()) || g.declaredAdmitsNull(body.payload, seen)
 		}
 	}
 

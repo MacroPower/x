@@ -249,3 +249,263 @@ func TestOverrideTypeMatchesReflection(t *testing.T) {
 		assert.Nil(t, n.items)
 	})
 }
+
+// nullRule is one sentence of the null decision: the facts it speaks for
+// and the verdict it gives. The first rule whose when holds decides.
+type nullRule struct {
+	when    func(f nullFacts) bool
+	name    string
+	verdict bool
+}
+
+// admitRules spell out admitNull in order, one sentence each.
+func admitRules() []nullRule {
+	return []nullRule{
+		{
+			name: "a composed embed branch admits no null", verdict: false,
+			when: func(f nullFacts) bool { return f.role == roleComposed },
+		},
+		{
+			name: "a verbatim leaf admits no null", verdict: false,
+			when: func(f nullFacts) bool { return f.verbatim },
+		},
+		{
+			name: "a body whose payload names null admits it", verdict: true,
+			when: func(f nullFacts) bool { return f.role == roleBody && f.declaresNull },
+		},
+		{
+			name: "a body admits the container null its entry's stance does not veto", verdict: true,
+			when: func(f nullFacts) bool {
+				return f.role == roleBody && f.defStance != NullForbidden && f.containerNull()
+			},
+		},
+		{
+			name: "a body admits nothing else", verdict: false,
+			when: func(f nullFacts) bool { return f.role == roleBody },
+		},
+		{
+			name: "an occurrence whose payload names null admits it", verdict: true,
+			when: func(f nullFacts) bool { return f.declaresNull },
+		},
+		{
+			name: "a NullAllowed entry stance grants null to a reference", verdict: true,
+			when: func(f nullFacts) bool { return f.defStance == NullAllowed },
+		},
+		{
+			name: "a NullForbidden entry stance vetoes null on a reference", verdict: false,
+			when: func(f nullFacts) bool { return f.defStance == NullForbidden },
+		},
+		{
+			name: "a NullAllowed stance grants null", verdict: true,
+			when: func(f nullFacts) bool { return f.stance == NullAllowed },
+		},
+		{
+			name: "a NullForbidden stance vetoes null", verdict: false,
+			when: func(f nullFacts) bool { return f.stance == NullForbidden },
+		},
+		{
+			name: "a pointer position admits null", verdict: true,
+			when: func(f nullFacts) bool { return f.pointer },
+		},
+		{
+			name: "a container whose nil marshals as null admits it", verdict: true,
+			when: func(f nullFacts) bool { return f.containerNull() },
+		},
+		{
+			name: "any other position admits no null", verdict: false,
+			when: func(nullFacts) bool { return true },
+		},
+	}
+}
+
+// wrapRules spell out wrapNull in order, for a node that admits null.
+func wrapRules() []nullRule {
+	return []nullRule{
+		{
+			name: "no wrapper where the payload names null itself", verdict: false,
+			when: func(f nullFacts) bool { return f.declaresNull },
+		},
+		{
+			name: "no wrapper on a reference whose body admits null on its own", verdict: false,
+			when: func(f nullFacts) bool { return f.ref && f.targetNull },
+		},
+		{
+			name: "no wrapper on a reference to a container body whose type list carries the null", verdict: false,
+			when: func(f nullFacts) bool { return f.ref && f.defStance != NullForbidden && f.containerNull() },
+		},
+		{
+			name: "a wrapper everywhere else", verdict: true,
+			when: func(nullFacts) bool { return true },
+		},
+	}
+}
+
+// firstRule returns the first rule whose when holds.
+func firstRule(rules []nullRule, f nullFacts) nullRule {
+	for _, r := range rules {
+		if r.when(f) {
+			return r
+		}
+	}
+
+	panic("no rule holds")
+}
+
+// nullFactAxes lists every value each nullFacts field takes, keyed by field
+// name, each value as the setter that writes it. TestNullDecisionRules holds
+// the keys total against the struct, so a fact added to nullFacts is
+// enumerated before it is decided.
+func nullFactAxes() map[string][]func(*nullFacts) {
+	bools := func(set func(*nullFacts, bool)) []func(*nullFacts) {
+		return []func(*nullFacts){
+			func(f *nullFacts) { set(f, false) },
+			func(f *nullFacts) { set(f, true) },
+		}
+	}
+	stances := func(set func(*nullFacts, Nullability)) []func(*nullFacts) {
+		return []func(*nullFacts){
+			func(f *nullFacts) { set(f, NullFromReflection) },
+			func(f *nullFacts) { set(f, NullAllowed) },
+			func(f *nullFacts) { set(f, NullForbidden) },
+		}
+	}
+
+	containers := make([]func(*nullFacts), 0, 5)
+	for _, c := range []containerKind{containerNone, containerSlice, containerMap, containerBytes, containerQuoted} {
+		containers = append(containers, func(f *nullFacts) { f.container = c })
+	}
+
+	roles := make([]func(*nullFacts), 0, 3)
+	for _, r := range []nullRole{roleOccurrence, roleBody, roleComposed} {
+		roles = append(roles, func(f *nullFacts) { f.role = r })
+	}
+
+	return map[string][]func(*nullFacts){
+		"container":    containers,
+		"role":         roles,
+		"stance":       stances(func(f *nullFacts, s Nullability) { f.stance = s }),
+		"defStance":    stances(func(f *nullFacts, s Nullability) { f.defStance = s }),
+		"pointer":      bools(func(f *nullFacts, b bool) { f.pointer = b }),
+		"ref":          bools(func(f *nullFacts, b bool) { f.ref = b }),
+		"verbatim":     bools(func(f *nullFacts, b bool) { f.verbatim = b }),
+		"declaresNull": bools(func(f *nullFacts, b bool) { f.declaresNull = b }),
+		"targetNull":   bools(func(f *nullFacts, b bool) { f.targetNull = b }),
+		"nilSliceNull": bools(func(f *nullFacts, b bool) { f.nilSliceNull = b }),
+		"nilMapNull":   bools(func(f *nullFacts, b bool) { f.nilMapNull = b }),
+	}
+}
+
+// everyNullFacts calls visit with every combination of the axes.
+func everyNullFacts(visit func(nullFacts)) {
+	axes := nullFactAxes()
+
+	names := make([]string, 0, len(axes))
+	for name := range axes {
+		names = append(names, name)
+	}
+
+	var rec func(i int, f nullFacts)
+
+	rec = func(i int, f nullFacts) {
+		if i == len(names) {
+			visit(f)
+
+			return
+		}
+
+		for _, set := range axes[names[i]] {
+			set(&f)
+			rec(i+1, f)
+		}
+	}
+
+	rec(0, nullFacts{})
+}
+
+// TestNullDecisionRules pins the null decision as an ordered list of
+// sentences over the full cross product of nullFacts: every fact field has
+// an axis, every combination decides as the first rule that speaks for it,
+// and every rule speaks for at least one combination. The four past
+// nullability fixes are named cases at the end.
+func TestNullDecisionRules(t *testing.T) {
+	t.Parallel()
+
+	typ := reflect.TypeFor[nullFacts]()
+
+	fields := make([]string, 0, typ.NumField())
+	for field := range typ.Fields() {
+		fields = append(fields, field.Name)
+	}
+
+	axes := make([]string, 0, len(nullFactAxes()))
+	for name := range nullFactAxes() {
+		axes = append(axes, name)
+	}
+
+	require.ElementsMatch(t, fields, axes, "every nullFacts field has an axis")
+
+	admits, wraps := admitRules(), wrapRules()
+	fired := map[string]int{}
+	cases := 0
+
+	everyNullFacts(func(f nullFacts) {
+		cases++
+
+		admit := firstRule(admits, f)
+		fired[admit.name]++
+		require.Equal(t, admit.verdict, admitNull(f), "%+v: %s", f, admit.name)
+
+		if !admit.verdict {
+			assert.False(t, wrapNull(f, false), "%+v: no wrapper where no null is admitted", f)
+
+			return
+		}
+
+		wrap := firstRule(wraps, f)
+		fired[wrap.name]++
+		require.Equal(t, wrap.verdict, wrapNull(f, true), "%+v: %s", f, wrap.name)
+	})
+
+	assert.Positive(t, cases)
+
+	for _, r := range append(admits, wraps...) {
+		assert.Positive(t, fired[r.name], "rule never fires: %s", r.name)
+	}
+
+	past := map[string]struct {
+		facts nullFacts
+		admit bool
+		wrap  bool
+	}{
+		"d1850de6 a reference reads its body's container null": {
+			facts: nullFacts{ref: true, container: containerSlice, nilSliceNull: true},
+			admit: true, wrap: false,
+		},
+		"604af3d1 a pointer to a named container admits null": {
+			facts: nullFacts{ref: true, pointer: true, container: containerSlice},
+			admit: true, wrap: true,
+		},
+		"ada9e95d a NullForbidden entry vetoes the format null on the reference": {
+			facts: nullFacts{ref: true, container: containerSlice, nilSliceNull: true, defStance: NullForbidden},
+			admit: false, wrap: false,
+		},
+		"ada9e95d a NullForbidden entry vetoes the format null on the body": {
+			facts: nullFacts{role: roleBody, container: containerSlice, nilSliceNull: true, defStance: NullForbidden},
+			admit: false, wrap: false,
+		},
+		"a pointer embed branch composes without null": {
+			facts: nullFacts{role: roleComposed, pointer: true},
+			admit: false, wrap: false,
+		},
+	}
+
+	for name, tc := range past {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			admit := admitNull(tc.facts)
+			assert.Equal(t, tc.admit, admit)
+			assert.Equal(t, tc.wrap, wrapNull(tc.facts, admit))
+		})
+	}
+}
