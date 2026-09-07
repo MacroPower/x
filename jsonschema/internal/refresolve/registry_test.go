@@ -17,13 +17,24 @@ import (
 func freeze(t *testing.T, s *jsonschema.Schema, base string, profile schemavet.Profile) schemavet.Doc {
 	t.Helper()
 
-	frozen, err := schemavet.Freeze(s, "document "+base, base, profile)
+	frozen, err := schemavet.Freeze(s, "document "+base, dk(t, base), profile)
 	require.NoError(t, err)
 
 	doc, err := frozen.Vet(base + "#")
 	require.NoError(t, err)
 
 	return doc
+}
+
+// dk mints the DocKey a base string names, the way the parent package's
+// ParseBase does before it hands a base to the registry.
+func dk(t *testing.T, s string) uriref.DocKey {
+	t.Helper()
+
+	k, err := uriref.ParseBase(s)
+	require.NoError(t, err)
+
+	return k
 }
 
 // TestFragmentOnlyIDRegistersByDraft pins the frozen walk's draft gate on the
@@ -59,7 +70,7 @@ func TestFragmentOnlyIDRegistersByDraft(t *testing.T) {
 			reg.Build(doc)
 
 			got, ok := reg.NewSession(nil).
-				LookupAnchor(uriref.AnchorKey("https://example.test/root.json", "a"))
+				LookupAnchor(dk(t, "https://example.test/root.json").Anchor("a"))
 
 			require.Equal(t, tc.want, ok, "the anchor registration follows the draft")
 
@@ -140,7 +151,7 @@ func TestRegisterFetchedCollisions(t *testing.T) {
 			if tc.err {
 				require.ErrorIs(t, err, refresolve.ErrIDCollision)
 
-				_, ok := sess.LookupURI(tc.baseURI)
+				_, ok := sess.LookupURI(dk(t, tc.baseURI))
 				assert.False(t, ok, "a refused document registers nothing, not even its retrieval URI")
 
 				return
@@ -148,7 +159,7 @@ func TestRegisterFetchedCollisions(t *testing.T) {
 
 			require.NoError(t, err)
 
-			got, ok := sess.LookupURI(tc.baseURI)
+			got, ok := sess.LookupURI(dk(t, tc.baseURI))
 			require.True(t, ok, "the document registers under its retrieval URI")
 			assert.Same(t, doc.Root(), got)
 		})

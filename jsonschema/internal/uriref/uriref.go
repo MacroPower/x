@@ -1,12 +1,22 @@
-// Package uriref implements RFC 3986 URI-reference resolution and fragment
-// handling for the $ref absolutization layer. It turns a relative $ref and an
-// enclosing base URI into the single absolute key under which a schema both
-// registers and is looked up, so registration and resolution agree. Resolution
-// also corrects [net/url.ResolveReference] for an opaque base (a URN): the
-// standard library collapses a relative ref against an opaque URI into a bogus
-// authority form, so an opaque/URN merge applies the RFC 3986 path-merge to the
-// opaque part instead. The fragment helpers strip, classify, and recover the
-// raw (still percent-encoded) fragment a JSON Pointer needs.
+// Package uriref is the one mint for document identity in the reference
+// machinery. A [DocKey] is the canonical, fragment-free URI of one document,
+// and only [Resolve] and [ParseBase] produce one, so every table keyed on a
+// document reads and writes the same spelling however the document was
+// reached: a relative $ref merged into its base, a $id resolved against its
+// parent, a configured base, or a retrieval URI. [Location] and [AnchorKey]
+// name a position and an anchor within a document, and are the only
+// producers of the "#" that joins a document to a fragment.
+//
+// Resolution follows RFC 3986 section 5, with two extensions the standard
+// leaves undefined and one correction to [net/url]: a relative reference
+// resolves against a bare-path base (a root with no configured base), an
+// opaque base (a URN) takes the path merge on its opaque part rather than
+// the bogus authority form [net/url.URL.ResolveReference] produces, and the
+// result takes the syntax-based normalization of section 6.2.2: a lowercase
+// scheme and host, uppercase percent-encoding hex digits, no
+// percent-encoding of an unreserved character, and no dot segments. Two
+// spellings section 6.2.3 leaves to each scheme, an empty path and "/", stay
+// distinct.
 package uriref
 
 import (
@@ -15,39 +25,298 @@ import (
 	"strings"
 )
 
-// IsFragmentOnly reports whether a URI is fragment-only (e.g. "#foo").
+// DocKey is the canonical identity of one document: its URI, normalized and
+// stripped of any fragment. The zero DocKey is the root document of a run
+// with no base, whose locations and anchors spell as a bare "#". Only
+// [Resolve] and [ParseBase] mint a non-zero key.
+type DocKey struct {
+	uri string
+}
+
+// String returns the canonical URI, "" for the zero key.
+func (k DocKey) String() string { return k.uri }
+
+// IsZero reports whether the key is the root document with no base.
+func (k DocKey) IsZero() bool { return k.uri == "" }
+
+// IsAbsolute reports whether the key names an absolute URI, one carrying a
+// scheme. A relative $id resolved against no base leaves a key that is not,
+// which registers no target a reference can absolutize back to.
+func (k DocKey) IsAbsolute() bool {
+	if k.uri == "" {
+		return false
+	}
+
+	u, err := url.Parse(k.uri)
+
+	return err == nil && u.IsAbs()
+}
+
+// At names the position the JSON Pointer addresses within the document.
+func (k DocKey) At(pointer string) Location {
+	return Location{Doc: k, Pointer: pointer}
+}
+
+// Anchor names an anchor declared within the document.
+func (k DocKey) Anchor(name string) AnchorKey {
+	return AnchorKey{Doc: k, Name: name}
+}
+
+// Location is a position within a document: the document and the RFC 6901
+// JSON Pointer to the node, "" for the root.
+type Location struct {
+	Doc     DocKey
+	Pointer string
+}
+
+// String spells the location as the document's URI, "#", and the pointer:
+// "#" for the root of the base-less root document, "#/a" for a node of it,
+// and "uri#/a" for a node of a keyed document.
+func (l Location) String() string {
+	return l.Doc.uri + "#" + l.Pointer
+}
+
+// AnchorKey is an anchor name within a document, the key an $anchor,
+// $dynamicAnchor, or Draft-07 fragment $id registers under and a "#name"
+// reference resolves to.
+type AnchorKey struct {
+	Doc  DocKey
+	Name string
+}
+
+// String spells the key as the document's URI, "#", and the name.
+func (a AnchorKey) String() string {
+	return a.Doc.uri + "#" + a.Name
+}
+
+// Fragment is the fragment a reference carries, in the two forms a resolver
+// reads: the decoded text an anchor is named by, and the raw text a JSON
+// Pointer is split on, which stays percent-encoded when [net/url] could not
+// canonicalize it (a %2F separator escape must be split before it decodes).
+type Fragment struct {
+	decoded string
+	raw     string
+	encoded bool
+}
+
+// fragmentOf reads the fragment off a parsed URI.
+func fragmentOf(u *url.URL) Fragment {
+	if u.RawFragment != "" {
+		return Fragment{decoded: u.Fragment, raw: u.RawFragment, encoded: true}
+	}
+
+	return Fragment{decoded: u.Fragment, raw: u.Fragment}
+}
+
+// IsEmpty reports a reference with no fragment, or an empty one.
+func (f Fragment) IsEmpty() bool { return f.decoded == "" && f.raw == "" }
+
+// IsPointer reports a JSON Pointer fragment, one whose decoded form starts
+// with "/". The decoded form is what settles it: a fragment whose leading
+// separator is a percent-escaped "%2F" is still a pointer, and its raw text
+// is split on both spellings downstream.
+func (f Fragment) IsPointer() bool { return strings.HasPrefix(f.decoded, "/") }
+
+// Name returns the decoded text, the name an anchor reference carries.
+func (f Fragment) Name() string { return f.decoded }
+
+// Pointer returns the text a JSON Pointer is split on and whether it is
+// still percent-encoded.
+func (f Fragment) Pointer() (string, bool) { return f.raw, f.encoded }
+
+// IsFragmentOnly reports whether a reference is fragment-only (e.g. "#foo").
 func IsFragmentOnly(uri string) bool {
 	return strings.HasPrefix(uri, "#")
 }
 
-// ResolveURI resolves ref against base per RFC 3986.
+// Resolve resolves ref against the document base per RFC 3986 and returns
+// the document the result names, canonicalized, with the fragment it
+// carries. A fragment-only reference names base itself. A reference that
+// does not parse is an error.
 //
 // A base with no scheme and no authority is a bare path, the form a root
 // document with no configured base and every document fetched through it
 // carry. RFC 3986 defines resolution only against an absolute base, so this
 // function extends it: a relative ref merges into the base path per the
 // section 5.2.3 merge and takes remove_dot_segments, keeping the unrooted
-// shape the base had. An empty base takes remove_dot_segments alone. Both
-// keep a document on one registry key however it is reached, so "dir/a.json"
-// named from the root and "a.json" named from "dir/b.json" resolve to the
-// same key and the document is fetched once.
-func ResolveURI(base, ref string) string {
+// shape the base had. The zero base takes remove_dot_segments alone. Both
+// keep a document on one key however it is reached, so "dir/a.json" named
+// from the root and "a.json" named from "dir/b.json" resolve to the same key
+// and the document is fetched once.
+func Resolve(base DocKey, ref string) (DocKey, Fragment, error) {
 	refURL, err := url.Parse(ref)
 	if err != nil {
-		return ref
+		//nolint:wrapcheck // The caller names the keyword the reference came from.
+		return DocKey{}, Fragment{}, err
 	}
 
+	if IsFragmentOnly(ref) {
+		return base, fragmentOf(refURL), nil
+	}
+
+	resolved, err := url.Parse(resolveURI(base.uri, refURL))
+	if err != nil {
+		//nolint:wrapcheck // The caller names the keyword the reference came from.
+		return DocKey{}, Fragment{}, err
+	}
+
+	fragment := fragmentOf(resolved)
+
+	return canonical(resolved), fragment, nil
+}
+
+// ParseBase mints the key of a configured base: a base with no scheme is a
+// file path and resolves against file:///, so RFC 3986 joining is
+// well-defined and a reference absolutizing back to the root reproduces the
+// key exactly; an absolute base is canonicalized; and a fragment on either
+// is dropped. The empty base is the zero key. A base that is not a URI
+// reference is an error, so it cannot corrupt every key derived from it.
+func ParseBase(base string) (DocKey, error) {
+	if base == "" {
+		return DocKey{}, nil
+	}
+
+	parsed, err := url.Parse(base)
+	if err != nil {
+		//nolint:wrapcheck // The caller names the option the value came from.
+		return DocKey{}, err
+	}
+
+	if parsed.Scheme == "" {
+		parsed, err = url.Parse(resolveURI("file:///", parsed))
+		if err != nil {
+			//nolint:wrapcheck // The caller names the option the value came from.
+			return DocKey{}, err
+		}
+	}
+
+	return canonical(parsed), nil
+}
+
+// canonical applies the RFC 3986 section 6.2.2 syntax-based normalization
+// and drops the fragment: the scheme and host lowercase, every
+// percent-encoded octet uppercase and decoded where it is unreserved, and
+// the path free of dot segments. The opaque part of a URN takes the
+// percent-encoding rule alone, since it has no path to normalize.
+func canonical(u *url.URL) DocKey {
+	c := *u
+	c.Scheme = strings.ToLower(c.Scheme)
+	c.Host = strings.ToLower(canonicalEscapes(c.Host))
+	c.Fragment = ""
+	c.RawFragment = ""
+
+	if c.RawQuery != "" {
+		c.RawQuery = canonicalEscapes(c.RawQuery)
+	}
+
+	if c.Opaque != "" {
+		c.Opaque = canonicalEscapes(c.Opaque)
+
+		return DocKey{uri: c.String()}
+	}
+
+	setPath(&c, removeDotSegments(canonicalEscapes(c.EscapedPath())))
+
+	return DocKey{uri: c.String()}
+}
+
+// canonicalEscapes rewrites every percent-encoded octet of s in its
+// canonical form: decoded where it encodes an unreserved character, and
+// with uppercase hex digits otherwise. A malformed triplet is left as it is.
+func canonicalEscapes(s string) string {
+	if !strings.Contains(s, "%") {
+		return s
+	}
+
+	var b strings.Builder
+
+	b.Grow(len(s))
+
+	for i := 0; i < len(s); i++ {
+		if s[i] != '%' || i+2 >= len(s) || !isHex(s[i+1]) || !isHex(s[i+2]) {
+			b.WriteByte(s[i])
+
+			continue
+		}
+
+		octet := unhex(s[i+1])<<4 | unhex(s[i+2])
+		if isUnreserved(octet) {
+			b.WriteByte(octet)
+		} else {
+			b.WriteByte('%')
+			b.WriteByte(upperHex(s[i+1]))
+			b.WriteByte(upperHex(s[i+2]))
+		}
+
+		i += 2
+	}
+
+	return b.String()
+}
+
+// isUnreserved reports an RFC 3986 unreserved character, which a canonical
+// URI never percent-encodes.
+func isUnreserved(c byte) bool {
+	switch {
+	case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
+		return true
+	case c == '-', c == '.', c == '_', c == '~':
+		return true
+	default:
+		return false
+	}
+}
+
+func isHex(c byte) bool {
+	return c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F'
+}
+
+func unhex(c byte) byte {
+	switch {
+	case c >= '0' && c <= '9':
+		return c - '0'
+	case c >= 'a' && c <= 'f':
+		return c - 'a' + 10
+	default:
+		return c - 'A' + 10
+	}
+}
+
+func upperHex(c byte) byte {
+	if c >= 'a' && c <= 'f' {
+		return c - 'a' + 'A'
+	}
+
+	return c
+}
+
+// setPath stores an escaped path on u so that [url.URL.String] emits it
+// verbatim: RawPath carries the spelling and Path its decoded form.
+func setPath(u *url.URL, escaped string) {
+	u.RawPath = escaped
+
+	decoded, err := url.PathUnescape(escaped)
+	if err != nil {
+		decoded = escaped
+	}
+
+	u.Path = decoded
+}
+
+// resolveURI resolves a parsed reference against a base URI string per RFC
+// 3986, before canonicalization.
+func resolveURI(base string, refURL *url.URL) string {
 	if base == "" {
 		if isRelativePathRef(refURL) {
 			return relativePathRef(refURL, removeDotSegments(refURL.EscapedPath()))
 		}
 
-		return ref
+		return refURL.String()
 	}
 
 	baseURL, err := url.Parse(base)
 	if err != nil {
-		return ref
+		return refURL.String()
 	}
 
 	if baseURL.Scheme == "" && baseURL.Host == "" && baseURL.Opaque == "" &&
@@ -62,8 +331,7 @@ func ResolveURI(base, ref string) string {
 	// 3986 path-merge to the opaque part; a rooted ref path replaces the base
 	// path outright per RFC 3986 section 5.2.2, spelled with OmitHost so the
 	// result matches what url.Parse yields for the same absolute URI written
-	// directly (urn:/c, not urn:///c). Registration and lookup share this
-	// function, so the result stays symmetric. Absolute and fragment-only refs
+	// directly (urn:/c, not urn:///c). Absolute and fragment-only refs
 	// resolve correctly through ResolveReference.
 	// The merge operates on the encoded path form: url.URL.Opaque is emitted
 	// verbatim by String() and kept raw by url.Parse, so feeding it the decoded
@@ -125,19 +393,13 @@ func resolveBarePathRef(baseURL, refURL *url.URL) string {
 // and the query and fragment of the reference it came from.
 func relativePathRef(refURL *url.URL, path string) string {
 	out := url.URL{
-		RawPath:     path,
 		RawQuery:    refURL.RawQuery,
 		ForceQuery:  refURL.ForceQuery,
 		Fragment:    refURL.Fragment,
 		RawFragment: refURL.RawFragment,
 	}
 
-	unescaped, err := url.PathUnescape(path)
-	if err != nil {
-		unescaped = path
-	}
-
-	out.Path = unescaped
+	setPath(&out, path)
 
 	return out.String()
 }
@@ -164,17 +426,9 @@ func resolveOpaqueRef(baseURL, refURL *url.URL) string {
 	// remove_dot_segments step 5.2.2 prescribes. RawPath keeps the
 	// still-encoded spelling String() must emit, mirroring the encoded-form
 	// discipline of the merge branch.
-	escaped := removeDotSegments(refURL.EscapedPath())
+	setPath(&resolved, removeDotSegments(refURL.EscapedPath()))
 
-	resolved.RawPath = escaped
 	resolved.OmitHost = true
-
-	decoded, err := url.PathUnescape(escaped)
-	if err != nil {
-		decoded = escaped
-	}
-
-	resolved.Path = decoded
 
 	return resolved.String()
 }
@@ -207,7 +461,7 @@ func mergeOpaquePath(base, ref string) string {
 	// keeps the namespace identifier, so a relative ref resolves to the same
 	// absolute URN a caller would write directly: urn:example:root + "sub"
 	// yields urn:example:sub, not urn:sub. Registration and lookup share
-	// ResolveURI, so this keeps a relative $id and the canonical absolute $ref
+	// Resolve, so this keeps a relative $id and the canonical absolute $ref
 	// agreeing on one registry key.
 	if i := strings.LastIndex(base, ":"); i >= 0 {
 		return base[:i+1] + removeDotSegments(ref)
@@ -270,98 +524,12 @@ func removeDotSegments(path string) string {
 	return string(out)
 }
 
-// StripFragment removes the fragment component from a URI.
-func StripFragment(uri string) string {
-	parsed, err := url.Parse(uri)
-	if err != nil {
-		return uri
-	}
-
-	parsed.Fragment = ""
-	parsed.RawFragment = ""
-
-	return parsed.String()
-}
-
-// AnchorKey returns the registry key for an anchor name declared within base,
-// the base URI joined to the name by a fragment separator. A $ref to "#name"
-// against the same base resolves to this identical key, so anchors register and
-// resolve symmetrically.
-func AnchorKey(base, name string) string {
-	return base + "#" + name
-}
-
-// IDBase returns the canonical registry key for a hierarchical (non
-// fragment-only) $id declared within base: the $id resolved against base per
-// RFC 3986 with any fragment stripped. The result is both the key the schema
-// registers under and the enclosing base for its sub-schemas, so a relative
-// $id and the absolute $ref that targets it compute the same key.
-func IDBase(base, id string) string {
-	return StripFragment(ResolveURI(base, id))
-}
-
-// NormalizeBaseURI returns the canonical absolute form of a configured base
-// URI. A base with no URI scheme is a file path; resolving it against
-// file:/// makes RFC 3986 joining well-defined and gives the root document a
-// registry key that refs absolutizing back to it reproduce exactly. An
-// empty, absolute, or unparsable base passes through unchanged.
-//
-// Callers that refuse an unparsable base call [ParseBaseURI] instead, which
-// reports the parse failure this function swallows.
-func NormalizeBaseURI(base string) string {
-	normalized, err := ParseBaseURI(base)
-	if err != nil {
-		return base
-	}
-
-	return normalized
-}
-
-// ParseBaseURI returns the base absolutized against file:/// when it carries no
-// scheme, and the parse error when it is not a URI reference. An empty or
-// already-absolute base passes through. Every entry point that registers
-// documents against a configured base reads it through here, so the engines
-// cannot disagree on which bases they accept. An unparsable base would
-// otherwise corrupt every registry key derived from it rather than surface
-// anywhere. The result carries the base unchanged alongside the error, so a
-// caller that tolerates the failure still gets the base it passed in.
-func ParseBaseURI(base string) (string, error) {
-	if base == "" {
-		return base, nil
-	}
-
-	parsed, err := url.Parse(base)
-	if err != nil {
-		//nolint:wrapcheck // The caller names the option the value came from.
-		return base, err
-	}
-
-	if parsed.Scheme != "" {
-		return base, nil
-	}
-
-	return ResolveURI("file:///", base), nil
-}
-
-// RawFragment returns the JSON Pointer fragment to resolve plus whether it is
-// still percent-encoded. The [url.Parse] result populates RawFragment only when
-// the fragment carries an encoding it could not canonicalize (e.g. a %2F
-// separator escape); that form must be split before decoding. Otherwise
-// Fragment is already the single-decoded value and must not be decoded again.
-func RawFragment(u *url.URL) (string, bool) {
-	if u.RawFragment != "" {
-		return u.RawFragment, true
-	}
-
-	return u.Fragment, false
-}
-
 // FilePathFromURI maps a ref URI to the file-system path it names. It drops a
 // file:// scheme and any authority via [url.Parse] so file://host/x, file:///x,
 // and file:////x all map to the path "x"; TrimPrefix alone mishandled an
 // authority and extra leading slashes. Non-file and relative inputs fall back to
 // the prior strip so they address the fs as before. It is the inverse of the
-// file:/// base registration that [NormalizeBaseURI] performs.
+// file:/// base registration that [ParseBase] performs.
 func FilePathFromURI(uri string) string {
 	u, err := url.Parse(uri)
 	if err == nil && u.Scheme == "file" {

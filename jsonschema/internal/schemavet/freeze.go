@@ -24,14 +24,14 @@ type Frozen struct {
 	root    *Schema
 	ids     map[*Schema]int
 	byPath  map[string]int
-	uri     map[string]*Schema
-	anchor  map[string]*Schema
-	dynamic map[string]*Schema
-	base    string
+	uri     map[uriref.DocKey]*Schema
+	anchor  map[uriref.AnchorKey]*Schema
+	dynamic map[uriref.AnchorKey]*Schema
+	base    uriref.DocKey
 	nodes   []*Schema
 	paths   []string
-	bases   []string
-	scopes  []string
+	bases   []uriref.DocKey
+	scopes  []uriref.DocKey
 	profile Profile
 }
 
@@ -51,9 +51,9 @@ type Frozen struct {
 // $anchor and $dynamicAnchor register nothing, and a $id beside a $ref
 // registers nothing and rebases nothing, since the draft ignores every
 // sibling of $ref; under [Profile.InertIDs] no $id registers or rebases at
-// all. A key two nodes
-// claim within the document resolves to the first the walk reaches.
-func Freeze(s *Schema, subject, base string, profile Profile) (*Frozen, error) {
+// all. A key two nodes claim within the document resolves to the first the
+// walk reaches.
+func Freeze(s *Schema, subject string, base uriref.DocKey, profile Profile) (*Frozen, error) {
 	tree, cyc := schemaclone.CloneTree(s)
 	if cyc != nil {
 		return nil, fmt.Errorf("%w: %s holds a loop where %q crosses a schema and returns to %q",
@@ -64,9 +64,9 @@ func Freeze(s *Schema, subject, base string, profile Profile) (*Frozen, error) {
 		root:    tree.Root,
 		ids:     map[*Schema]int{},
 		byPath:  map[string]int{},
-		uri:     map[string]*Schema{},
-		anchor:  map[string]*Schema{},
-		dynamic: map[string]*Schema{},
+		uri:     map[uriref.DocKey]*Schema{},
+		anchor:  map[uriref.AnchorKey]*Schema{},
+		dynamic: map[uriref.AnchorKey]*Schema{},
 		base:    base,
 		profile: profile,
 	}
@@ -138,13 +138,18 @@ func (f *Frozen) refuseAliasedIdentifiers(subject string, tree schemaclone.Tree)
 // registeredKey names the identifier keyword and value s carries that the
 // profile registers, and reports false where s carries none.
 func (f *Frozen) registeredKey(s *Schema) (string, bool) {
+	d := identifiers(s, uriref.DocKey{}, f.profile)
+
 	switch {
-	case s.ID != "" && !f.profile.InertIDs:
+	case d.hasURI:
 		return fmt.Sprintf("$id %q", s.ID), true
 	case s.Anchor != "" && !f.profile.Draft7:
 		return fmt.Sprintf("$anchor %q", s.Anchor), true
 	case s.DynamicAnchor != "" && !f.profile.Draft7:
 		return fmt.Sprintf("$dynamicAnchor %q", s.DynamicAnchor), true
+	case len(d.anchors) > 0:
+		// A Draft-07 fragment-only $id registers as an anchor.
+		return fmt.Sprintf("$id %q", s.ID), true
 	default:
 		return "", false
 	}
@@ -152,62 +157,140 @@ func (f *Frozen) registeredKey(s *Schema) (string, bool) {
 
 // walk assigns s its id, records its pointer and base, registers its
 // identifiers, and descends its sub-schemas, threading the base each child
-// inherits exactly as the registry walk did.
-func (f *Frozen) walk(s *Schema, path, parentBase string) {
+// inherits exactly as the registry walk did. Every registration and the
+// child scope come from [identifiers], the one reading of a node's
+// identifier keywords the freeze, the identifier checks, and the JSON-form
+// pointer walk share.
+func (f *Frozen) walk(s *Schema, path string, parentBase uriref.DocKey) {
 	id := len(f.nodes)
 	f.nodes = append(f.nodes, s)
 	f.ids[s] = id
 	f.byPath[path] = id
 	f.paths = append(f.paths, path)
 
-	currentBase := parentBase
+	d := identifiers(s, parentBase, f.profile)
 
-	// Draft-07 ignores the siblings of a $ref, so a $id beside one registers
-	// nothing and rebases nothing: neither an anchor or URI a reference could
-	// name nor a base the node or its children would resolve against.
-	ignoreID := f.profile.Draft7 && s.Ref != ""
-
-	if s.ID != "" && !f.profile.InertIDs && !ignoreID {
-		if uriref.IsFragmentOnly(s.ID) {
-			// Draft-07: a fragment-only $id is the anchor spelling. Draft
-			// 2020-12 forbids a fragment in $id, so there the form registers
-			// nothing and a ref naming it stays unresolvable.
-			if f.profile.Draft7 {
-				registerFirst(f.anchor, uriref.AnchorKey(currentBase, s.ID[1:]), s)
-			}
-		} else {
-			resolved := uriref.IDBase(currentBase, s.ID)
-			registerFirst(f.uri, resolved, s)
-
-			currentBase = resolved
-		}
+	if d.hasURI {
+		registerFirst(f.uri, d.uri, s)
 	}
 
-	// $anchor and $dynamicAnchor are Draft 2020-12 keywords; under Draft-07
-	// they are unknown annotations and register nothing.
-	if !f.profile.Draft7 {
+	for _, key := range d.anchors {
+		registerFirst(f.anchor, key, s)
+	}
+
+	for _, key := range d.dynamic {
+		registerFirst(f.dynamic, key, s)
+	}
+
+	f.bases = append(f.bases, d.scope)
+	f.scopes = append(f.scopes, d.scope)
+
+	for _, entry := range Entries(s) {
+		f.walk(entry.Schema, path+string(entry.Pointer), d.scope)
+	}
+}
+
+// declared is what one node's identifier keywords register and the base URI
+// its children inherit, read from the node alone against the base in effect
+// at it. It is the single reading the freeze walk, the identifier checks, and
+// the JSON-form pointer walk consume, so the three cannot disagree on which
+// keyword registers what under which draft.
+type declared struct {
+	// The uri is the URI a live, absolutizable $id registers, valid only when
+	// hasURI is set.
+	uri uriref.DocKey
+	// The scope is the base URI a child of the node inherits: the node's own
+	// $id applied to the parent base, or the parent base unchanged.
+	scope uriref.DocKey
+	// The anchors are the anchor keys the node registers: its $anchor and
+	// $dynamicAnchor under Draft 2020-12, or its fragment-only $id under
+	// Draft-07.
+	anchors []uriref.AnchorKey
+	// The dynamic keys are the $dynamicAnchor keys, a subset of anchors kept
+	// apart for the dynamic-anchor table.
+	dynamic []uriref.AnchorKey
+	hasURI  bool
+}
+
+// identifiers reads the identifier keywords of s against the base in effect at
+// it and reports what registers and the base its children inherit. Under
+// [Profile.Draft7] a $id beside a $ref registers nothing and rebases nothing
+// (the draft ignores every sibling of $ref), a fragment-only $id is the anchor
+// spelling, and $anchor and $dynamicAnchor are unknown keywords that register
+// nothing; under [Profile.InertIDs] no $id registers or rebases; and a $id that
+// does not parse against the base registers no URI and leaves the scope
+// unchanged, so a reference targeting it misses and the identifier check
+// reports the parse fault separately.
+func identifiers(s *Schema, parent uriref.DocKey, profile Profile) declared {
+	d := declared{scope: parent}
+
+	applyID(&d, s, parent, profile)
+
+	if !profile.Draft7 {
 		if s.Anchor != "" {
-			registerFirst(f.anchor, uriref.AnchorKey(currentBase, s.Anchor), s)
+			d.anchors = append(d.anchors, d.scope.Anchor(s.Anchor))
 		}
 
 		if s.DynamicAnchor != "" {
-			key := uriref.AnchorKey(currentBase, s.DynamicAnchor)
-			registerFirst(f.anchor, key, s)
-			registerFirst(f.dynamic, key, s)
+			key := d.scope.Anchor(s.DynamicAnchor)
+			d.anchors = append(d.anchors, key)
+			d.dynamic = append(d.dynamic, key)
 		}
 	}
 
-	f.bases = append(f.bases, currentBase)
-	f.scopes = append(f.scopes, currentBase)
+	return d
+}
 
-	for _, entry := range Entries(s) {
-		f.walk(entry.Schema, path+string(entry.Pointer), currentBase)
+// applyID folds the $id registration and the child scope into d. A $id the run
+// reads as inert (under [Profile.InertIDs], or beside a $ref under
+// [Profile.Draft7]) registers nothing; a fragment-only $id is a Draft-07 anchor
+// and nothing under 2020-12; and an $id that does not resolve to a key registers
+// no URI and leaves the scope on the parent base.
+func applyID(d *declared, s *Schema, parent uriref.DocKey, profile Profile) {
+	ignoreID := profile.Draft7 && s.Ref != ""
+	if s.ID == "" || profile.InertIDs || ignoreID {
+		return
 	}
+
+	if uriref.IsFragmentOnly(s.ID) {
+		if profile.Draft7 {
+			d.anchors = append(d.anchors, parent.Anchor(s.ID[1:]))
+		}
+
+		return
+	}
+
+	key, _, err := uriref.Resolve(parent, s.ID)
+	if err != nil {
+		return
+	}
+
+	d.uri, d.hasURI = key, true
+	d.scope = key
+}
+
+// ScopeOfJSON reads the base a child of a JSON-form schema object inherits: the
+// object's own live $id applied to the parent base, or the parent base
+// unchanged. The JSON-form pointer walk calls it where its typed traversal ends
+// and it descends raw maps, so a crossed $id rebases the located target on the
+// same terms [identifiers] rebases a typed node.
+func ScopeOfJSON(obj map[string]any, parent uriref.DocKey, profile Profile) uriref.DocKey {
+	id, ok := obj["$id"].(string)
+	if !ok || id == "" || uriref.IsFragmentOnly(id) || profile.InertIDs {
+		return parent
+	}
+
+	key, _, err := uriref.Resolve(parent, id)
+	if err != nil {
+		return parent
+	}
+
+	return key
 }
 
 // registerFirst stores s under key unless the key is already held, so a key
 // claimed twice within one document resolves to the first the walk reaches.
-func registerFirst(reg map[string]*Schema, key string, s *Schema) {
+func registerFirst[K comparable](reg map[K]*Schema, key K, s *Schema) {
 	if _, ok := reg[key]; !ok {
 		reg[key] = s
 	}
@@ -223,9 +306,9 @@ func (f *Frozen) Root() *Schema {
 }
 
 // Base returns the base URI the document was frozen against.
-func (f *Frozen) Base() string {
+func (f *Frozen) Base() uriref.DocKey {
 	if f == nil {
-		return ""
+		return uriref.DocKey{}
 	}
 
 	return f.base
@@ -260,14 +343,14 @@ func (f *Frozen) Path(id int) string {
 
 // NodeBase returns the base URI in effect at the node with the given id, the
 // one its own references resolve against.
-func (f *Frozen) NodeBase(id int) string {
+func (f *Frozen) NodeBase(id int) uriref.DocKey {
 	return f.bases[id]
 }
 
 // ScopeBase returns the base URI a child of the node with the given id
 // inherits: the node's own $id applied to its parent's base, whether or not
 // a Draft-07 $ref beside it ignores that $id for the node's own reference.
-func (f *Frozen) ScopeBase(id int) string {
+func (f *Frozen) ScopeBase(id int) uriref.DocKey {
 	return f.scopes[id]
 }
 
@@ -290,16 +373,16 @@ func (f *Frozen) At(pointer string) (*Schema, bool) {
 
 // URIs returns the document's $id registrations, keyed by absolute URI. The
 // map is the Frozen's own and must not be mutated.
-func (f *Frozen) URIs() map[string]*Schema { return f.uri }
+func (f *Frozen) URIs() map[uriref.DocKey]*Schema { return f.uri }
 
 // Anchors returns the document's $anchor registrations, including each
 // $dynamicAnchor, keyed by baseURI#name. The map is the Frozen's own and must
 // not be mutated.
-func (f *Frozen) Anchors() map[string]*Schema { return f.anchor }
+func (f *Frozen) Anchors() map[uriref.AnchorKey]*Schema { return f.anchor }
 
 // DynamicAnchors returns the document's $dynamicAnchor registrations, keyed
 // by baseURI#name. The map is the Frozen's own and must not be mutated.
-func (f *Frozen) DynamicAnchors() map[string]*Schema { return f.dynamic }
+func (f *Frozen) DynamicAnchors() map[uriref.AnchorKey]*Schema { return f.dynamic }
 
 // Vet runs the vetting policy over the whole document: the structural checks
 // [Frozen.VetNode] runs plus the identifier checks ($id domain and
@@ -357,7 +440,7 @@ func (f *Frozen) VetNode(pathPrefix string) (Node, error) {
 // over it, minting the [Node] currency. The locator names the fragment in a
 // violation, and base is the base URI in effect at its position, which its
 // own identifiers resolve against.
-func FreezeNode(s *Schema, locator, base string, profile Profile) (Node, error) {
+func FreezeNode(s *Schema, locator string, base uriref.DocKey, profile Profile) (Node, error) {
 	f, err := Freeze(s, locator, base, profile)
 	if err != nil {
 		return Node{}, err

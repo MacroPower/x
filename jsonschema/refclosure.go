@@ -1,12 +1,14 @@
 package jsonschema
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"slices"
 
 	"go.jacobcolvin.com/x/jsonschema/internal/refresolve"
 	"go.jacobcolvin.com/x/jsonschema/internal/schemavet"
+	"go.jacobcolvin.com/x/jsonschema/internal/uriref"
 )
 
 // refClosure is the reference-closure walk both engines drive. It statically
@@ -150,7 +152,7 @@ func (c refClosure) run() error {
 		return err
 	}
 
-	processed := map[string]bool{}
+	processed := map[uriref.DocKey]bool{}
 	folded := map[*Schema]bool{}
 	refCursor := 0
 
@@ -164,7 +166,7 @@ func (c refClosure) run() error {
 		// document each names is handed to onDoc on first sight, and each is
 		// then strictly ref-walked, since an in-document reference that
 		// cannot resolve now never can.
-		var pending []string
+		var pending []uriref.DocKey
 
 		// One snapshot per round. It holds because no fetch this walk drives
 		// clones the registry. Only a validation run's copy-on-write fetch calls
@@ -178,7 +180,7 @@ func (c refClosure) run() error {
 			}
 		}
 
-		slices.Sort(pending)
+		slices.SortFunc(pending, func(a, b uriref.DocKey) int { return cmp.Compare(a.String(), b.String()) })
 
 		for _, uri := range pending {
 			processed[uri] = true
@@ -195,7 +197,7 @@ func (c refClosure) run() error {
 				}
 			}
 
-			err := walkRefs(s, uri+"#", true)
+			err := walkRefs(s, uri.At("").String(), true)
 			if err != nil {
 				return err
 			}

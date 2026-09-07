@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"net/url"
 	"strings"
 
 	"go.jacobcolvin.com/x/jsonschema/internal/refresolve"
@@ -47,6 +46,10 @@ type inliner struct {
 	draftOverride *Draft
 
 	baseURI string
+
+	// The canonical key ParseBase mints from baseURI, the one the root is
+	// frozen against.
+	base uriref.DocKey
 
 	// The node-identity index over every pristine schema the run touches:
 	// the pristine root document, each fetched document, each fallback
@@ -372,12 +375,12 @@ func NewInliner(opts ...InlineOption) *Inliner {
 		}
 	}
 
-	base, err := uriref.ParseBaseURI(proto.baseURI)
+	base, err := uriref.ParseBase(proto.baseURI)
 	if err != nil {
 		proto.baseURIErr = fmt.Errorf("%w: %w", ErrInvalidBaseURI, err)
 	}
 
-	proto.baseURI = base
+	proto.base = base
 
 	return &Inliner{proto: proto}
 }
@@ -408,6 +411,7 @@ func (il *Inliner) Inline(ctx context.Context, s *Schema) (*Schema, error) {
 		fallback:      il.proto.fallback,
 		draftOverride: il.proto.draftOverride,
 		baseURI:       il.proto.baseURI,
+		base:          il.proto.base,
 		retrievalBase: il.proto.retrievalBase,
 		index:         newSchemaIndex(),
 	}
@@ -439,7 +443,7 @@ func (in *inliner) run(s *Schema) (*Schema, error) {
 	// while the working copy cloned from it receives the expansions and
 	// becomes the result. Both are trees of the same shape, so they walk in
 	// lockstep.
-	frozen, err := schemavet.Freeze(s, "the root document", in.baseURI, in.vetProfile())
+	frozen, err := schemavet.Freeze(s, "the root document", in.base, in.vetProfile())
 	if err != nil {
 		//nolint:wrapcheck // The freeze error already names the document and path.
 		return nil, err
@@ -472,7 +476,7 @@ func (in *inliner) run(s *Schema) (*Schema, error) {
 	// malformed output schema this package's own [Compile] rejects.
 	in.session = reg.NewSession(in.fallbackVet)
 
-	in.recordDoc(rootDoc, "", in.session.SchemaBase(pristine))
+	in.recordDoc(rootDoc, "", in.session.SchemaBase(pristine).String())
 
 	// Fetch and vet the whole reference closure before expanding any of it.
 	// The walk holds a document reachable only through another document's
@@ -931,10 +935,12 @@ func (in *inliner) fragmentTargetLocation(pristine *Schema, ref string) (string,
 	// Recorded paths use decoded tokens; a still-encoded fragment (one
 	// url.Parse could not canonicalize, e.g. a %2F separator escape) keeps the
 	// raw spelling its splitting depends on.
-	parsed, perr := url.Parse(ref)
-	if perr == nil {
-		if fragment, encoded := uriref.RawFragment(parsed); !encoded {
-			ptr = fragment
+	_, fragment, err := uriref.Resolve(uriref.DocKey{}, ref)
+	if err == nil {
+		if raw, encoded := fragment.Pointer(); encoded {
+			ptr = raw
+		} else {
+			ptr = fragment.Name()
 		}
 	}
 
@@ -1061,7 +1067,7 @@ func (in *inliner) substitute(pristine *Schema, path, ref string, inlineErr erro
 	// the two would mislocate the failure.
 	seed, doc := path, in.docs[pristineID]
 	if in.session.SchemaBase(cp) != base {
-		seed, doc = "", in.session.SchemaBase(cp)
+		seed, doc = "", in.session.SchemaBase(cp).String()
 	}
 
 	in.recordDoc(subDoc, seed, doc)
@@ -1187,7 +1193,7 @@ func (in *inliner) resolveTarget(node *Schema, ref string) (*Schema, string, str
 		return nil, "", "", fmt.Errorf("%w: cannot resolve %q", ErrRefResolve, ref)
 	}
 
-	return res.Target, res.DocumentURI, res.Fragment, nil
+	return res.Target, res.DocumentURI.String(), res.Fragment, nil
 }
 
 // runContext returns the [Inline] call's context for hook invocations (the
@@ -1224,7 +1230,7 @@ func (in *inliner) vetProfile() schemavet.Profile {
 // [inliner.vetTarget] reads where the walk records the target. A violation
 // wraps [ErrRefResolve], so it surfaces through the referencing ref exactly
 // like a malformed-document violation.
-func (in *inliner) fallbackVet(sc *Schema, base, locator string) (schemavet.Node, error) {
+func (in *inliner) fallbackVet(sc *Schema, base uriref.DocKey, locator string) (schemavet.Node, error) {
 	node, err := schemavet.FreezeNode(sc, locator, base, in.vetProfile())
 	if err != nil {
 		return schemavet.Node{}, fmt.Errorf("%w: %w", ErrRefResolve, err)
@@ -1265,9 +1271,9 @@ func (in *inliner) fallbackVet(sc *Schema, base, locator string) (schemavet.Node
 // [ErrRefResolve] rather than being inlined into a malformed output schema.
 // The check is recorded in the negative cache like the other failures, so it
 // too is run at most once per baseURI in a run.
-func (in *inliner) fetchDoc(baseURI string) (*Schema, error) {
+func (in *inliner) fetchDoc(baseURI uriref.DocKey) (*Schema, error) {
 	if in.resolver == nil {
-		return nil, fmt.Errorf("%w: no resolver configured for %q", ErrRefResolve, baseURI)
+		return nil, fmt.Errorf("%w: no resolver configured for %q", ErrRefResolve, baseURI.String())
 	}
 
 	doc, missed, err := fetchAndFreeze(in.runContext(), in.resolver, in.session, baseURI, in.vetProfile())
@@ -1278,7 +1284,7 @@ func (in *inliner) fetchDoc(baseURI string) (*Schema, error) {
 	if missed {
 		// Unlike the validator's fetch, a miss is fatal for the inliner: there
 		// is no fallback answer for an unresolvable non-fragment ref.
-		return nil, fmt.Errorf("%w: cannot resolve %q", ErrRefResolve, baseURI)
+		return nil, fmt.Errorf("%w: cannot resolve %q", ErrRefResolve, baseURI.String())
 	}
 
 	// The registration is the one path both engines take for a fetched
@@ -1292,7 +1298,7 @@ func (in *inliner) fetchDoc(baseURI string) (*Schema, error) {
 	}
 
 	cp := doc.Root()
-	in.recordDoc(doc, "", in.session.SchemaBase(cp))
+	in.recordDoc(doc, "", in.session.SchemaBase(cp).String())
 
 	return cp, nil
 }

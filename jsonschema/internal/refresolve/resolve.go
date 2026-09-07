@@ -20,7 +20,7 @@ import (
 // resolver did serve and the fetch turned away. The closure owns resolver
 // invocation, the freeze, registration target, and negative caching; the
 // core owns the resolution decision tree around it.
-type Fetch func(baseURI string) (*jsonschema.Schema, error)
+type Fetch func(baseURI uriref.DocKey) (*jsonschema.Schema, error)
 
 // RefusedError marks a fetch failure as the refusal of a document the resolver
 // served: a pointer cycle the freeze found, an identifier another document
@@ -60,9 +60,9 @@ type Result struct {
 	// rejection wraps [ErrRefResolve] only when that vet wraps it.
 	Err error
 
-	// DocumentURI is the located document's base URI for a non-fragment ref, ""
-	// for a same-document fragment ref.
-	DocumentURI string
+	// DocumentURI is the located document's base URI for a non-fragment ref,
+	// the zero key for a same-document fragment ref.
+	DocumentURI uriref.DocKey
 
 	// Fragment is the fragment portion for a pointer target within a located
 	// document, "" otherwise.
@@ -118,7 +118,12 @@ func (s *Session) ResolveRef(schema *jsonschema.Schema, ref string, fetch Fetch)
 // resolveRefUncached performs the resolution decision tree behind ResolveRef's
 // per-run cache.
 func (s *Session) resolveRefUncached(schema *jsonschema.Schema, ref string, fetch Fetch) Result {
-	parsed, err := url.Parse(ref)
+	base := s.SchemaBase(schema)
+
+	// One canonicalizing resolution mints the target document key and reads
+	// the fragment the reference carries. A fragment-only ref names base
+	// itself; every other ref names the document its target absolutizes to.
+	doc, fragment, err := uriref.Resolve(base, ref)
 	if err != nil {
 		return Result{}
 	}
@@ -126,26 +131,23 @@ func (s *Session) resolveRefUncached(schema *jsonschema.Schema, ref string, fetc
 	// Fragment-only refs (e.g. "#", "#/$defs/foo", "#anchor").
 	//nolint:nestif // Resolution walks distinct fragment forms (pointer, anchor, root).
 	if uriref.IsFragmentOnly(ref) {
-		fragment := parsed.Fragment
-
 		// Find the root of the current resource.
 		resourceRoot := s.reg.root
 
-		base := s.SchemaBase(schema)
-		if base != "" {
+		if !base.IsZero() {
 			if target, ok := s.LookupURI(base); ok {
 				resourceRoot = target
 			}
 		}
 
-		if fragment == "" {
+		if fragment.IsEmpty() {
 			return Result{Target: resourceRoot}
 		}
 
 		// JSON Pointer. Pass the still-encoded fragment so a member name escaped
 		// as %2F is not mistaken for a pointer separator.
-		if strings.HasPrefix(fragment, "/") {
-			raw, encoded := uriref.RawFragment(parsed)
+		if fragment.IsPointer() {
+			raw, encoded := fragment.Pointer()
 
 			t, ptrErr := s.ResolveJSONPointer(resourceRoot, raw, encoded)
 
@@ -156,32 +158,17 @@ func (s *Session) resolveRefUncached(schema *jsonschema.Schema, ref string, fetc
 		}
 
 		// Anchor reference.
-		if target, ok := s.LookupAnchor(uriref.AnchorKey(base, fragment)); ok {
+		if target, ok := s.LookupAnchor(base.Anchor(fragment.Name())); ok {
 			return Result{Target: target}
 		}
 
 		return Result{}
 	}
 
-	// Non-fragment ref: resolve against the current schema's base URI.
-	base := s.SchemaBase(schema)
-	absRef := uriref.ResolveURI(base, ref)
-
-	parsedAbs, err := url.Parse(absRef)
-	if err != nil {
-		return Result{}
-	}
-
-	fragment := parsedAbs.Fragment
-	rawFrag, fragEncoded := uriref.RawFragment(parsedAbs)
-	parsedAbs.Fragment = ""
-	parsedAbs.RawFragment = ""
-	baseURI := parsedAbs.String()
-
-	target, ok := s.LookupURI(baseURI)
+	target, ok := s.LookupURI(doc)
 	if !ok {
 		// Try remote resolution as fallback.
-		cp, fetchErr := fetch(baseURI)
+		cp, fetchErr := fetch(doc)
 		if cp == nil {
 			return Result{Err: fetchErr, DocumentMiss: !refused(fetchErr)}
 		}
@@ -189,15 +176,17 @@ func (s *Session) resolveRefUncached(schema *jsonschema.Schema, ref string, fetc
 		target = cp
 	}
 
-	if fragment == "" {
-		return Result{Target: target, DocumentURI: baseURI}
+	if fragment.IsEmpty() {
+		return Result{Target: target, DocumentURI: doc}
 	}
 
 	// JSON Pointer within resolved schema.
-	if strings.HasPrefix(fragment, "/") {
-		t, ptrErr := s.ResolveJSONPointer(target, rawFrag, fragEncoded)
+	if fragment.IsPointer() {
+		raw, encoded := fragment.Pointer()
+
+		t, ptrErr := s.ResolveJSONPointer(target, raw, encoded)
 		if t != nil {
-			return Result{Target: t, DocumentURI: baseURI, Fragment: fragment}
+			return Result{Target: t, DocumentURI: doc, Fragment: fragment.Name()}
 		}
 
 		// The fragment-only path above holds the same invariant. A non-nil
@@ -207,8 +196,8 @@ func (s *Session) resolveRefUncached(schema *jsonschema.Schema, ref string, fetc
 
 	// Anchor within resolved schema, resolved via the shared cross-document
 	// precedence (retrieval base first, then the document's canonical $id base).
-	if anchorTarget, ok := s.LookupAnchorWithFallback(baseURI, target, fragment); ok {
-		return Result{Target: anchorTarget, DocumentURI: baseURI}
+	if anchorTarget, ok := s.LookupAnchorWithFallback(doc, target, fragment.Name()); ok {
+		return Result{Target: anchorTarget, DocumentURI: doc}
 	}
 
 	return Result{}
@@ -244,14 +233,14 @@ func (s *Session) ResolveDynamicRef(schema *jsonschema.Schema, ref string, fetch
 	// the fragment name, not merely when the static target's resource defines
 	// one somewhere.
 	staticBase := s.SchemaBase(static.Target)
-	if anchored, ok := s.LookupDynamicAnchor(uriref.AnchorKey(staticBase, fragment)); !ok || anchored != static.Target {
+	if anchored, ok := s.LookupDynamicAnchor(staticBase.Anchor(fragment)); !ok || anchored != static.Target {
 		return static // no bookend -> behave like $ref
 	}
 
 	// Phase 3: walk dynamic scope outermost->innermost for the first matching
 	// $dynamicAnchor.
 	for _, scopeBase := range s.dynamicScope {
-		if target, ok := s.LookupDynamicAnchor(uriref.AnchorKey(scopeBase, fragment)); ok {
+		if target, ok := s.LookupDynamicAnchor(scopeBase.Anchor(fragment)); ok {
 			return Result{Target: target}
 		}
 	}

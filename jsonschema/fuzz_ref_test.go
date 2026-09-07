@@ -1648,6 +1648,59 @@ func TestRefEnginesAgreeOnPastFixes(t *testing.T) {
 			},
 			instances: []string{`5`, `"text"`, `null`},
 		},
+		// Section 6: a reference spelled with an upper-case host reaches the one
+		// document the resolver serves under the canonical lower-case key, so
+		// both engines canonicalize the ref before the fetch and agree. The two
+		// spellings used to name two keys, so the document was fetched twice and
+		// a live $id in it collided with its own first copy.
+		"host case canonicalizes to one document": {
+			root: stringtest.Input(`
+				{
+					"$schema": "https://json-schema.org/draft/2020-12/schema",
+					"allOf": [
+						{"$ref": "https://EXAMPLE.test/a.json"},
+						{"$ref": "https://example.test/a.json"}
+					]
+				}
+			`),
+			remotes: map[string]string{
+				"https://example.test/a.json": `{"$id": "https://example.test/a.json", "type": "string"}`,
+			},
+			instances: []string{`"text"`, `42`, `null`},
+		},
+		// Section 6: a reference carrying dot segments resolves to the same
+		// document as its collapsed spelling, so both engines apply
+		// remove_dot_segments before the fetch.
+		"dot segments in a reference collapse": {
+			root: stringtest.Input(`
+				{
+					"$schema": "https://json-schema.org/draft/2020-12/schema",
+					"allOf": [
+						{"$ref": "https://example.test/x/../a.json"},
+						{"$ref": "https://example.test/a.json"}
+					]
+				}
+			`),
+			remotes: map[string]string{
+				"https://example.test/a.json": `{"type": "string"}`,
+			},
+			instances: []string{`"text"`, `42`, `null`},
+		},
+		// Section 6: a percent-escape spelled with a lower-case hex digit reaches
+		// the document served under the upper-case canonical key, so both
+		// engines uppercase the escape before the fetch.
+		"percent-encoding hex case canonicalizes": {
+			root: stringtest.Input(`
+				{
+					"$schema": "https://json-schema.org/draft/2020-12/schema",
+					"$ref": "https://example.test/a%2fb.json"
+				}
+			`),
+			remotes: map[string]string{
+				"https://example.test/a%2Fb.json": `{"type": "string"}`,
+			},
+			instances: []string{`"text"`, `42`},
+		},
 	}
 
 	for name, tc := range tests {

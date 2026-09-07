@@ -646,3 +646,41 @@ func TestCompileRootRefErrorNamesTheRootDocument(t *testing.T) {
 		})
 	}
 }
+
+// TestCompileOneKeyPerDocument locks in the section 6 identity fix: a document
+// named by several references that canonicalize to one URI is fetched once,
+// under that one key. The spellings differ by host case, a dot segment, and
+// percent-encoding hex case, each of which RFC 3986 section 6.2.2 folds into
+// the canonical form the resolver is asked for. Before the fix each spelling
+// minted its own key, so the resolver was called once per spelling and a live
+// $id in the document collided with its own earlier copy.
+func TestCompileOneKeyPerDocument(t *testing.T) {
+	t.Parallel()
+
+	const canonical = "https://example.test/a%2Fb.json"
+
+	root, err := jsonschema.ParseSchema([]byte(stringtest.Input(`
+		{
+			"$schema": "https://json-schema.org/draft/2020-12/schema",
+			"allOf": [
+				{"$ref": "https://EXAMPLE.test/a%2Fb.json"},
+				{"$ref": "https://example.test/x/../a%2Fb.json"},
+				{"$ref": "https://example.test/./a%2fb.json"}
+			]
+		}
+	`)))
+	require.NoError(t, err)
+
+	resolver := &fetchCountingResolver{
+		inner: mapResolver{canonical: &jsonschema.Schema{
+			ID:   canonical,
+			Type: "string",
+		}},
+		calls: map[string]int{},
+	}
+
+	require.NoError(t, validateValue(t.Context(), root, "text", jsonschema.WithRefResolver(resolver)))
+
+	assert.Equal(t, map[string]int{canonical: 1}, resolver.calls,
+		"three canonically-equal spellings name one document, fetched once")
+}

@@ -6,8 +6,10 @@ import (
 
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"go.jacobcolvin.com/x/jsonschema/internal/jsonptr"
+	"go.jacobcolvin.com/x/jsonschema/internal/uriref"
 )
 
 // materializeSchema is a plain JSON round-trip [jsonptr.Materialize] for tests;
@@ -27,6 +29,44 @@ func materializeSchema(node any) (*jsonschema.Schema, error) {
 	}
 
 	return &s, nil
+}
+
+// mustBase mints the DocKey a base string names, the way the parent package's
+// ParseBase does before it hands a base to the walk.
+func mustBase(t *testing.T, s string) uriref.DocKey {
+	t.Helper()
+
+	k, err := uriref.ParseBase(s)
+	require.NoError(t, err)
+
+	return k
+}
+
+// rebaseByID is the id-tracking callback the walk applies, mirroring
+// schemavet.ScopeOfJSON: a crossed object's own live $id rebases the running
+// base, and every other form leaves it.
+func rebaseByID(obj map[string]any, base uriref.DocKey) uriref.DocKey {
+	id, ok := obj["$id"].(string)
+	if !ok || id == "" || uriref.IsFragmentOnly(id) {
+		return base
+	}
+
+	key, _, err := uriref.Resolve(base, id)
+	if err != nil {
+		return base
+	}
+
+	return key
+}
+
+// rebaseFor returns the tracking callback when track is set, nil otherwise, so
+// a test names the retrieval-base walk by passing false.
+func rebaseFor(track bool) func(map[string]any, uriref.DocKey) uriref.DocKey {
+	if !track {
+		return nil
+	}
+
+	return rebaseByID
 }
 
 // TestSchemaAtJSONForm pins the JSON-form walk: which segments locate a
@@ -115,7 +155,9 @@ func TestSchemaAtJSONForm(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got, base := jsonptr.SchemaAtJSONForm(tt.root, tt.segs, tt.base, tt.trackIDs, materializeSchema)
+			got, base := jsonptr.SchemaAtJSONForm(
+				tt.root, tt.segs, mustBase(t, tt.base), rebaseFor(tt.trackIDs), materializeSchema,
+			)
 
 			if tt.want == nil {
 				assert.Nil(t, got)
@@ -125,7 +167,7 @@ func TestSchemaAtJSONForm(t *testing.T) {
 			}
 
 			assert.Equal(t, tt.want, got)
-			assert.Equal(t, tt.wantBase, base)
+			assert.Equal(t, tt.wantBase, base.String())
 		})
 	}
 }

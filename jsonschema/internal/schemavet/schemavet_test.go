@@ -24,13 +24,13 @@ func TestVetMintsOnlyOnSuccess(t *testing.T) {
 	strict := schemavet.Profile{RejectItemsArray: true, RejectIDFragment: true, Vocabularies: true}
 	valid := &schemavet.Schema{Type: "string"}
 
-	node, err := schemavet.FreezeNode(valid, "", "https://example.com/s", strict)
+	node, err := schemavet.FreezeNode(valid, "", bk(t, "https://example.com/s"), strict)
 	require.NoError(t, err)
 	require.NotNil(t, node.Root())
 	assert.NotSame(t, valid, node.Root(), "the currency holds the frozen copy")
 	assert.Same(t, node.Frozen().Root(), node.Root())
 
-	frozen, err := schemavet.Freeze(valid, "the document", "https://example.com/s", schemavet.Profile{})
+	frozen, err := schemavet.Freeze(valid, "the document", bk(t, "https://example.com/s"), schemavet.Profile{})
 	require.NoError(t, err)
 
 	doc, err := frozen.Vet("")
@@ -40,11 +40,11 @@ func TestVetMintsOnlyOnSuccess(t *testing.T) {
 
 	invalid := &schemavet.Schema{Type: "no-such-type"}
 
-	node, err = schemavet.FreezeNode(invalid, "", "https://example.com/s", schemavet.Profile{})
+	node, err = schemavet.FreezeNode(invalid, "", bk(t, "https://example.com/s"), schemavet.Profile{})
 	require.ErrorIs(t, err, schemavet.ErrInvalidType)
 	assert.Nil(t, node.Root())
 
-	frozen, err = schemavet.Freeze(invalid, "the document", "https://example.com/s", schemavet.Profile{})
+	frozen, err = schemavet.Freeze(invalid, "the document", bk(t, "https://example.com/s"), schemavet.Profile{})
 	require.NoError(t, err, "the freeze reads structure, not the checks")
 
 	doc, err = frozen.Vet("")
@@ -85,7 +85,7 @@ func TestVetViolationPaths(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			_, err := schemavet.FreezeNode(tc.schema, "", "https://example.com/s", tc.profile)
+			_, err := schemavet.FreezeNode(tc.schema, "", bk(t, "https://example.com/s"), tc.profile)
 			require.ErrorIs(t, err, tc.err)
 			assert.Contains(t, err.Error(), tc.path)
 		})
@@ -96,7 +96,7 @@ func TestVetDocIdentifierChecks(t *testing.T) {
 	t.Parallel()
 
 	vetDoc := func(s *schemavet.Schema, profile schemavet.Profile) error {
-		frozen, err := schemavet.Freeze(s, "the document", "https://example.com/s", profile)
+		frozen, err := schemavet.Freeze(s, "the document", bk(t, "https://example.com/s"), profile)
 		require.NoError(t, err)
 
 		_, err = frozen.Vet("")

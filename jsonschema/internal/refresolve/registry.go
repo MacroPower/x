@@ -1,6 +1,7 @@
 package refresolve
 
 import (
+	"cmp"
 	"fmt"
 	"maps"
 	"slices"
@@ -8,6 +9,7 @@ import (
 	"github.com/google/jsonschema-go/jsonschema"
 
 	"go.jacobcolvin.com/x/jsonschema/internal/schemavet"
+	"go.jacobcolvin.com/x/jsonschema/internal/uriref"
 )
 
 // Registry is the compiled, shareable resolution state: the maps built once at
@@ -25,17 +27,17 @@ import (
 type Registry struct {
 	// URI maps an absolute URI to the schema registered under it ($id or the
 	// document base).
-	URI map[string]*jsonschema.Schema
+	URI map[uriref.DocKey]*jsonschema.Schema
 
 	// Maps a baseURI#anchor key to its schema ($anchor, and $dynamicAnchor which
 	// is also reachable via $ref).
-	anchor map[string]*jsonschema.Schema
+	anchor map[uriref.AnchorKey]*jsonschema.Schema
 
 	// Maps a baseURI#name key to its $dynamicAnchor schema.
-	dynamicAnchor map[string]*jsonschema.Schema
+	dynamicAnchor map[uriref.AnchorKey]*jsonschema.Schema
 
 	// Maps a schema to its base URI, consulted during $ref resolution.
-	baseURIs map[*jsonschema.Schema]string
+	baseURIs map[*jsonschema.Schema]uriref.DocKey
 
 	// Maps every node the registry holds to the document it is a node of, so
 	// a JSON-pointer resolution finds the tree to answer from and a walk can
@@ -53,10 +55,10 @@ type Registry struct {
 // JSON-form pointer walk reads so a crossed $id rebases nothing.
 func NewRegistry(deps Deps, inertIDs bool) *Registry {
 	return &Registry{
-		URI:           map[string]*jsonschema.Schema{},
-		anchor:        map[string]*jsonschema.Schema{},
-		dynamicAnchor: map[string]*jsonschema.Schema{},
-		baseURIs:      map[*jsonschema.Schema]string{},
+		URI:           map[uriref.DocKey]*jsonschema.Schema{},
+		anchor:        map[uriref.AnchorKey]*jsonschema.Schema{},
+		dynamicAnchor: map[uriref.AnchorKey]*jsonschema.Schema{},
+		baseURIs:      map[*jsonschema.Schema]uriref.DocKey{},
 		nodes:         map[*jsonschema.Schema]schemavet.Doc{},
 		inertIDs:      inertIDs,
 		deps:          deps,
@@ -72,7 +74,7 @@ func (r *Registry) Build(root schemavet.Doc) {
 	r.root = root.Root()
 	r.absorb(root)
 
-	if base := root.Frozen().Base(); base != "" {
+	if base := root.Frozen().Base(); !base.IsZero() {
 		if _, ok := r.URI[base]; !ok {
 			r.URI[base] = r.root
 		}
@@ -129,8 +131,8 @@ func (r *Registry) NewSession(vet FallbackVet) *Session {
 // message. Sorting the colliding keys keeps the report stable, so a document
 // colliding on several keys names the same one every run rather than following
 // Go's map order.
-func (r *Registry) collision(claimed, held map[string]*jsonschema.Schema, kind, claimant string) error {
-	var keys []string
+func collision[K identKey](r *Registry, claimed, held map[K]*jsonschema.Schema, kind, claimant string) error {
+	var keys []K
 
 	for key, sc := range claimed {
 		if other, ok := held[key]; ok && other != sc {
@@ -142,12 +144,19 @@ func (r *Registry) collision(claimed, held map[string]*jsonschema.Schema, kind, 
 		return nil
 	}
 
-	slices.Sort(keys)
+	slices.SortFunc(keys, func(a, b K) int { return cmp.Compare(a.String(), b.String()) })
 
 	key := keys[0]
 
 	return fmt.Errorf("%w: %s claims %s %q, already held by %s",
-		ErrIDCollision, claimant, kind, key, r.holderName(held[key], key))
+		ErrIDCollision, claimant, kind, key.String(), r.holderName(held[key], key.String()))
+}
+
+// identKey is the identity a registry table keys on: a document URI or an
+// anchor key, each a comparable value that spells itself for a message.
+type identKey interface {
+	comparable
+	String() string
 }
 
 // holderName names the holder of key by its own base URI. When that base is
@@ -158,15 +167,15 @@ func (r *Registry) collision(claimed, held map[string]*jsonschema.Schema, kind, 
 // repeats it and lets the surrounding wording carry which document is which.
 func (r *Registry) holderName(sc *jsonschema.Schema, key string) string {
 	base := r.baseURIs[sc]
-	if base != key {
+	if base.String() != key {
 		return documentName(base)
 	}
 
 	var others []string
 
 	for uri, held := range r.URI {
-		if held == sc && uri != key {
-			others = append(others, uri)
+		if held == sc && uri.String() != key {
+			others = append(others, uri.String())
 		}
 	}
 
@@ -203,7 +212,7 @@ func (r *Registry) absorb(doc schemavet.Doc) {
 // root. A document whose own $id equals the URI it was fetched from names
 // that key with that schema twice, so it registers one schema under one key
 // rather than colliding with itself.
-func claims(f *schemavet.Frozen, baseURI string) map[string]*jsonschema.Schema {
+func claims(f *schemavet.Frozen, baseURI uriref.DocKey) map[uriref.DocKey]*jsonschema.Schema {
 	uris := maps.Clone(f.URIs())
 	uris[baseURI] = f.Root()
 
@@ -213,10 +222,10 @@ func claims(f *schemavet.Frozen, baseURI string) map[string]*jsonschema.Schema {
 // documentName renders a document's base URI for a collision message. An empty
 // base names the root document, the one document that holds registrations
 // without a URI of its own.
-func documentName(base string) string {
-	if base == "" {
+func documentName(base uriref.DocKey) string {
+	if base.IsZero() {
 		return "the root document"
 	}
 
-	return fmt.Sprintf("document %q", base)
+	return fmt.Sprintf("document %q", base.String())
 }

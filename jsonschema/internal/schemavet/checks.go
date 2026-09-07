@@ -4,7 +4,6 @@ import (
 	"encoding/json/jsontext"
 	"fmt"
 	"maps"
-	"net/url"
 	"slices"
 	"strconv"
 
@@ -276,7 +275,7 @@ func checkNilSubschemaEntries(schema *Schema, schemaPath string) error {
 // recursion and each entry's Pointer for the location, with visited guarding
 // schema-graph cycles.
 func checkIdentifiers(
-	schema *Schema, schemaPath, base string, profile Profile, visited map[*Schema]bool,
+	schema *Schema, schemaPath string, base uriref.DocKey, profile Profile, visited map[*Schema]bool,
 ) error {
 	if schema == nil || visited[schema] {
 		return nil
@@ -346,19 +345,19 @@ func checkVocabularyPlacement(schema *Schema, schemaPath string, profile Profile
 // and returns the base URI the node's children inherit. The base threads
 // exactly as in the registry walk (refresolve.Registry's walkInto): a
 // fragment-only $id changes no base, and any other $id rebases the children
-// to [uriref.IDBase] of itself against the enclosing base, whether or not its
+// to [uriref.Resolve] of itself against the enclosing base, whether or not its
 // checks ran. Under Draft-07 two forms go unchecked: an $id beside a $ref
 // (the draft ignores it) and a fragment-carrying $id (the anchor spelling);
 // Draft 2020-12 rejects any fragment in $id (core section 8.2.1). A checked
 // $id must parse, and its resolved form must be an absolute URI; a relative
 // $id with no absolute base registers no resolvable URI, so every ref
 // targeting it would silently miss.
-func checkSchemaID(schema *Schema, schemaPath, base string, profile Profile) (string, error) {
+func checkSchemaID(schema *Schema, schemaPath string, base uriref.DocKey, profile Profile) (uriref.DocKey, error) {
 	id := schema.ID
 
 	if uriref.IsFragmentOnly(id) {
 		if profile.RejectIDFragment {
-			return "", fmt.Errorf("%w: $id %q must not carry a fragment at %s/$id",
+			return uriref.DocKey{}, fmt.Errorf("%w: $id %q must not carry a fragment at %s/$id",
 				ErrInvalidID, id, schemaPath)
 		}
 
@@ -366,7 +365,10 @@ func checkSchemaID(schema *Schema, schemaPath, base string, profile Profile) (st
 		return base, nil
 	}
 
-	resolved := uriref.IDBase(base, id)
+	resolved, fragment, err := uriref.Resolve(base, id)
+	if err != nil {
+		return uriref.DocKey{}, fmt.Errorf("%w: cannot parse $id %q at %s/$id", ErrInvalidID, id, schemaPath)
+	}
 
 	// Draft-07 ignores an $id beside a $ref, so its domain goes unchecked;
 	// the resolved base still threads to the children, as in the registry
@@ -375,14 +377,9 @@ func checkSchemaID(schema *Schema, schemaPath, base string, profile Profile) (st
 		return resolved, nil
 	}
 
-	parsed, err := url.Parse(id)
-	if err != nil {
-		return "", fmt.Errorf("%w: cannot parse $id %q at %s/$id", ErrInvalidID, id, schemaPath)
-	}
-
-	if parsed.Fragment != "" {
+	if !fragment.IsEmpty() {
 		if profile.RejectIDFragment {
-			return "", fmt.Errorf("%w: $id %q must not carry a fragment at %s/$id",
+			return uriref.DocKey{}, fmt.Errorf("%w: $id %q must not carry a fragment at %s/$id",
 				ErrInvalidID, id, schemaPath)
 		}
 
@@ -390,10 +387,9 @@ func checkSchemaID(schema *Schema, schemaPath, base string, profile Profile) (st
 		return resolved, nil
 	}
 
-	resolvedURL, err := url.Parse(resolved)
-	if err != nil || !resolvedURL.IsAbs() {
-		return "", fmt.Errorf("%w: $id %q does not resolve to an absolute URI against base %q at %s/$id",
-			ErrInvalidID, id, base, schemaPath)
+	if !resolved.IsAbsolute() {
+		return uriref.DocKey{}, fmt.Errorf("%w: $id %q does not resolve to an absolute URI against base %q at %s/$id",
+			ErrInvalidID, id, base.String(), schemaPath)
 	}
 
 	return resolved, nil

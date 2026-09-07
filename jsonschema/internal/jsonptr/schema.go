@@ -111,38 +111,39 @@ type Materialize func(node any) (*jsonschema.Schema, error)
 // which also spares the walk a second pass over the prefix.
 //
 // The walk starts from base, the base URI in effect at schema, and, when
-// trackIDs is set, tracks $id members of the crossed objects that occupy
-// schema positions -- the sub-schema keyword containers the
-// [schemafield.Subschemas] table declares -- so the returned base is the one
-// in effect at the located target. Base already carries schema's own $id, so
-// the walk rebases only below it; the target's own $id is left to the caller
-// during registration. A "$id" string inside a non-schema keyword's payload
-// (examples, default, const) or an unknown keyword is plain instance data,
-// never a resource boundary, and leaves base untouched; a target reached
-// through such data keeps the base of its nearest enclosing schema resource.
-// A caller whose walk treats $id as inert (a retrieval-base walk) passes
-// trackIDs false, and every crossed $id leaves base untouched.
+// rebase is non-nil, applies it to each crossed object that occupies a schema
+// position -- the sub-schema keyword containers the [schemafield.Subschemas]
+// table declares -- so the returned base is the one in effect at the located
+// target. The rebase callback reads the object's own $id against the running
+// base, the same reading [schemavet.ScopeOfJSON] gives a typed node, and
+// returns the base its children inherit. Base already carries schema's own
+// $id, so the walk rebases only below it; the target's own $id is left to the
+// caller during registration. A "$id" string inside a non-schema keyword's
+// payload (examples, default, const) or an unknown keyword is plain instance
+// data, never a resource boundary, and leaves base untouched; a target
+// reached through such data keeps the base of its nearest enclosing schema
+// resource. A caller whose walk treats $id as inert (a retrieval-base walk)
+// passes a nil rebase, and every crossed $id leaves base untouched.
 func SchemaAtJSONForm(
-	schema *jsonschema.Schema, segments []string, base string, trackIDs bool,
+	schema *jsonschema.Schema, segments []string, base uriref.DocKey,
+	rebase func(obj map[string]any, base uriref.DocKey) uriref.DocKey,
 	materialize Materialize,
-) (*jsonschema.Schema, string) {
+) (*jsonschema.Schema, uriref.DocKey) {
 	// Exact is the marshal + exact-decode round trip, so a number beyond
 	// float64 precision keeps its literal form: the materialized target's
 	// const/enum must hold what the author wrote, not the rounded float64
 	// neighbor.
 	node, ok := jsonvalue.Exact(schema)
 	if !ok {
-		return nil, ""
+		return nil, uriref.DocKey{}
 	}
 
 	pos := posSchema
 
 	for i, seg := range segments {
-		if trackIDs && i > 0 && pos == posSchema {
+		if rebase != nil && i > 0 && pos == posSchema {
 			if obj, ok := node.(map[string]any); ok {
-				if id, ok := obj["$id"].(string); ok && id != "" && !uriref.IsFragmentOnly(id) {
-					base = uriref.IDBase(base, id)
-				}
+				base = rebase(obj, base)
 			}
 		}
 
@@ -150,7 +151,7 @@ func SchemaAtJSONForm(
 		case map[string]any:
 			next, ok := container[seg]
 			if !ok {
-				return nil, ""
+				return nil, uriref.DocKey{}
 			}
 
 			pos = nextPosition(pos, seg, next)
@@ -159,14 +160,14 @@ func SchemaAtJSONForm(
 		case []any:
 			idx, ok := ParseArrayIndex(seg)
 			if !ok || idx >= len(container) {
-				return nil, ""
+				return nil, uriref.DocKey{}
 			}
 
 			pos = nextPosition(pos, seg, container[idx])
 			node = container[idx]
 
 		default:
-			return nil, ""
+			return nil, uriref.DocKey{}
 		}
 	}
 
@@ -174,12 +175,12 @@ func SchemaAtJSONForm(
 	case map[string]any, bool:
 		schema, err := materialize(node)
 		if err != nil {
-			return nil, ""
+			return nil, uriref.DocKey{}
 		}
 
 		return schema, base
 
 	default:
-		return nil, ""
+		return nil, uriref.DocKey{}
 	}
 }

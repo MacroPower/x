@@ -10,54 +10,54 @@ import (
 	"go.jacobcolvin.com/x/jsonschema/internal/uriref"
 )
 
-func TestResolveURI(t *testing.T) {
+// key mints the document key a spelling names from the base-less root, the
+// way a $ref in the root document reaches it.
+func key(t *testing.T, spelling string) uriref.DocKey {
+	t.Helper()
+
+	k, _, err := uriref.Resolve(uriref.DocKey{}, spelling)
+	require.NoError(t, err)
+
+	return k
+}
+
+// TestResolve pins resolution and canonicalization together: the document a
+// reference names, spelled the one way every table keys it, and the fragment
+// it carries. The rows cover the opaque-URN merge and its symmetry with the
+// absolute spelling, the bare-path base a base-less root carries, and every
+// spelling pair that once produced two keys for one document.
+func TestResolve(t *testing.T) {
 	t.Parallel()
 
 	tests := map[string]struct {
-		base string
-		ref  string
-		want string
+		base    string
+		ref     string
+		want    string
+		name    string // the fragment as an anchor name, when any
+		pointer string // the fragment as a pointer, when any
+		encoded bool
 	}{
 		// The opaque-URN symmetry invariant: a relative ref against an opaque
 		// base must keep the namespace identifier, so the result matches the
 		// absolute URN a caller would register directly.
-		"opaque urn relative ref keeps namespace": {
-			base: "urn:example:root",
-			ref:  "sub",
-			want: "urn:example:sub",
-		},
+		"opaque urn relative ref keeps namespace": {base: "urn:example:root", ref: "sub", want: "urn:example:sub"},
 		"opaque urn fragment ref": {
-			base: "urn:example:root",
-			ref:  "#/$defs/foo",
-			want: "urn:example:root#/$defs/foo",
+			base: "urn:example:root", ref: "#/$defs/foo", want: "urn:example:root",
+			name: "/$defs/foo", pointer: "/$defs/foo",
 		},
 		// RFC 3986 section 5.2.2: a reference path beginning with "/" replaces
 		// the base path outright instead of merging with it.
-		"opaque urn rooted ref replaces path": {
-			base: "urn:example:a/b",
-			ref:  "/c",
-			want: "urn:/c",
-		},
+		"opaque urn rooted ref replaces path": {base: "urn:example:a/b", ref: "/c", want: "urn:/c"},
 		"opaque urn rooted ref keeps fragment": {
-			base: "urn:example:root",
-			ref:  "/c#frag",
-			want: "urn:/c#frag",
+			base: "urn:example:root", ref: "/c#frag", want: "urn:/c", name: "frag",
 		},
-		"opaque urn rooted dot-segmented ref": {
-			base: "urn:example:a/b",
-			ref:  "/x/../c",
-			want: "urn:/c",
-		},
+		"opaque urn rooted dot-segmented ref": {base: "urn:example:a/b", ref: "/x/../c", want: "urn:/c"},
 		"opaque urn rooted encoded ref keeps encoding": {
 			base: "urn:example:root",
 			ref:  "/sub%2Fx",
 			want: "urn:/sub%2Fx",
 		},
-		"empty base returns ref": {
-			base: "",
-			ref:  "sub",
-			want: "sub",
-		},
+		"empty base keeps the ref": {base: "", ref: "sub", want: "sub"},
 		// RFC 3986 5.2.2 applies remove_dot_segments after the merge, so a
 		// dot-segmented ref and its canonical absolute spelling compute the
 		// same registry key, matching the hierarchical branch.
@@ -91,280 +91,141 @@ func TestResolveURI(t *testing.T) {
 			ref:  "http://other.com/x",
 			want: "http://other.com/x",
 		},
+
+		// The opaque merge operates on the encoded form of a relative ref, the
+		// same way the hierarchical branch resolves on escaped paths. A
+		// percent-escape of a reserved character survives, since decoding it
+		// would name a different key than the absolute spelling recomputes.
+		"escaped slash stays encoded": {base: "urn:example:root", ref: "a%2Fb", want: "urn:example:a%2Fb"},
+		"escaped space stays encoded": {base: "urn:example:root", ref: "su%20b", want: "urn:example:su%20b"},
+		"encoded fragment survives the merge": {
+			base: "urn:example:root", ref: "sub#/a%2Fb", want: "urn:example:sub",
+			name: "/a/b", pointer: "/a%2Fb", encoded: true,
+		},
+
+		// A fragment whose leading pointer separator is itself percent-escaped
+		// is still a pointer: net/url decodes it to a "/"-led form, and the
+		// splitter reads %2F as a separator, so the still-encoded raw text is
+		// what a pointer walk must receive.
+		"encoded root separator is a pointer": {
+			base: "", ref: "#%2F$defs%2Ffoo", want: "",
+			name: "/$defs/foo", pointer: "%2F$defs%2Ffoo", encoded: true,
+		},
+
+		// A bare-path base, the form a root document with no configured base
+		// and every document fetched through it carry. A relative ref used to
+		// pass through verbatim under an empty base and take net/url's rooted,
+		// dot-segment-free form under a schemeless base, so one file
+		// registered under two keys and was fetched twice.
+		"empty base keeps a plain path":          {base: "", ref: "dir/a.json", want: "dir/a.json"},
+		"empty base drops a dot segment":         {base: "", ref: "./c.json", want: "c.json"},
+		"empty base keeps an absolute ref":       {base: "", ref: "http://x/y", want: "http://x/y"},
+		"empty base keeps a rooted ref":          {base: "", ref: "/abs.json", want: "/abs.json"},
+		"empty base keeps a fragment ref":        {base: "", ref: "#/a", want: "", name: "/a", pointer: "/a"},
+		"sibling merges into the base directory": {base: "dir/b.json", ref: "a.json", want: "dir/a.json"},
+		"parent segment pops the directory":      {base: "dir/b.json", ref: "../x.json", want: "x.json"},
+		"nested directory joins":                 {base: "dir/b.json", ref: "sub/c.json", want: "dir/sub/c.json"},
+		"query and fragment carry over": {
+			base: "dir/b.json", ref: "a.json?q=1#/x", want: "dir/a.json?q=1", name: "/x", pointer: "/x",
+		},
+		"fragment against a bare path":      {base: "dir/b.json", ref: "#frag", want: "dir/b.json", name: "frag"},
+		"rooted ref replaces a bare path":   {base: "dir/b.json", ref: "/abs.json", want: "/abs.json"},
+		"absolute ref replaces a bare path": {base: "dir/b.json", ref: "http://x/y", want: "http://x/y"},
+		"bare file name base":               {base: "root.json", ref: "a.json", want: "a.json"},
+
+		// RFC 3986 section 6.2.2: every spelling pair below once named one
+		// document under two keys.
+		"dot segments in an absolute base": {
+			base: "http://x/a/./b/../c/d.json",
+			ref:  "e.json",
+			want: "http://x/a/c/e.json",
+		},
+		"scheme and host lowercase":          {base: "", ref: "HTTP://EXAMPLE.com/A", want: "http://example.com/A"},
+		"percent-encoding hex uppercase":     {base: "", ref: "http://x/a%2fb", want: "http://x/a%2Fb"},
+		"unreserved escape decodes":          {base: "", ref: "http://x/%7Efoo/%41", want: "http://x/~foo/A"},
+		"unreserved escape decodes in a urn": {base: "", ref: "urn:example:%7Ea", want: "urn:example:~a"},
+		"rooted and bare stay distinct":      {base: "", ref: "/a.json", want: "/a.json"},
+		"empty path and slash stay distinct": {base: "", ref: "http://x", want: "http://x"},
+		"slash path":                         {base: "", ref: "http://x/", want: "http://x/"},
+		"query escapes canonicalize":         {base: "", ref: "http://x/a?q=%7e", want: "http://x/a?q=~"},
 	}
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			assert.Equal(t, tc.want, uriref.ResolveURI(tc.base, tc.ref))
-		})
-	}
-}
-
-// TestResolveURIOpaqueSymmetry asserts the registration/lookup symmetry the
-// opaque merge exists to preserve: resolving a relative ref against an opaque
-// base yields the same key as directly resolving the absolute URN against an
-// empty base, so a relative $id and the absolute $ref agree on one registry
-// key.
-func TestResolveURIOpaqueSymmetry(t *testing.T) {
-	t.Parallel()
-
-	const base = "urn:example:root"
-
-	registered := uriref.ResolveURI("", "urn:example:sub")
-	resolved := uriref.ResolveURI(base, "sub")
-
-	assert.Equal(t, registered, resolved)
-	assert.Equal(t, "urn:example:sub", resolved)
-	assert.NotEqual(t, "urn:sub", resolved)
-}
-
-// TestResolveURIRootedRefOpaqueSymmetry asserts the same symmetry for a rooted
-// ref path: per RFC 3986 section 5.2.2 a path beginning with "/" replaces the
-// base path, so the result must match the key the absolute spelling registers
-// under (urn:/c) rather than a merged form like urn:example:a//c or the bogus
-// authority form urn:///c that ResolveReference produces.
-func TestResolveURIRootedRefOpaqueSymmetry(t *testing.T) {
-	t.Parallel()
-
-	registered := uriref.ResolveURI("", "urn:/c")
-	resolved := uriref.ResolveURI("urn:example:a/b", "/c")
-
-	assert.Equal(t, registered, resolved)
-	assert.Equal(t, "urn:/c", resolved)
-}
-
-func TestRawFragment(t *testing.T) {
-	t.Parallel()
-
-	tests := map[string]struct {
-		uri         string
-		want        string
-		wantEncoded bool
-	}{
-		// A percent-escaped separator leaves the fragment in its still-encoded
-		// RawFragment form so the caller splits before decoding.
-		"percent-escaped separator stays encoded": {
-			uri:         "http://example.com/#/a%2Fb",
-			want:        "/a%2Fb",
-			wantEncoded: true,
-		},
-		"plain pointer is already decoded": {
-			uri:         "http://example.com/#/foo",
-			want:        "/foo",
-			wantEncoded: false,
-		},
-		"plain anchor is already decoded": {
-			uri:         "http://example.com/#plain",
-			want:        "plain",
-			wantEncoded: false,
-		},
-		"no fragment": {
-			uri:         "http://example.com/x",
-			want:        "",
-			wantEncoded: false,
-		},
-	}
-
-	for name, tc := range tests {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			u, err := url.Parse(tc.uri)
+			got, frag, err := uriref.Resolve(key(t, tc.base), tc.ref)
 			require.NoError(t, err)
+			assert.Equal(t, tc.want, got.String())
 
-			raw, encoded := uriref.RawFragment(u)
-			assert.Equal(t, tc.want, raw)
-			assert.Equal(t, tc.wantEncoded, encoded)
+			if tc.name == "" && tc.pointer == "" {
+				assert.True(t, frag.IsEmpty(), "no fragment")
+
+				return
+			}
+
+			assert.Equal(t, tc.name, frag.Name())
+
+			raw, encoded := frag.Pointer()
+			if tc.pointer != "" {
+				assert.True(t, frag.IsPointer())
+				assert.Equal(t, tc.pointer, raw)
+				assert.Equal(t, tc.encoded, encoded)
+			}
+
+			// A key survives a url.Parse round trip byte for byte, the
+			// symmetry the registry relies on: the absolute spelling of the
+			// same document parses and re-serializes to this exact key.
+			parsed, err := url.Parse(got.String())
+			require.NoError(t, err)
+			assert.Equal(t, got.String(), parsed.String())
+
+			// A key resolved from the root reproduces itself, so the two
+			// producers agree.
+			again, _, err := uriref.Resolve(uriref.DocKey{}, got.String())
+			require.NoError(t, err)
+			assert.Equal(t, got, again)
 		})
 	}
 }
 
-func TestStripFragment(t *testing.T) {
+// TestResolveSymmetry asserts the registration/lookup symmetry the opaque
+// merge exists to preserve: resolving a relative ref against an opaque base
+// yields the same key as resolving the absolute URN from the root, so a
+// relative $id and the absolute $ref agree on one registry key, for a merged
+// ref and for a rooted one.
+func TestResolveSymmetry(t *testing.T) {
 	t.Parallel()
 
-	tests := map[string]struct {
-		uri  string
-		want string
-	}{
-		"removes pointer fragment": {
-			uri:  "http://example.com/a#/foo",
-			want: "http://example.com/a",
-		},
-		"removes encoded fragment": {
-			uri:  "http://example.com/a#/a%2Fb",
-			want: "http://example.com/a",
-		},
-		"no fragment passes through": {
-			uri:  "http://example.com/a",
-			want: "http://example.com/a",
-		},
-		"opaque urn fragment removed": {
-			uri:  "urn:example:root#/foo",
-			want: "urn:example:root",
-		},
-	}
+	registered, _, err := uriref.Resolve(uriref.DocKey{}, "urn:example:sub")
+	require.NoError(t, err)
 
-	for name, tc := range tests {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
+	resolved, _, err := uriref.Resolve(key(t, "urn:example:root"), "sub")
+	require.NoError(t, err)
+	assert.Equal(t, registered, resolved)
+	assert.Equal(t, "urn:example:sub", resolved.String())
 
-			assert.Equal(t, tc.want, uriref.StripFragment(tc.uri))
-		})
-	}
+	registered, _, err = uriref.Resolve(uriref.DocKey{}, "urn:/c")
+	require.NoError(t, err)
+
+	resolved, _, err = uriref.Resolve(key(t, "urn:example:a/b"), "/c")
+	require.NoError(t, err)
+	assert.Equal(t, registered, resolved)
 }
 
-func TestIsFragmentOnly(t *testing.T) {
+// TestResolveRefusesAnUnparsableRef pins that a reference net/url cannot
+// parse is an error rather than a key.
+func TestResolveRefusesAnUnparsableRef(t *testing.T) {
 	t.Parallel()
 
-	tests := map[string]struct {
-		uri  string
-		want bool
-	}{
-		"bare hash is fragment only": {
-			uri:  "#",
-			want: true,
-		},
-		"hash pointer is fragment only": {
-			uri:  "#/$defs/foo",
-			want: true,
-		},
-		"hash anchor is fragment only": {
-			uri:  "#anchor",
-			want: true,
-		},
-		"absolute uri is not fragment only": {
-			uri:  "http://example.com/a#/foo",
-			want: false,
-		},
-		"relative ref is not fragment only": {
-			uri:  "sub",
-			want: false,
-		},
-		"empty is not fragment only": {
-			uri:  "",
-			want: false,
-		},
-	}
-
-	for name, tc := range tests {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			assert.Equal(t, tc.want, uriref.IsFragmentOnly(tc.uri))
-		})
-	}
+	_, _, err := uriref.Resolve(uriref.DocKey{}, "http://[::1")
+	require.Error(t, err)
 }
 
-func TestNormalizeBaseURI(t *testing.T) {
-	t.Parallel()
-
-	tests := map[string]struct {
-		base string
-		want string
-	}{
-		"empty passes through": {
-			base: "",
-			want: "",
-		},
-		"schemeless path resolves against file root": {
-			base: "main.json",
-			want: "file:///main.json",
-		},
-		"absolute uri passes through": {
-			base: "http://example.com/a",
-			want: "http://example.com/a",
-		},
-		"file uri passes through": {
-			base: "file:///main.json",
-			want: "file:///main.json",
-		},
-	}
-
-	for name, tc := range tests {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			assert.Equal(t, tc.want, uriref.NormalizeBaseURI(tc.base))
-		})
-	}
-}
-
-func TestAnchorKey(t *testing.T) {
-	t.Parallel()
-
-	tests := map[string]struct {
-		base string
-		name string
-		want string
-	}{
-		"absolute base": {base: "https://example.com/s", name: "a", want: "https://example.com/s#a"},
-		"empty base":    {base: "", name: "a", want: "#a"},
-		"urn base":      {base: "urn:example:s", name: "a", want: "urn:example:s#a"},
-		"empty name":    {base: "https://example.com/s", name: "", want: "https://example.com/s#"},
-		"dotted name":   {base: "https://example.com/s", name: "a.b", want: "https://example.com/s#a.b"},
-	}
-
-	for name, tc := range tests {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			assert.Equal(t, tc.want, uriref.AnchorKey(tc.base, tc.name))
-		})
-	}
-}
-
-func TestIDBase(t *testing.T) {
-	t.Parallel()
-
-	tests := map[string]struct {
-		base string
-		id   string
-		want string
-	}{
-		"relative id resolves against base": {
-			base: "https://example.com/root.json",
-			id:   "child.json",
-			want: "https://example.com/child.json",
-		},
-		"absolute id replaces base": {
-			base: "https://example.com/root.json",
-			id:   "https://other.test/x.json",
-			want: "https://other.test/x.json",
-		},
-		"fragment is stripped": {
-			base: "https://example.com/root.json",
-			id:   "child.json#section",
-			want: "https://example.com/child.json",
-		},
-		"empty base keeps id": {
-			base: "",
-			id:   "https://example.com/x.json",
-			want: "https://example.com/x.json",
-		},
-		"opaque urn base merges path": {
-			base: "urn:example:root",
-			id:   "child",
-			want: "urn:example:child",
-		},
-	}
-
-	for name, tc := range tests {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			got := uriref.IDBase(tc.base, tc.id)
-			assert.Equal(t, tc.want, got)
-
-			// IDBase agrees with the key a $ref recomputes: exactly the resolved
-			// id with its fragment removed.
-			assert.Equal(t, uriref.StripFragment(uriref.ResolveURI(tc.base, tc.id)), got)
-		})
-	}
-}
-
-func TestParseBaseURI(t *testing.T) {
+// TestParseBase pins the key a configured base mints: a schemeless base is a
+// file path under file:///, an absolute base canonicalizes, a fragment is
+// dropped, and a base that is not a URI reference is refused.
+func TestParseBase(t *testing.T) {
 	t.Parallel()
 
 	tests := map[string]struct {
@@ -372,84 +233,58 @@ func TestParseBaseURI(t *testing.T) {
 		want string
 		err  bool
 	}{
-		"empty passes through":        {base: "", want: ""},
+		"empty is the zero key":       {base: "", want: ""},
 		"absolute passes through":     {base: "https://ex.test/a.json", want: "https://ex.test/a.json"},
 		"schemeless resolves to file": {base: "main.json", want: "file:///main.json"},
-		"unparsable reports the parse failure and returns the input": {
-			base: "http://[::1",
-			want: "http://[::1",
-			err:  true,
-		},
+		"nested schemeless":           {base: "dir/main.json", want: "file:///dir/main.json"},
+		"fragment is dropped":         {base: "https://ex.test/a.json#frag", want: "https://ex.test/a.json"},
+		"host lowercases":             {base: "HTTPS://EX.TEST/a.json", want: "https://ex.test/a.json"},
+		"dot segments collapse":       {base: "https://ex.test/x/../a.json", want: "https://ex.test/a.json"},
+		"opaque passes through":       {base: "urn:x:y", want: "urn:x:y"},
+		"unparsable is refused":       {base: "http://[::1", err: true},
 	}
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got, err := uriref.ParseBaseURI(tc.base)
-
+			got, err := uriref.ParseBase(tc.base)
 			if tc.err {
 				require.Error(t, err)
-			} else {
-				require.NoError(t, err)
+
+				return
 			}
 
-			assert.Equal(t, tc.want, got)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got.String())
+			assert.Equal(t, tc.want == "", got.IsZero())
 		})
 	}
 }
 
-// TestNormalizeBaseURIMatchesParseBaseURI pins that the two helpers agree on
-// each base form below, empty, schemeless, absolute, unparsable, and opaque, so
-// an entry point that tolerates an unparsable base and one that refuses it
-// still register documents under the same keys.
-func TestNormalizeBaseURIMatchesParseBaseURI(t *testing.T) {
+// TestLocationAndAnchor pins the one producer of "#": a location spells the
+// document, "#", and the pointer, and an anchor key the document, "#", and
+// the name, with the zero key spelling a bare "#".
+func TestLocationAndAnchor(t *testing.T) {
 	t.Parallel()
 
-	for _, base := range []string{"", "main.json", "https://ex.test/a.json", "http://[::1", "urn:x:y"} {
-		parsed, err := uriref.ParseBaseURI(base)
-		if err != nil {
-			assert.Equal(t, base, parsed, "a rejected base %q is returned unchanged", base)
-		}
+	doc := key(t, "https://example.com/s")
 
-		assert.Equal(t, uriref.NormalizeBaseURI(base), parsed, "base %q", base)
-	}
+	assert.Equal(t, "#", uriref.DocKey{}.At("").String())
+	assert.Equal(t, "#/a", uriref.DocKey{}.At("/a").String())
+	assert.Equal(t, "https://example.com/s#/a/b", doc.At("/a/b").String())
+	assert.Equal(t, "https://example.com/s#", doc.At("").String())
+	assert.Equal(t, "https://example.com/s#a", doc.Anchor("a").String())
+	assert.Equal(t, "#a", uriref.DocKey{}.Anchor("a").String())
+	assert.Equal(t, "https://example.com/s#a.b", doc.Anchor("a.b").String())
+	assert.Equal(t, "urn:example:s#a", key(t, "urn:example:s").Anchor("a").String())
 }
 
-// TestResolveURIBarePathBase pins resolution against a bare-path base, the
-// form a root document with no configured base and every document fetched
-// through it carry. A relative ref used to pass through verbatim under an
-// empty base and take net/url's rooted, dot-segment-free form under a
-// schemeless base, so one file registered under two keys and was fetched
-// twice; a live $id in it then collided with its own first copy.
-func TestResolveURIBarePathBase(t *testing.T) {
+func TestIsFragmentOnly(t *testing.T) {
 	t.Parallel()
 
-	tests := map[string]struct {
-		base string
-		ref  string
-		want string
-	}{
-		"empty base keeps a plain path":          {base: "", ref: "dir/a.json", want: "dir/a.json"},
-		"empty base drops a dot segment":         {base: "", ref: "./c.json", want: "c.json"},
-		"empty base keeps an absolute ref":       {base: "", ref: "http://x/y", want: "http://x/y"},
-		"empty base keeps a rooted ref":          {base: "", ref: "/abs.json", want: "/abs.json"},
-		"empty base keeps a fragment ref":        {base: "", ref: "#/a", want: "#/a"},
-		"sibling merges into the base directory": {base: "dir/b.json", ref: "a.json", want: "dir/a.json"},
-		"parent segment pops the directory":      {base: "dir/b.json", ref: "../x.json", want: "x.json"},
-		"nested directory joins":                 {base: "dir/b.json", ref: "sub/c.json", want: "dir/sub/c.json"},
-		"query and fragment carry over":          {base: "dir/b.json", ref: "a.json?q=1#/x", want: "dir/a.json?q=1#/x"},
-		"fragment against a bare path":           {base: "dir/b.json", ref: "#frag", want: "dir/b.json#frag"},
-		"rooted ref replaces a bare path":        {base: "dir/b.json", ref: "/abs.json", want: "/abs.json"},
-		"absolute ref replaces a bare path":      {base: "dir/b.json", ref: "http://x/y", want: "http://x/y"},
-		"bare file name base":                    {base: "root.json", ref: "a.json", want: "a.json"},
-	}
-
-	for name, tc := range tests {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			assert.Equal(t, tc.want, uriref.ResolveURI(tc.base, tc.ref))
-		})
-	}
+	assert.True(t, uriref.IsFragmentOnly("#foo"))
+	assert.True(t, uriref.IsFragmentOnly("#"))
+	assert.False(t, uriref.IsFragmentOnly("foo#bar"))
+	assert.False(t, uriref.IsFragmentOnly(""))
 }

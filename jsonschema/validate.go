@@ -387,6 +387,10 @@ type validator struct {
 	// to the root schema's $id.
 	baseURI string
 
+	// The canonical key ParseBase mints from baseURI, the one the root is
+	// frozen against and every reference absolutizes back to.
+	base uriref.DocKey
+
 	// The activeRows are the keywordTable rows this run evaluates: those whose
 	// draft, vocabulary, and opt-in gates all pass. The gate reads only run-fixed
 	// state (draft, vocabs, formatsEnabled, contentEnabled), so the set is constant
@@ -447,12 +451,12 @@ func newValidator(ctx context.Context, schema *Schema, opts []ValidateOption) (*
 	// ParseBaseURI normalizes it once here, so buildRefReg and the identifier
 	// checks read the same canonical form. NewInliner calls the same helper, so
 	// the two entry points accept the same bases.
-	base, err := uriref.ParseBaseURI(v.baseURI)
+	base, err := uriref.ParseBase(v.baseURI)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidBaseURI, err)
 	}
 
-	v.baseURI = base
+	v.base = base
 
 	// Detect draft from $schema field; a WithDraft override wins.
 	draft, err := resolveDraft(schema, v.draftOverride)
@@ -487,7 +491,7 @@ func newValidator(ctx context.Context, schema *Schema, opts []ValidateOption) (*
 	// frozen copy, so the caller's value is never held and never read again,
 	// and a node reached through two paths in the caller's value is two nodes
 	// here.
-	frozen, err := schemavet.Freeze(schema, "the root document", v.baseURI, v.draft.vetProfile())
+	frozen, err := schemavet.Freeze(schema, "the root document", v.base, v.draft.vetProfile())
 	if err != nil {
 		//nolint:wrapcheck // The freeze error already names the document and path.
 		return nil, err
@@ -997,7 +1001,7 @@ func callResolver(ctx context.Context, resolver RefResolver, uri string) (*Schem
 // and the caller registers it.
 func fetchAndFreeze(
 	ctx context.Context, resolver RefResolver, sess *refresolve.Session,
-	baseURI string, profile schemavet.Profile,
+	baseURI uriref.DocKey, profile schemavet.Profile,
 ) (schemavet.Doc, bool, error) {
 	if recorded, seen := sess.RemoteMiss(baseURI); seen {
 		if recorded != nil {
@@ -1007,7 +1011,7 @@ func fetchAndFreeze(
 		return schemavet.Doc{}, true, nil
 	}
 
-	schema, ok, err := callResolver(ctx, resolver, baseURI)
+	schema, ok, err := callResolver(ctx, resolver, baseURI.String())
 	if err != nil {
 		sess.RecordRemoteMiss(baseURI, err)
 
@@ -1020,7 +1024,7 @@ func fetchAndFreeze(
 		return schemavet.Doc{}, true, nil
 	}
 
-	frozen, err := schemavet.Freeze(schema, fmt.Sprintf("document %q", baseURI), baseURI, profile)
+	frozen, err := schemavet.Freeze(schema, fmt.Sprintf("document %q", baseURI.String()), baseURI, profile)
 	if err != nil {
 		return schemavet.Doc{}, false, refuseFetched(sess, baseURI, err)
 	}
@@ -1030,7 +1034,7 @@ func fetchAndFreeze(
 		return schemavet.Doc{}, false, refuseFetched(sess, baseURI, err)
 	}
 
-	doc, err := frozen.Vet(baseURI + "#")
+	doc, err := frozen.Vet(baseURI.At("").String())
 	if err != nil {
 		return schemavet.Doc{}, false, refuseFetched(sess, baseURI, err)
 	}
@@ -1045,7 +1049,7 @@ func fetchAndFreeze(
 // every pass where a plain miss would be deferred; the negative cache holds
 // the same marked error, so a replay settles the same way. The whole is
 // wrapped in [ErrRefResolve], as every fetch failure is.
-func refuseFetched(sess *refresolve.Session, baseURI string, cause error) error {
+func refuseFetched(sess *refresolve.Session, baseURI uriref.DocKey, cause error) error {
 	refused := &refresolve.RefusedError{Err: cause}
 	sess.RecordRemoteMiss(baseURI, refused)
 
@@ -1072,7 +1076,7 @@ func refuseFetched(sess *refresolve.Session, baseURI string, cause error) error 
 // later evaluation, and only a resolver-reported failure carries an error;
 // a plain not-resolved answer returns (nil, nil).
 func (v *validator) remoteFetch(sess *refresolve.Session, cow bool) refresolve.Fetch {
-	return func(baseURI string) (*Schema, error) {
+	return func(baseURI uriref.DocKey) (*Schema, error) {
 		if v.refResolver == nil {
 			return nil, nil //nolint:nilnil // A missing resolver is a plain miss, not an error.
 		}
@@ -1116,7 +1120,7 @@ func (v *validator) remoteFetch(sess *refresolve.Session, cow bool) refresolve.F
 // The compile-time vet passes wrap false, since refWalkError frames the bare
 // sentinel under the failing reference.
 func newFallbackVet(profile schemavet.Profile, wrap bool) refresolve.FallbackVet {
-	return func(sc *Schema, base, locator string) (schemavet.Node, error) {
+	return func(sc *Schema, base uriref.DocKey, locator string) (schemavet.Node, error) {
 		node, err := schemavet.FreezeNode(sc, locator, base, profile)
 		if err != nil {
 			if wrap {

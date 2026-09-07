@@ -23,9 +23,9 @@ type Session struct {
 	// JSON-pointer fallback ([Session.ResolveJSONPointer]) and for substitutes.
 	// Lookups consult the shared registry first and these second, so
 	// concurrent runs never write the shared maps.
-	fallbackURI      map[string]*jsonschema.Schema
-	fallbackAnchor   map[string]*jsonschema.Schema
-	fallbackBaseURIs map[*jsonschema.Schema]string
+	fallbackURI      map[uriref.DocKey]*jsonschema.Schema
+	fallbackAnchor   map[uriref.AnchorKey]*jsonschema.Schema
+	fallbackBaseURIs map[*jsonschema.Schema]uriref.DocKey
 
 	// Maps every node a fallback registration holds to the frozen tree it is
 	// a node of, so a JSON-pointer resolution rooted inside one finds its
@@ -55,9 +55,9 @@ type Session struct {
 
 	// Negative cache of baseURIs the resolver could not serve this run; a nil
 	// value is a plain miss, a non-nil value the error to replay.
-	remoteMiss map[string]error
+	remoteMiss map[uriref.DocKey]error
 
-	dynamicScope []string
+	dynamicScope []uriref.DocKey
 
 	owned bool
 }
@@ -106,7 +106,7 @@ func (s *Session) EnsureOwned() {
 
 // RemoteMiss reports whether baseURI was recorded as unresolvable this run, and
 // the error to replay (nil for a plain miss).
-func (s *Session) RemoteMiss(baseURI string) (error, bool) {
+func (s *Session) RemoteMiss(baseURI uriref.DocKey) (error, bool) {
 	err, ok := s.remoteMiss[baseURI]
 
 	return err, ok
@@ -115,9 +115,9 @@ func (s *Session) RemoteMiss(baseURI string) (error, bool) {
 // RecordRemoteMiss notes that the resolver could not serve baseURI this run so
 // the fetch closure skips re-calling it. A nil err records a plain miss; a
 // non-nil err is replayed on each later evaluation of the same ref.
-func (s *Session) RecordRemoteMiss(baseURI string, err error) {
+func (s *Session) RecordRemoteMiss(baseURI uriref.DocKey, err error) {
 	if s.remoteMiss == nil {
-		s.remoteMiss = map[string]error{}
+		s.remoteMiss = map[uriref.DocKey]error{}
 	}
 
 	s.remoteMiss[baseURI] = err
@@ -126,15 +126,15 @@ func (s *Session) RecordRemoteMiss(baseURI string, err error) {
 // SeedDynamicScope seeds the dynamic scope with rootBase, the root document's
 // base URI. The caller invokes it once per run under Draft 2020-12; under
 // Draft 7 the scope stays nil.
-func (s *Session) SeedDynamicScope(rootBase string) {
-	s.dynamicScope = []string{rootBase}
+func (s *Session) SeedDynamicScope(rootBase uriref.DocKey) {
+	s.dynamicScope = []uriref.DocKey{rootBase}
 }
 
 // EnterScope pushes base onto the dynamic scope when it differs from the current
 // top, returning a function that pops it. When the scope is empty or base
 // already tops it, no push happens and it returns nil, so the caller registers a
 // defer only on the rarer resource-boundary crossing rather than on every node.
-func (s *Session) EnterScope(base string) func() {
+func (s *Session) EnterScope(base uriref.DocKey) func() {
 	if len(s.dynamicScope) == 0 || base == s.dynamicScope[len(s.dynamicScope)-1] {
 		return nil
 	}
@@ -146,7 +146,7 @@ func (s *Session) EnterScope(base string) func() {
 
 // SchemaBase returns the base URI registered for sc, consulting the shared
 // registry first and the per-run fallback registrations second.
-func (s *Session) SchemaBase(sc *jsonschema.Schema) string {
+func (s *Session) SchemaBase(sc *jsonschema.Schema) uriref.DocKey {
 	if base, ok := s.reg.baseURIs[sc]; ok {
 		return base
 	}
@@ -183,7 +183,7 @@ func (s *Session) FallbackNode(sc *jsonschema.Schema) (schemavet.Node, bool) {
 
 // LookupURI resolves an absolute URI to its schema, consulting the shared
 // registry first and the per-run fallback registrations second.
-func (s *Session) LookupURI(uri string) (*jsonschema.Schema, bool) {
+func (s *Session) LookupURI(uri uriref.DocKey) (*jsonschema.Schema, bool) {
 	if sc, ok := s.reg.URI[uri]; ok {
 		return sc, true
 	}
@@ -195,7 +195,7 @@ func (s *Session) LookupURI(uri string) (*jsonschema.Schema, bool) {
 
 // LookupAnchor resolves a baseURI#anchor key, consulting the shared registry
 // first and the per-run fallback registrations second.
-func (s *Session) LookupAnchor(key string) (*jsonschema.Schema, bool) {
+func (s *Session) LookupAnchor(key uriref.AnchorKey) (*jsonschema.Schema, bool) {
 	if sc, ok := s.reg.anchor[key]; ok {
 		return sc, true
 	}
@@ -212,16 +212,16 @@ func (s *Session) LookupAnchor(key string) (*jsonschema.Schema, bool) {
 // resolution and the inliner's call it, so an anchor resolves identically on
 // both paths.
 func (s *Session) LookupAnchorWithFallback(
-	baseURI string,
+	baseURI uriref.DocKey,
 	docRoot *jsonschema.Schema,
 	fragment string,
 ) (*jsonschema.Schema, bool) {
-	if target, ok := s.LookupAnchor(uriref.AnchorKey(baseURI, fragment)); ok {
+	if target, ok := s.LookupAnchor(baseURI.Anchor(fragment)); ok {
 		return target, true
 	}
 
-	if canonBase := s.SchemaBase(docRoot); canonBase != "" && canonBase != baseURI {
-		if target, ok := s.LookupAnchor(uriref.AnchorKey(canonBase, fragment)); ok {
+	if canonBase := s.SchemaBase(docRoot); !canonBase.IsZero() && canonBase != baseURI {
+		if target, ok := s.LookupAnchor(canonBase.Anchor(fragment)); ok {
 			return target, true
 		}
 	}
@@ -234,7 +234,7 @@ func (s *Session) LookupAnchorWithFallback(
 // lookups it does not consult the per-run JSON-pointer fallback: a $dynamicAnchor
 // a fallback materialized for an unrelated ref is outside any $dynamicRef's
 // dynamic scope and must not be selectable as its target.
-func (s *Session) LookupDynamicAnchor(key string) (*jsonschema.Schema, bool) {
+func (s *Session) LookupDynamicAnchor(key uriref.AnchorKey) (*jsonschema.Schema, bool) {
 	sc, ok := s.reg.dynamicAnchor[key]
 
 	return sc, ok
@@ -252,7 +252,23 @@ func (s *Session) LookupDynamicAnchor(key string) (*jsonschema.Schema, bool) {
 // construction ([Registry.NewSession]), and every production session passes
 // a vet. The compile-time session, the validator's per-run sessions, and the
 // inliner's session all vet each target where they materialize it.
-type FallbackVet func(sc *jsonschema.Schema, base, locator string) (schemavet.Node, error)
+type FallbackVet func(sc *jsonschema.Schema, base uriref.DocKey, locator string) (schemavet.Node, error)
+
+// rebaseJSON is the id-tracking callback the JSON-form pointer walk applies to
+// each crossed schema object, or nil under a retrieval-base run where every
+// $id is inert. It reads a crossed object's own $id against the running base
+// through [schemavet.ScopeOfJSON], the same reading the frozen tables give a
+// typed node, so the located target carries the base its own references
+// absolutize against.
+func (s *Session) rebaseJSON() func(map[string]any, uriref.DocKey) uriref.DocKey {
+	if s.reg.inertIDs {
+		return nil
+	}
+
+	return func(obj map[string]any, base uriref.DocKey) uriref.DocKey {
+		return schemavet.ScopeOfJSON(obj, base, schemavet.Profile{})
+	}
+}
 
 // ResolveJSONPointer resolves a JSON Pointer fragment against a resource
 // root: the root document, an embedded $id resource, or a fallback target.
@@ -272,18 +288,12 @@ func (s *Session) ResolveJSONPointer(
 		return nil, nil //nolint:nilnil // An unlocatable pointer is a plain miss, not an error.
 	}
 
-	// ID tracking during the JSON-form walk follows the same inertIDs policy
-	// as the frozen tables: under a retrieval-base run a crossed $id must not
-	// rebase the located schema, or its refs would absolutize against the $id
-	// instead of the document's retrieval base.
-	trackIDs := !s.reg.inertIDs
-
 	node, rest, base := s.typedPrefix(root, segments)
 	if len(rest) == 0 {
 		return node, nil
 	}
 
-	return s.resolveJSONPointerViaJSON(root, segments, node, rest, base, trackIDs)
+	return s.resolveJSONPointerViaJSON(root, segments, node, rest, base)
 }
 
 // typedPrefix follows segments from root through the frozen tree root belongs
@@ -293,7 +303,7 @@ func (s *Session) ResolveJSONPointer(
 // consumes nothing.
 func (s *Session) typedPrefix(
 	root *jsonschema.Schema, segments []string,
-) (*jsonschema.Schema, []string, string) {
+) (*jsonschema.Schema, []string, uriref.DocKey) {
 	f, rootID, ok := s.locate(root)
 	if !ok {
 		return root, segments, s.SchemaBase(root)
@@ -345,7 +355,7 @@ func (s *Session) locate(sc *jsonschema.Schema) (*schemavet.Frozen, int, bool) {
 // instead of retaking the typed steps.
 func (s *Session) resolveJSONPointerViaJSON(
 	root *jsonschema.Schema, segments []string,
-	node *jsonschema.Schema, rest []string, prefixBase string, trackIDs bool,
+	node *jsonschema.Schema, rest []string, prefixBase uriref.DocKey,
 ) (*jsonschema.Schema, error) {
 	if s.jsonPointerCache == nil {
 		s.jsonPointerCache = map[jsonPointerKey]fallbackResult{}
@@ -357,10 +367,10 @@ func (s *Session) resolveJSONPointerViaJSON(
 	}
 
 	target, base := jsonptr.SchemaAtJSONForm(
-		node, rest, prefixBase, trackIDs, s.reg.deps.Materialize,
+		node, rest, prefixBase, s.rebaseJSON(), s.reg.deps.Materialize,
 	)
 
-	locator := s.SchemaBase(root) + "#" + displayPointer(segments)
+	locator := s.SchemaBase(root).At(displayPointer(segments)).String()
 
 	var vetErr error
 
@@ -389,7 +399,7 @@ func (s *Session) resolveJSONPointerViaJSON(
 
 // vetFallback runs the session's [FallbackVet] over a materialized target, or
 // freezes the target under an empty profile where a test installed none.
-func (s *Session) vetFallback(target *jsonschema.Schema, base, locator string) (schemavet.Node, error) {
+func (s *Session) vetFallback(target *jsonschema.Schema, base uriref.DocKey, locator string) (schemavet.Node, error) {
 	if s.fallbackVet != nil {
 		return s.fallbackVet(target, base, locator)
 	}
@@ -477,18 +487,19 @@ func (s *Session) RegisterFetched(doc schemavet.Doc) error {
 func (s *Session) CheckFetched(f *schemavet.Frozen) error {
 	claimant := documentName(f.Base())
 
-	for _, space := range []struct {
-		claimed, held map[string]*jsonschema.Schema
-		kind          string
-	}{
-		{claims(f, f.Base()), s.reg.URI, "URI"},
-		{f.Anchors(), s.reg.anchor, "anchor"},
-		{f.DynamicAnchors(), s.reg.dynamicAnchor, "dynamic anchor"},
-	} {
-		err := s.reg.collision(space.claimed, space.held, space.kind, claimant)
-		if err != nil {
-			return err
-		}
+	err := collision(s.reg, claims(f, f.Base()), s.reg.URI, "URI", claimant)
+	if err != nil {
+		return err
+	}
+
+	err = collision(s.reg, f.Anchors(), s.reg.anchor, "anchor", claimant)
+	if err != nil {
+		return err
+	}
+
+	err = collision(s.reg, f.DynamicAnchors(), s.reg.dynamicAnchor, "dynamic anchor", claimant)
+	if err != nil {
+		return err
 	}
 
 	return nil
@@ -499,7 +510,7 @@ func (s *Session) CheckFetched(f *schemavet.Frozen) error {
 // f, registering nothing, so the inliner settles the collision ahead of the
 // structural vet as the fetch closures do.
 func (s *Session) CheckFallbackDocument(f *schemavet.Frozen, claimant string) error {
-	return s.reg.collision(f.URIs(), s.reg.URI, "URI", claimant)
+	return collision(s.reg, f.URIs(), s.reg.URI, "URI", claimant)
 }
 
 // RegisterFallbackDocument registers a caller-supplied substitute, which enters
@@ -560,9 +571,9 @@ func (s *Session) RegisterFallback(node schemavet.Node) {
 // matching the frozen tables' own precedence rather than a map-iteration race.
 func (s *Session) mergeFallback(f *schemavet.Frozen) {
 	if s.fallbackBaseURIs == nil {
-		s.fallbackURI = map[string]*jsonschema.Schema{}
-		s.fallbackAnchor = map[string]*jsonschema.Schema{}
-		s.fallbackBaseURIs = map[*jsonschema.Schema]string{}
+		s.fallbackURI = map[uriref.DocKey]*jsonschema.Schema{}
+		s.fallbackAnchor = map[uriref.AnchorKey]*jsonschema.Schema{}
+		s.fallbackBaseURIs = map[*jsonschema.Schema]uriref.DocKey{}
 		s.fallbackNodes = map[*jsonschema.Schema]*schemavet.Frozen{}
 	}
 

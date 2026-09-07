@@ -1657,6 +1657,18 @@
 // resolves in-memory. The same [WithBaseURI] value serves [Inline] (see
 // Inlining below), so one option configures both.
 //
+// A resolver receives the canonical form of the URI it is asked for, the RFC
+// 3986 section 6.2.2 syntax-based normalization of the reference resolved
+// against its base: the scheme and host lower-cased, every percent-encoding
+// hex digit upper-cased, an unreserved octet decoded rather than escaped, and
+// the path free of dot segments. A schemeless base is a file path resolved
+// against file:///, so "main.json" is served as "file:///main.json". Two
+// distinctions the normalization keeps: "%2F" stays encoded, since only
+// unreserved octets decode, and "http://x" and "http://x/" stay separate,
+// since RFC 3986 leaves an empty path and "/" scheme-specific. So every
+// spelling that names one document folds to one key, and the resolver is
+// called once for it however many references reach it.
+//
 // The resolver receives a context with every resolution call: the [Compile]
 // context for refs resolved while compiling, and the [Validator.Validate] (or
 // other validation entry point) context for refs reached during that

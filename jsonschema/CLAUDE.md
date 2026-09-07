@@ -93,7 +93,8 @@ is the only one that imports the parent package.
 - `numkind`, `numrat`, `typename`: kind, decimal, and type-name primitives.
 - `reflectkind`: method-set predicates over `reflect.Type`.
 - `refresolve`: `$ref` resolution both engines share; every document it holds
-  is a `schemavet.Doc`.
+  is a `schemavet.Doc`, and every table keys on a `uriref.DocKey` or
+  `uriref.AnchorKey`.
 - `schemaclone`, `schemafield`, `schemashape`: the field table and the copy,
   traversal, and shape predicates derived from it.
 - `schemavet`: `Freeze` copies a document into a private tree and builds its
@@ -104,6 +105,12 @@ is the only one that imports the parent package.
   extraction and cross-package name collision tests; real source packages so
   `go/packages` can load their doc comments.
 - `regexcache`, `uriref`, `vocab`: pattern cache, RFC 3986, vocabulary gating.
+  A `uriref.DocKey` is the canonical, fragment-free identity of one document,
+  minted only by `uriref.Resolve` and `uriref.ParseBase`; `Location` and
+  `AnchorKey` are the only producers of the `#` joining a document to a
+  fragment. `schemavet.identifiers` is the one reading of a node's identifier
+  keywords the freeze, the identifier checks, and the JSON-form pointer walk
+  share.
 - `uriabnf`: the RFC 3986 and 3987 grammars by descent, an oracle for
   `format` that shares nothing with net/url.
 
@@ -159,6 +166,9 @@ is the only one that imports the parent package.
 - `FuzzRefEnginesAgree`, `TestSuiteInlineAgrees`,
   `TestRefEnginesAgreeOnPastFixes`: `Compile`, `Inline`, and the substitute
   path reach one verdict per reference graph.
+- `TestCompileOneKeyPerDocument`, `TestRefEnginesFetchOnceWithoutBase`: a
+  document named by several canonically-equal spellings is fetched once,
+  under one `uriref.DocKey`.
 - `FuzzValidatorTaggedShapes`, `FuzzValidatorRequiredNullableShapes`
   (`interpreters/validate/differentialtest`): the validate tag agrees with
   go-playground where the marshaled object lets it.

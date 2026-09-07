@@ -11,6 +11,7 @@ import (
 
 	"go.jacobcolvin.com/x/jsonschema/internal/refresolve"
 	"go.jacobcolvin.com/x/jsonschema/internal/schemavet"
+	"go.jacobcolvin.com/x/jsonschema/internal/uriref"
 )
 
 // errVetRefused is the sentinel the rejecting vet below answers with, standing
@@ -87,13 +88,15 @@ func TestResolveRefMarksVetRejectedTargets(t *testing.T) {
 			reg := refresolve.NewRegistry(pointerTargetDeps(), false)
 			reg.Build(doc)
 
-			sess := reg.NewSession(func(sc *jsonschema.Schema, base, locator string) (schemavet.Node, error) {
+			vet := func(sc *jsonschema.Schema, base uriref.DocKey, locator string) (schemavet.Node, error) {
 				if tc.reject {
 					return schemavet.Node{}, errVetRefused
 				}
 
 				return schemavet.FreezeNode(sc, locator, base, schemavet.Profile{})
-			})
+			}
+
+			sess := reg.NewSession(vet)
 
 			res := sess.ResolveRef(doc.Root(), tc.ref, nil)
 
@@ -127,7 +130,7 @@ func TestFallbackTargetsExcludeRejected(t *testing.T) {
 	reg := refresolve.NewRegistry(pointerTargetDeps(), false)
 	reg.Build(doc)
 
-	sess := reg.NewSession(func(_ *jsonschema.Schema, _, _ string) (schemavet.Node, error) {
+	sess := reg.NewSession(func(_ *jsonschema.Schema, _ uriref.DocKey, _ string) (schemavet.Node, error) {
 		return schemavet.Node{}, errVetRefused
 	})
 
@@ -156,7 +159,7 @@ func TestFallbackNodeAnswersBelowTheRoot(t *testing.T) {
 	reg := refresolve.NewRegistry(pointerTargetDeps(), false)
 	reg.Build(doc)
 
-	sess := reg.NewSession(func(sc *jsonschema.Schema, base, locator string) (schemavet.Node, error) {
+	sess := reg.NewSession(func(sc *jsonschema.Schema, base uriref.DocKey, locator string) (schemavet.Node, error) {
 		return schemavet.FreezeNode(sc, locator, base, schemavet.Profile{})
 	})
 

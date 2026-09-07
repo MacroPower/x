@@ -7,9 +7,29 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"go.jacobcolvin.com/x/jsonschema/internal/schemavet"
+	"go.jacobcolvin.com/x/jsonschema/internal/uriref"
 )
 
 const rootURI = "https://example.test/root.json"
+
+// bk mints the DocKey a base string names, the way the parent package's
+// ParseBase does before it hands a base to Freeze.
+func bk(t *testing.T, s string) uriref.DocKey {
+	t.Helper()
+
+	k, err := uriref.ParseBase(s)
+	require.NoError(t, err)
+
+	return k
+}
+
+// ak builds the anchor key a name registers under a base, the key the freeze
+// walk stores through DocKey.Anchor.
+func ak(t *testing.T, uri, name string) uriref.AnchorKey {
+	t.Helper()
+
+	return bk(t, uri).Anchor(name)
+}
 
 // TestFreezeDuplicatesAliasedNodes pins the tree property: a node the source
 // reaches through two paths becomes two nodes, each with its own id and
@@ -20,7 +40,7 @@ func TestFreezeDuplicatesAliasedNodes(t *testing.T) {
 	shared := &schemavet.Schema{Type: "string"}
 	src := &schemavet.Schema{Properties: map[string]*schemavet.Schema{"a": shared, "b": shared}}
 
-	f, err := schemavet.Freeze(src, "the root document", rootURI, schemavet.Profile{})
+	f, err := schemavet.Freeze(src, "the root document", bk(t, rootURI), schemavet.Profile{})
 	require.NoError(t, err)
 
 	a, ok := f.At("/properties/a")
@@ -92,7 +112,7 @@ func TestFreezeRefusesCycles(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			_, err := schemavet.Freeze(tc.build(), "the root document", rootURI, schemavet.Profile{})
+			_, err := schemavet.Freeze(tc.build(), "the root document", bk(t, rootURI), schemavet.Profile{})
 			require.ErrorIs(t, err, schemavet.ErrSchemaCycle)
 			assert.Contains(t, err.Error(), tc.want)
 		})
@@ -140,7 +160,7 @@ func TestFreezeRefusesAliasedIdentifiers(t *testing.T) {
 				}}
 			}
 
-			f, err := schemavet.Freeze(src, "the root document", rootURI, tc.profile)
+			f, err := schemavet.Freeze(src, "the root document", bk(t, rootURI), tc.profile)
 			if tc.err {
 				require.ErrorIs(t, err, schemavet.ErrIDCollision)
 				assert.Contains(t, err.Error(), `"/properties/a" and "/properties/b"`)
@@ -153,7 +173,7 @@ func TestFreezeRefusesAliasedIdentifiers(t *testing.T) {
 			if tc.shared == nil {
 				first, ok := f.At("/properties/a")
 				require.True(t, ok)
-				assert.Same(t, first, f.Anchors()[rootURI+"#dup"], "a repeated key keeps the first node")
+				assert.Same(t, first, f.Anchors()[ak(t, rootURI, "dup")], "a repeated key keeps the first node")
 			}
 		})
 	}
@@ -182,7 +202,7 @@ func TestFreezeRefusesAliasedIdentifiersInWalkOrder(t *testing.T) {
 		`at "/properties/a" and "/properties/b"`
 
 	for range 50 {
-		_, err := schemavet.Freeze(src, "the root document", rootURI, schemavet.Profile{})
+		_, err := schemavet.Freeze(src, "the root document", bk(t, rootURI), schemavet.Profile{})
 		require.ErrorIs(t, err, schemavet.ErrIDCollision)
 		require.ErrorContains(t, err, want)
 	}
@@ -212,7 +232,9 @@ func TestFreezeTables(t *testing.T) {
 	t.Run("draft 2020-12", func(t *testing.T) {
 		t.Parallel()
 
-		f, err := schemavet.Freeze(src(), "the root document", rootURI, schemavet.Profile{RejectIDFragment: true})
+		f, err := schemavet.Freeze(
+			src(), "the root document", bk(t, rootURI), schemavet.Profile{RejectIDFragment: true},
+		)
 		require.NoError(t, err)
 
 		nested, ok := f.At("/$defs/nested")
@@ -224,27 +246,27 @@ func TestFreezeTables(t *testing.T) {
 		sibling, ok := f.At("/$defs/sibling")
 		require.True(t, ok)
 
-		assert.Same(t, nested, f.URIs()["https://example.test/nested.json"])
-		assert.Same(t, nested, f.Anchors()["https://example.test/nested.json#n"])
-		assert.Same(t, deep, f.Anchors()["https://example.test/nested.json#d"])
-		assert.Same(t, deep, f.DynamicAnchors()["https://example.test/nested.json#d"])
-		assert.NotContains(t, f.Anchors(), rootURI+"#frag", "2020-12 registers nothing for a fragment-only $id")
+		assert.Same(t, nested, f.URIs()[bk(t, "https://example.test/nested.json")])
+		assert.Same(t, nested, f.Anchors()[ak(t, "https://example.test/nested.json", "n")])
+		assert.Same(t, deep, f.Anchors()[ak(t, "https://example.test/nested.json", "d")])
+		assert.Same(t, deep, f.DynamicAnchors()[ak(t, "https://example.test/nested.json", "d")])
+		assert.NotContains(t, f.Anchors(), ak(t, rootURI, "frag"), "2020-12 registers nothing for a fragment-only $id")
 
 		rootID, _ := f.ID(f.Root())
 		deepID, _ := f.ID(deep)
 		siblingID, _ := f.ID(sibling)
 
-		assert.Equal(t, rootURI, f.NodeBase(rootID))
-		assert.Equal(t, "https://example.test/nested.json", f.NodeBase(deepID))
-		assert.Equal(t, "https://example.test/sibling.json", f.NodeBase(siblingID),
+		assert.Equal(t, rootURI, f.NodeBase(rootID).String())
+		assert.Equal(t, "https://example.test/nested.json", f.NodeBase(deepID).String())
+		assert.Equal(t, "https://example.test/sibling.json", f.NodeBase(siblingID).String(),
 			"2020-12 honors a $id beside $ref")
-		assert.Equal(t, rootURI, f.Base())
+		assert.Equal(t, rootURI, f.Base().String())
 	})
 
 	t.Run("draft-07", func(t *testing.T) {
 		t.Parallel()
 
-		f, err := schemavet.Freeze(src(), "the root document", rootURI, schemavet.Profile{Draft7: true})
+		f, err := schemavet.Freeze(src(), "the root document", bk(t, rootURI), schemavet.Profile{Draft7: true})
 		require.NoError(t, err)
 
 		frag, ok := f.At("/$defs/frag")
@@ -253,13 +275,13 @@ func TestFreezeTables(t *testing.T) {
 		sibling, ok := f.At("/$defs/sibling")
 		require.True(t, ok)
 
-		assert.Same(t, frag, f.Anchors()[rootURI+"#frag"], "draft-07 reads a fragment-only $id as an anchor")
-		assert.NotContains(t, f.Anchors(), "https://example.test/nested.json#n", "draft-07 has no $anchor")
+		assert.Same(t, frag, f.Anchors()[ak(t, rootURI, "frag")], "draft-07 reads a fragment-only $id as an anchor")
+		assert.NotContains(t, f.Anchors(), ak(t, "https://example.test/nested.json", "n"), "draft-07 has no $anchor")
 		assert.Empty(t, f.DynamicAnchors())
 
 		siblingID, _ := f.ID(sibling)
-		assert.Equal(t, rootURI, f.NodeBase(siblingID), "draft-07 ignores a $id beside $ref")
-		assert.NotContains(t, f.URIs(), "https://example.test/sibling.json",
+		assert.Equal(t, rootURI, f.NodeBase(siblingID).String(), "draft-07 ignores a $id beside $ref")
+		assert.NotContains(t, f.URIs(), bk(t, "https://example.test/sibling.json"),
 			"draft-07 registers no target for a $id beside $ref")
 	})
 
@@ -271,26 +293,26 @@ func TestFreezeTables(t *testing.T) {
 			"b": {Type: "string"},
 		}}
 
-		f, err := schemavet.Freeze(src, "the root document", rootURI, schemavet.Profile{Draft7: true})
+		f, err := schemavet.Freeze(src, "the root document", bk(t, rootURI), schemavet.Profile{Draft7: true})
 		require.NoError(t, err)
-		assert.NotContains(t, f.Anchors(), rootURI+"#foo",
+		assert.NotContains(t, f.Anchors(), ak(t, rootURI, "foo"),
 			"draft-07 registers no anchor for a fragment-only $id beside $ref")
 	})
 
 	t.Run("inert ids", func(t *testing.T) {
 		t.Parallel()
 
-		f, err := schemavet.Freeze(src(), "the root document", rootURI, schemavet.Profile{InertIDs: true})
+		f, err := schemavet.Freeze(src(), "the root document", bk(t, rootURI), schemavet.Profile{InertIDs: true})
 		require.NoError(t, err)
 
 		deep, ok := f.At("/$defs/nested/properties/deep")
 		require.True(t, ok)
 
 		assert.Empty(t, f.URIs())
-		assert.Same(t, deep, f.Anchors()[rootURI+"#d"], "anchors hang off the retrieval base")
+		assert.Same(t, deep, f.Anchors()[ak(t, rootURI, "d")], "anchors hang off the retrieval base")
 
 		deepID, _ := f.ID(deep)
-		assert.Equal(t, rootURI, f.NodeBase(deepID))
+		assert.Equal(t, rootURI, f.NodeBase(deepID).String())
 	})
 }
 
@@ -309,7 +331,7 @@ func TestFreezeAtFollowsSubschemaEdgesOnly(t *testing.T) {
 		Extra: map[string]any{"x-custom": map[string]any{"type": "string"}},
 	}
 
-	f, err := schemavet.Freeze(src, "the root document", "", schemavet.Profile{})
+	f, err := schemavet.Freeze(src, "the root document", bk(t, ""), schemavet.Profile{})
 	require.NoError(t, err)
 
 	_, ok := f.At("/items")
@@ -333,7 +355,7 @@ func TestFrozenVetMintsCurrency(t *testing.T) {
 	withFragment := &schemavet.Schema{ID: "#frag", Type: "string"}
 	profile := schemavet.Profile{RejectIDFragment: true}
 
-	f, err := schemavet.Freeze(withFragment, "the root document", rootURI, profile)
+	f, err := schemavet.Freeze(withFragment, "the root document", bk(t, rootURI), profile)
 	require.NoError(t, err)
 
 	doc, err := f.Vet("")
@@ -345,7 +367,7 @@ func TestFrozenVetMintsCurrency(t *testing.T) {
 	assert.Same(t, f.Root(), node.Root())
 	assert.Same(t, f, node.Frozen())
 
-	valid, err := schemavet.Freeze(&schemavet.Schema{Type: "string"}, "the root document", rootURI, profile)
+	valid, err := schemavet.Freeze(&schemavet.Schema{Type: "string"}, "the root document", bk(t, rootURI), profile)
 	require.NoError(t, err)
 
 	doc, err = valid.Vet("")
@@ -353,7 +375,9 @@ func TestFrozenVetMintsCurrency(t *testing.T) {
 	assert.Same(t, valid.Root(), doc.Root())
 	assert.Same(t, valid, doc.Frozen())
 
-	invalid, err := schemavet.Freeze(&schemavet.Schema{Type: "no-such-type"}, "the root document", rootURI, profile)
+	invalid, err := schemavet.Freeze(
+		&schemavet.Schema{Type: "no-such-type"}, "the root document", bk(t, rootURI), profile,
+	)
 	require.NoError(t, err, "freezing runs no vetting check")
 
 	_, err = invalid.Vet("https://example.test/a.json#")
@@ -369,14 +393,14 @@ func TestFreezeNode(t *testing.T) {
 
 	node, err := schemavet.FreezeNode(
 		&schemavet.Schema{Anchor: "a", Type: "string"},
-		rootURI+"#/x-custom/sub", "https://example.test/res.json", schemavet.Profile{},
+		rootURI+"#/x-custom/sub", bk(t, "https://example.test/res.json"), schemavet.Profile{},
 	)
 	require.NoError(t, err)
-	assert.Contains(t, node.Frozen().Anchors(), "https://example.test/res.json#a")
+	assert.Contains(t, node.Frozen().Anchors(), ak(t, "https://example.test/res.json", "a"))
 
 	_, err = schemavet.FreezeNode(
 		&schemavet.Schema{Type: "no-such-type"},
-		rootURI+"#/x-custom/sub", "", schemavet.Profile{},
+		rootURI+"#/x-custom/sub", bk(t, ""), schemavet.Profile{},
 	)
 	require.ErrorIs(t, err, schemavet.ErrInvalidType)
 	assert.Contains(t, err.Error(), rootURI+"#/x-custom/sub/type")
@@ -389,7 +413,7 @@ func TestNodeNarrow(t *testing.T) {
 
 	node, err := schemavet.FreezeNode(
 		&schemavet.Schema{Properties: map[string]*schemavet.Schema{"p": {Type: "string"}}},
-		rootURI+"#/x-custom/sub", rootURI, schemavet.Profile{},
+		rootURI+"#/x-custom/sub", bk(t, rootURI), schemavet.Profile{},
 	)
 	require.NoError(t, err)
 
