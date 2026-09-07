@@ -132,6 +132,11 @@ is the only one that imports the parent package.
   `testdata/tags/cases.json` covers every shape and both dialects agree.
 - `TestHookPointersArePrivateCopies` (ir_test.go): a hook write through
   `Parent` or `Base` never reaches the output.
+- `TestFieldContextZeroValueSurvives` (interfaces_test.go),
+  `TestConstraintsFacadeNilCanvasWrites`, `TestConstraintsFacadeInvalidRule`
+  (constraints_test.go): every method on the zero context and facade returns,
+  a write needs a canvas, and a rule outside the model's table is refused;
+  the case counts track the method sets.
 - `TestRigExclusionsMatchTheDraw` (differentialtest): every excluded case is
   a recorded reason the draw pools honor.
 

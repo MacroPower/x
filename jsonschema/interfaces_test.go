@@ -304,6 +304,98 @@ func TestFieldContextElementContextsCyclicPointer(t *testing.T) {
 	require.Empty(t, elems)
 }
 
+// TestFieldContextZeroValueSurvives pins the read half of the facade
+// boundary: every exported method on the zero FieldContext, and every method
+// on the zero Constraints, returns rather than panicking, answering as a
+// field with nothing set, no elements, and an opaque shape. The case counts
+// are checked against the method sets, so a method added later takes a row
+// before it ships.
+func TestFieldContextZeroValueSurvives(t *testing.T) {
+	t.Parallel()
+
+	var fc jsonschema.FieldContext
+
+	fields := map[string]func(t *testing.T){
+		"ElementContexts": func(t *testing.T) { t.Helper(); assert.Nil(t, fc.ElementContexts()) },
+		"Constraints":     func(t *testing.T) { t.Helper(); assert.NotNil(t, fc.Constraints()) },
+		"ConstraintsFor": func(t *testing.T) {
+			t.Helper()
+			assert.NotNil(t, fc.ConstraintsFor(jsonschema.ShapeOf(nil, nil)))
+		},
+		"Shape":            func(t *testing.T) { t.Helper(); assert.Equal(t, jsonschema.FormOpaque, fc.Shape().Form) },
+		"EffectiveFormat":  func(t *testing.T) { t.Helper(); assert.Empty(t, fc.EffectiveFormat()) },
+		"EffectivePattern": func(t *testing.T) { t.Helper(); assert.Empty(t, fc.EffectivePattern()) },
+		"EffectiveContentEncoding": func(t *testing.T) {
+			t.Helper()
+			assert.Empty(t, fc.EffectiveContentEncoding())
+		},
+		"EffectiveContentMediaType": func(t *testing.T) {
+			t.Helper()
+			assert.Empty(t, fc.EffectiveContentMediaType())
+		},
+	}
+
+	var zero jsonschema.Constraints
+
+	facade := map[string]func(t *testing.T){
+		"Apply": func(t *testing.T) {
+			t.Helper()
+			require.ErrorIs(t, zero.Apply(jsonschema.OpFloorIncl, jsonschema.AxisAuto, "1"), jsonschema.ErrNilCanvas)
+		},
+		"SetMultipleOf": func(t *testing.T) { t.Helper(); require.ErrorIs(t, zero.SetMultipleOf(2), jsonschema.ErrNilCanvas) },
+		"SetConst":      func(t *testing.T) { t.Helper(); require.ErrorIs(t, zero.SetConst("x"), jsonschema.ErrNilCanvas) },
+		"SetEnum": func(t *testing.T) {
+			t.Helper()
+			require.ErrorIs(t, zero.SetEnum([]any{"x"}), jsonschema.ErrNilCanvas)
+		},
+		"Forbid": func(t *testing.T) { t.Helper(); require.ErrorIs(t, zero.Forbid("x"), jsonschema.ErrNilCanvas) },
+		"ForbidSchema": func(t *testing.T) {
+			t.Helper()
+			require.ErrorIs(t, zero.ForbidSchema(&jsonschema.Schema{}), jsonschema.ErrNilCanvas)
+		},
+		"Const": func(t *testing.T) {
+			t.Helper()
+
+			_, ok := zero.Const()
+			assert.False(t, ok)
+		},
+		"Enum": func(t *testing.T) {
+			t.Helper()
+
+			_, ok := zero.Enum()
+			assert.False(t, ok)
+		},
+	}
+
+	assert.Len(t, fields, reflect.TypeFor[jsonschema.FieldContext]().NumMethod(),
+		"every exported FieldContext method takes a row here")
+	assert.Len(t, facade, reflect.TypeFor[*jsonschema.Constraints]().NumMethod(),
+		"every Constraints method takes a row here")
+
+	for name, check := range fields {
+		t.Run("FieldContext."+name, func(t *testing.T) {
+			t.Parallel()
+			check(t)
+		})
+	}
+
+	for name, check := range facade {
+		t.Run("Constraints."+name, func(t *testing.T) {
+			t.Parallel()
+			check(t)
+		})
+	}
+
+	// The nil-Type shape is the same answer ShapeOf gives, so an interpreter
+	// dispatching on either sees one opaque value.
+	assert.Equal(t, jsonschema.FormOpaque, jsonschema.ShapeOf(nil, nil).Form)
+	require.ErrorIs(t,
+		jsonschema.FieldContext{Canvas: &jsonschema.Schema{}}.Constraints().
+			Apply(jsonschema.OpFloorIncl, jsonschema.AxisAuto, "1"),
+		jsonschema.ErrConstraintUnsupported,
+		"a rule on the opaque value is the shape refusal, not a panic")
+}
+
 // TestFieldContextEffectiveAccessorsNilCanvas pins that the Effective accessors
 // tolerate a caller-built FieldContext with a nil Canvas the same way they
 // tolerate a nil Base: the nil side reads as unauthored, so a hand-built

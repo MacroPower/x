@@ -46,7 +46,7 @@ func TestConstraintsFacadeValueSet(t *testing.T) {
 			require.True(t, ok)
 			assert.Equal(t, "x", got)
 
-			c.Forbid("y")
+			require.NoError(t, c.Forbid("y"))
 
 			return nil
 		},
@@ -586,9 +586,7 @@ func TestConstraintsForbidComposesTypeNot(t *testing.T) {
 		}
 
 		interp := boundInterp(func(c *jsonschema.Constraints) error {
-			c.Forbid("x")
-
-			return nil
+			return c.Forbid("x")
 		})
 
 		s, err := jsonschema.GenerateFor[doc](t.Context(),
@@ -629,9 +627,7 @@ func TestConstraintsForbidComposesTypeNot(t *testing.T) {
 
 		three := 3
 		interp := boundInterp(func(c *jsonschema.Constraints) error {
-			c.ForbidSchema(&jsonschema.Schema{MinLength: &three})
-
-			return nil
+			return c.ForbidSchema(&jsonschema.Schema{MinLength: &three})
 		})
 
 		s, err := jsonschema.GenerateFor[doc](t.Context(),
@@ -647,88 +643,98 @@ func TestConstraintsForbidComposesTypeNot(t *testing.T) {
 	})
 }
 
-// TestConstraintsFacadeArity pins that Apply validates parameter counts
-// instead of silently misreading them: a missing single value would pin the
-// empty string, an extra one would be dropped, and an empty enumeration would
-// forbid every instance.
-func TestConstraintsFacadeArity(t *testing.T) {
+// TestConstraintsFacadeNilCanvasWrites pins the facade's write boundary:
+// every write on a facade with no canvas, the zero Constraints or one a
+// caller-built context handed out without a Canvas, is ErrNilCanvas and
+// leaves nothing behind, while the reads answer as nothing set.
+func TestConstraintsFacadeNilCanvasWrites(t *testing.T) {
 	t.Parallel()
 
-	type Payload struct {
-		Name string `arity:"x" json:"name"`
+	three := 3
+	writes := map[string]func(c *jsonschema.Constraints) error{
+		"Apply": func(c *jsonschema.Constraints) error {
+			return c.Apply(jsonschema.OpFloorIncl, jsonschema.AxisAuto, "1")
+		},
+		"SetMultipleOf": func(c *jsonschema.Constraints) error { return c.SetMultipleOf(2) },
+		"SetConst":      func(c *jsonschema.Constraints) error { return c.SetConst("x") },
+		"SetEnum":       func(c *jsonschema.Constraints) error { return c.SetEnum([]any{"x"}) },
+		"Forbid":        func(c *jsonschema.Constraints) error { return c.Forbid("x") },
+		"ForbidSchema":  func(c *jsonschema.Constraints) error { return c.ForbidSchema(&jsonschema.Schema{MinLength: &three}) },
 	}
 
-	var noParam, extraParam, emptyEnum error
+	assert.Len(t, writes, reflect.TypeFor[*jsonschema.Constraints]().NumMethod()-2,
+		"every write on the facade takes a row here; only Const and Enum are reads")
 
-	interp := boundInterp(func(c *jsonschema.Constraints) error {
-		noParam = c.Apply(jsonschema.OpNotEqual, jsonschema.AxisAuto)
-		extraParam = c.Apply(jsonschema.OpEqual, jsonschema.AxisAuto, "a", "b")
-		emptyEnum = c.Apply(jsonschema.OpOneOf, jsonschema.AxisAuto)
-
-		return nil
-	})
-
-	s, err := jsonschema.GenerateFor[Payload](t.Context(),
-		jsonschema.WithTagInterpreter("arity", interp),
-	)
-	require.NoError(t, err)
-
-	require.Error(t, noParam, "a single-value operation with no parameter must not pin the empty string")
-	require.Error(t, extraParam, "an extra parameter must not be silently dropped")
-	require.Error(t, emptyEnum, "an empty enumeration must not be recorded")
-
-	field := s.Properties["name"]
-	assert.Nil(t, field.Const, "the misapplied rules must leave no trace")
-	assert.Nil(t, field.Enum)
-	assert.Nil(t, field.Not)
-}
-
-// TestConstraintsFacadeNilType pins that a caller-built context with no Type,
-// the documented unit-test path for an interpreter, classifies as an opaque
-// value, so a rule reports a shape error rather than dereferencing nothing.
-func TestConstraintsFacadeNilType(t *testing.T) {
-	t.Parallel()
-
-	fc := jsonschema.FieldContext{Canvas: &jsonschema.Schema{}}
-	assert.Equal(t, jsonschema.FormOpaque, fc.Shape().Form)
-	assert.Equal(t, jsonschema.FormOpaque, jsonschema.ShapeOf(nil, nil).Form)
-
-	err := fc.Constraints().Apply(jsonschema.OpFloorIncl, jsonschema.AxisAuto, "1")
-	require.ErrorContains(t, err, "opaque value")
-}
-
-// TestConstraintsFacadeReadsNilCanvas pins that the Const and Enum reads
-// tolerate a caller-built context with no Canvas, as the Effective accessors
-// do; only a write through the facade needs a canvas to land on.
-func TestConstraintsFacadeReadsNilCanvas(t *testing.T) {
-	t.Parallel()
-
-	c := jsonschema.FieldContext{Type: reflect.TypeFor[string]()}.Constraints()
-
-	value, ok := c.Const()
-	assert.Nil(t, value)
-	assert.False(t, ok)
-
-	members, ok := c.Enum()
-	assert.Nil(t, members)
-	assert.False(t, ok)
-}
-
-// TestConstraintsFacadeAxisRange pins that Apply range-checks the axis the
-// way it range-checks the operation, so a rule built with an axis outside the
-// table reports an error instead of indexing past it.
-func TestConstraintsFacadeAxisRange(t *testing.T) {
-	t.Parallel()
-
-	fc := jsonschema.FieldContext{
-		Type:   reflect.TypeFor[string](),
-		Canvas: &jsonschema.Schema{},
-		Base:   &jsonschema.Schema{Type: "string"},
+	facades := map[string]*jsonschema.Constraints{
+		"zero facade":       {},
+		"canvas-less field": jsonschema.FieldContext{Type: reflect.TypeFor[string]()}.Constraints(),
 	}
 
-	err := fc.Constraints().Apply(jsonschema.OpFloorIncl, jsonschema.Axis(9), "1")
-	require.Error(t, err)
-	assert.Nil(t, fc.Canvas.MinLength, "the misapplied rule must leave no trace")
+	for facadeName, c := range facades {
+		for writeName, write := range writes {
+			t.Run(facadeName+" "+writeName, func(t *testing.T) {
+				t.Parallel()
+
+				require.ErrorIs(t, write(c), jsonschema.ErrNilCanvas)
+			})
+		}
+
+		t.Run(facadeName+" reads", func(t *testing.T) {
+			t.Parallel()
+
+			value, ok := c.Const()
+			assert.Nil(t, value)
+			assert.False(t, ok)
+
+			members, ok := c.Enum()
+			assert.Nil(t, members)
+			assert.False(t, ok)
+		})
+	}
+}
+
+// TestConstraintsFacadeInvalidRule pins that a rule the model has no row for
+// is ErrInvalidRule and leaves no trace: an operation or axis outside the
+// table, a parameter count the operation does not take (a missing single
+// value would pin the empty string, an extra one would be dropped, an empty
+// enumeration would forbid every instance), a non-boolean uniqueness literal,
+// and a nil subschema to forbid.
+func TestConstraintsFacadeInvalidRule(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]func(c *jsonschema.Constraints) error{
+		"unset op": func(c *jsonschema.Constraints) error { return c.Apply(jsonschema.Op(0), jsonschema.AxisAuto, "1") },
+		"op past the table": func(c *jsonschema.Constraints) error {
+			return c.Apply(jsonschema.Op(200), jsonschema.AxisAuto, "1")
+		},
+		"axis past the table": func(c *jsonschema.Constraints) error {
+			return c.Apply(jsonschema.OpFloorIncl, jsonschema.Axis(9), "1")
+		},
+		"missing value": func(c *jsonschema.Constraints) error { return c.Apply(jsonschema.OpNotEqual, jsonschema.AxisAuto) },
+		"extra value": func(c *jsonschema.Constraints) error {
+			return c.Apply(jsonschema.OpEqual, jsonschema.AxisAuto, "a", "b")
+		},
+		"empty enumeration": func(c *jsonschema.Constraints) error { return c.Apply(jsonschema.OpOneOf, jsonschema.AxisAuto) },
+		"unique non-boolean": func(c *jsonschema.Constraints) error {
+			return c.Apply(jsonschema.OpUnique, jsonschema.AxisAuto, "yes")
+		},
+		"nil forbidden schema": func(c *jsonschema.Constraints) error { return c.ForbidSchema(nil) },
+	}
+
+	for name, apply := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			fc := jsonschema.FieldContext{
+				Type:   reflect.TypeFor[[]string](),
+				Canvas: &jsonschema.Schema{},
+				Base:   &jsonschema.Schema{Type: "array", Items: &jsonschema.Schema{Type: "string"}},
+			}
+
+			require.ErrorIs(t, apply(fc.Constraints()), jsonschema.ErrInvalidRule)
+			assert.Equal(t, &jsonschema.Schema{}, fc.Canvas, "the misapplied rule must leave no trace")
+		})
+	}
 }
 
 // TestConstraintsMultipleOfComposes pins that an inferred multipleOf never

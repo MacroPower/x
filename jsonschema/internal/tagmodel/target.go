@@ -7,7 +7,9 @@ import "github.com/google/jsonschema-go/jsonschema"
 // element are the same type here, which is what makes retargeting a
 // sequence-wide rule onto elements one implementation rather than two.
 type Target struct {
-	// Canvas is where authored facts land.
+	// Canvas is where authored facts land. Every applier writes to it, so a
+	// caller hands the model a non-nil canvas or refuses the write before
+	// reaching it.
 	Canvas *jsonschema.Schema
 	// Base is the type-derived schema, read-only: what the type itself already
 	// declares, consulted so a rule that would silently overwrite it conflicts

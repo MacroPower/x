@@ -3340,9 +3340,7 @@ func TestInterpreterNullForbidOnARecursiveStancedType(t *testing.T) {
 
 	interp := jsonschema.TagInterpreterFunc(
 		func(_ context.Context, field jsonschema.FieldContext, _ jsonschema.Tag) error {
-			field.Constraints().Forbid(nil)
-
-			return nil
+			return field.Constraints().Forbid(nil)
 		},
 	)
 

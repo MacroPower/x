@@ -490,10 +490,21 @@
 //     jsonschema tag's, or the type's) to their least common multiple, so
 //     a stated divisor is never replaced by a weaker inferred one and two
 //     inferred divisors compose in either order.
-//   - Shape errors. A rule the field's shape cannot carry is an error naming
-//     the reason rather than a keyword nothing enforces.
+//   - Shape errors. A rule the field's shape cannot carry is
+//     [ErrConstraintUnsupported], naming the reason, rather than a keyword
+//     nothing enforces.
 //   - Conflicts. A conflicting const or enum surfaces the public
 //     [ErrConstraintConflict] sentinel.
+//
+// The facade is the boundary a hook's inputs are checked at, so a hook that
+// builds its own [FieldContext] (a unit test driving an interpreter directly)
+// populates only what it uses. A write needs [FieldContext.Canvas] and is
+// [ErrNilCanvas] without one; a rule the model has no row for, such as an
+// operation outside the table or a parameter count it does not take, is
+// [ErrInvalidRule]. Everything else is optional for a read: a nil Canvas or
+// Base reads as nothing set, a nil Type classifies as [FormOpaque], and a
+// context with no backing node has no elements. No exported method on the
+// zero [FieldContext] or the zero [Constraints] panics.
 //
 // An interpreter that branches on what the field is classifies it once with
 // [FieldContext.Shape], or with [ShapeOf] when no context is available,

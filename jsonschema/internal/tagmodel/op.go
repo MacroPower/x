@@ -246,6 +246,26 @@ type Rule struct {
 	Axis   Axis
 }
 
+// Validate reports whether the rule can index the model at all: an operation
+// and an axis inside their tables, and parameters that suit the operation
+// (one value for every operation that pins one, at least one member for an
+// enumeration, a boolean literal for the uniqueness flag). It is the whole
+// check a caller constructing a Rule directly owes the model, and [Apply]
+// runs it again, so no applier reads a parameter count it would misread: a
+// missing single value would pin the empty string, an extra one would be
+// dropped, and an empty enumeration would forbid every instance.
+func (r Rule) Validate() error {
+	if r.Op == OpUnset || r.Op >= opCount {
+		return fmt.Errorf("tagmodel: %s", r.Op)
+	}
+
+	if r.Axis >= axisCount {
+		return fmt.Errorf("tagmodel: %s", r.Axis)
+	}
+
+	return checkParams(r.Op, r.Params)
+}
+
 // Bind resolves a key-table row against the target's shape and its raw tag
 // value, producing the [Rule] that [Apply] executes. It resolves the sized-shape
 // operation swap, enforces the row's declared arity, and checks that the

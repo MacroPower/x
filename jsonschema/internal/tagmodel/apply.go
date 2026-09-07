@@ -15,26 +15,15 @@ import (
 )
 
 // Apply executes one rule against one target. It is the single entry point:
-// resolve the bound axis if the operation needs one, look up the (Op, Form)
-// cell, and run it. No path reaches an applier without a Form, so no applier
-// asks what shape it is looking at.
+// validate the rule, resolve the bound axis if the operation needs one, look
+// up the (Op, Form) cell, and run it. No path reaches an applier without a
+// Form, so no applier asks what shape it is looking at. The target's Canvas
+// must be non-nil: every applier writes to it, and the caller that built the
+// target refuses the write before reaching here ([Target] documents it).
 func Apply(t Target, r Rule, pol Policy) error {
-	if r.Op == OpUnset || r.Op >= opCount {
-		return fmt.Errorf("tagmodel: %s", r.Op)
-	}
-
-	// The axis is range-checked for the same reason as the operation: a
-	// caller constructing a Rule directly indexes the axis table with it.
-	if r.Axis >= axisCount {
-		return fmt.Errorf("tagmodel: %s", r.Axis)
-	}
-
-	// Arity is checked here as well as in Bind, so a caller constructing a
-	// Rule directly (the interpreter facade) cannot hand an applier a
-	// parameter count it would silently misread: a missing single value would
-	// pin the empty string, an extra one would be dropped, and an empty
-	// enumeration would forbid every instance.
-	err := checkParams(r.Op, r.Params)
+	// Validated here as well as by the callers that build a Rule, so no path
+	// reaches an applier with a rule it would misread.
+	err := r.Validate()
 	if err != nil {
 		return err
 	}

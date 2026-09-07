@@ -1,6 +1,8 @@
 package jsonschema
 
 import (
+	"errors"
+	"fmt"
 	"reflect"
 
 	"go.jacobcolvin.com/x/jsonschema/internal/constraint"
@@ -8,6 +10,25 @@ import (
 )
 
 var (
+	// ErrNilCanvas reports a write through [Constraints] on a context with no
+	// [FieldContext.Canvas] to land on: the zero [Constraints], or a facade a
+	// caller-built context handed out before populating its canvas. A context
+	// the generator builds always carries one.
+	ErrNilCanvas = errors.New("constraints: no canvas to write to")
+
+	// ErrInvalidRule reports a rule [Constraints.Apply] cannot hand to the
+	// model at all: an [Op] or [Axis] outside the table, a parameter count the
+	// operation does not take, or a uniqueness literal that is not a boolean.
+	// It wraps the model's own reason. A rule the field's shape cannot carry
+	// is a different refusal, [ErrConstraintUnsupported].
+	ErrInvalidRule = errors.New("constraints: invalid rule")
+
+	// ErrConstraintUnsupported reports a rule the field's shape cannot carry:
+	// a length on a number, a divisor on a string, any rule on an opaque
+	// value such as a nil Type or an unresolved reference. The error names
+	// the reason after the sentinel.
+	ErrConstraintUnsupported = tagmodel.ErrUnsupported
+
 	// ErrConstraintConflict reports two value constraints an interpreter adds
 	// through [Constraints] that can never both hold: a second const pinned to a
 	// different value, or an enum sharing no value with one in force. It is
@@ -37,11 +58,17 @@ var (
 // below are conveniences for the value set, where an interpreter usually wants
 // to run its own conflict check with its own wording first. Bounds are
 // intersect-only, const and enum report [ErrConstraintConflict] rather than
-// overwriting, and a rule the field's shape cannot carry is an error rather
-// than an inert keyword.
+// overwriting, and a rule the field's shape cannot carry is
+// [ErrConstraintUnsupported] rather than an inert keyword.
 //
-// The zero value is not usable; the generator hands each field-level hook a
-// ready facade via [FieldContext.Constraints].
+// The facade is the one boundary between a hook and the constraint model,
+// and it checks its inputs there so nothing past it does. Every write needs
+// a [FieldContext.Canvas] to land on and returns [ErrNilCanvas] without one,
+// which is what the zero Constraints and a facade over a caller-built
+// context with no canvas both are. Every write checks its rule and returns
+// [ErrInvalidRule] for one the model has no row for. Reads never fail: a
+// missing canvas reads as nothing set. The generator hands each field-level
+// hook a ready facade via [FieldContext.Constraints].
 type Constraints struct {
 	target tagmodel.Target
 }
@@ -171,13 +198,37 @@ func (c *Constraints) policy() tagmodel.Policy {
 // loosens a stronger one and repeated rules compose order-independently. A
 // second const or enum that disagrees with one already in force is
 // [ErrConstraintConflict] rather than a silent overwrite.
+//
+// A rule the model has no row for (an operation or axis outside the table, a
+// parameter count the operation does not take, a uniqueness literal that is
+// not a boolean) is [ErrInvalidRule], and a facade with no canvas returns
+// [ErrNilCanvas]. Neither leaves a trace on the field.
 func (c *Constraints) Apply(op Op, axis Axis, params ...string) error {
+	err := c.ready()
+	if err != nil {
+		return err
+	}
+
+	rule := tagmodel.Rule{Op: op, Axis: axis, Params: tagmodel.ParamsOf(params...)}
+
+	err = rule.Validate()
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalidRule, err)
+	}
+
 	//nolint:wrapcheck // The model owns the message; the interpreter adds its own dialect prefix.
-	return tagmodel.Apply(
-		c.target,
-		tagmodel.Rule{Op: op, Axis: axis, Params: tagmodel.ParamsOf(params...)},
-		c.policy(),
-	)
+	return tagmodel.Apply(c.target, rule, c.policy())
+}
+
+// ready reports whether the facade has a canvas to write to, checked on
+// every write so the zero Constraints and a facade over a canvas-less
+// context refuse the same way.
+func (c *Constraints) ready() error {
+	if c == nil || c.target.Canvas == nil {
+		return ErrNilCanvas
+	}
+
+	return nil
 }
 
 // SetMultipleOf records a multipleOf value on the field, reporting an error for
@@ -187,6 +238,11 @@ func (c *Constraints) Apply(op Op, axis Axis, params ...string) error {
 // common multiple, so an inferred divisor never loosens a stated one. It is
 // the named form of [Constraints.Apply] with [OpMultipleOf].
 func (c *Constraints) SetMultipleOf(value float64) error {
+	err := c.ready()
+	if err != nil {
+		return err
+	}
+
 	//nolint:wrapcheck // The model owns the rule and its wording.
 	return tagmodel.SetMultipleOf(c.target, value, c.policy())
 }
@@ -225,6 +281,11 @@ func (c *Constraints) Enum() ([]any, bool) {
 // interpreter that needs its own conflict wording checks [Constraints.Const]
 // first; this call is the shared backstop for the overlay path.
 func (c *Constraints) SetConst(value any) error {
+	err := c.ready()
+	if err != nil {
+		return err
+	}
+
 	//nolint:wrapcheck // The model owns the conflict sentinel and its wording.
 	return tagmodel.SetConst(c.target, value)
 }
@@ -239,18 +300,44 @@ func (c *Constraints) SetConst(value any) error {
 // intersects the two sets there instead. An interpreter that needs its own
 // wording checks [Constraints.Enum] first.
 func (c *Constraints) SetEnum(values []any) error {
+	err := c.ready()
+	if err != nil {
+		return err
+	}
+
 	//nolint:wrapcheck // The model owns the conflict sentinel and its wording.
 	return tagmodel.SetEnum(c.target, values)
 }
 
 // Forbid records that the field must not equal value, composing with any value
-// already forbidden through the shared not.const -> not.enum -> allOf escalation.
-func (c *Constraints) Forbid(value any) {
+// already forbidden through the shared not.const -> not.enum -> allOf
+// escalation. It fails only for a facade with no canvas ([ErrNilCanvas]).
+func (c *Constraints) Forbid(value any) error {
+	err := c.ready()
+	if err != nil {
+		return err
+	}
+
 	tagmodel.Forbid(c.target.Canvas, value)
+
+	return nil
 }
 
 // ForbidSchema forbids a whole subschema (a length range, say), taking the free
 // not slot or moving an existing not under allOf so both apply conjunctively.
-func (c *Constraints) ForbidSchema(forbidden *Schema) {
+// A nil subschema is [ErrInvalidRule], and a facade with no canvas returns
+// [ErrNilCanvas].
+func (c *Constraints) ForbidSchema(forbidden *Schema) error {
+	err := c.ready()
+	if err != nil {
+		return err
+	}
+
+	if forbidden == nil {
+		return fmt.Errorf("%w: no subschema to forbid", ErrInvalidRule)
+	}
+
 	tagmodel.ForbidSchema(c.target.Canvas, forbidden)
+
+	return nil
 }

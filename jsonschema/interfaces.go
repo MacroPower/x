@@ -731,13 +731,13 @@ func (fc FieldContext) ElementContexts() []FieldContext {
 // bound parses at the kind go-playground would parse it at). Each call builds a
 // fresh facade over the same canvas, so an interpreter may call it repeatedly.
 //
-// The facade writes to Canvas, so a caller-built context must populate Canvas
-// before contributing through it (a facade over a nil canvas has nowhere to
-// record a contribution and panics on write). A context the generator builds
-// always carries a canvas; the read-only Effective accessors and the facade's
-// own [Constraints.Const] and [Constraints.Enum] reads, by contrast, tolerate
-// a nil Canvas. A caller-built context with a nil Type classifies as
-// [FormOpaque], so every rule reports a shape error instead of panicking.
+// The facade is the one place the context's fields are checked, so a
+// caller-built context need populate only what it uses. Every write needs
+// Canvas and returns [ErrNilCanvas] without it; a context the generator
+// builds always carries one. Every read tolerates the zero value: a nil
+// Canvas reads as nothing set, a nil Base as nothing type-derived, a nil node
+// as a field with no elements, and a nil Type classifies as [FormOpaque], so
+// a rule on it is [ErrConstraintUnsupported] rather than a panic.
 func (fc FieldContext) Constraints() *Constraints {
 	return fc.ConstraintsFor(fc.Shape())
 }
@@ -893,25 +893,21 @@ func fcNodeDef(n *node) *defEntry {
 	return n.def
 }
 
-// effectiveBase returns fc.Base, or an empty schema when a caller built the
-// context without one, so the Effective accessors never dereference a nil Base.
-func (fc FieldContext) effectiveBase() *Schema {
-	if fc.Base != nil {
-		return fc.Base
+// ready returns the context with a nil Canvas or Base replaced by an empty
+// schema, for the read paths: a nil side reads as nothing authored or nothing
+// type-derived, so a caller-built context never dereferences one. The copy is
+// the receiver's own; the caller's context keeps its nils, and a write path
+// refuses through [Constraints] instead.
+func (fc FieldContext) ready() FieldContext {
+	if fc.Canvas == nil {
+		fc.Canvas = &Schema{}
 	}
 
-	return &Schema{}
-}
-
-// effectiveCanvas returns fc.Canvas, or an empty schema when a caller built the
-// context without one, mirroring [FieldContext.effectiveBase]: a nil canvas
-// reads as nothing authored, so the Effective accessors fall through to Base.
-func (fc FieldContext) effectiveCanvas() *Schema {
-	if fc.Canvas != nil {
-		return fc.Canvas
+	if fc.Base == nil {
+		fc.Base = &Schema{}
 	}
 
-	return &Schema{}
+	return fc
 }
 
 // EffectiveFormat reports the effective format keyword: the canvas value, or the
@@ -935,41 +931,45 @@ func (fc FieldContext) effectiveCanvas() *Schema {
 // the field exactly as an inline one is, and the first-wins write gate sees
 // the same value these report.
 func (fc FieldContext) EffectiveFormat() string {
-	if f := fc.effectiveCanvas().Format; f != "" {
-		return f
+	r := fc.ready()
+	if r.Canvas.Format != "" {
+		return r.Canvas.Format
 	}
 
-	return cmp.Or(fc.effectiveBase().Format, fc.refBase().Format)
+	return cmp.Or(r.Base.Format, fc.refBase().Format)
 }
 
 // EffectivePattern reports the effective pattern keyword.
 // See [FieldContext.EffectiveFormat].
 func (fc FieldContext) EffectivePattern() string {
-	if p := fc.effectiveCanvas().Pattern; p != "" {
-		return p
+	r := fc.ready()
+	if r.Canvas.Pattern != "" {
+		return r.Canvas.Pattern
 	}
 
-	return cmp.Or(fc.effectiveBase().Pattern, fc.refBase().Pattern)
+	return cmp.Or(r.Base.Pattern, fc.refBase().Pattern)
 }
 
 // EffectiveContentEncoding reports the effective contentEncoding keyword.
 // See [FieldContext.EffectiveFormat].
 func (fc FieldContext) EffectiveContentEncoding() string {
-	if e := fc.effectiveCanvas().ContentEncoding; e != "" {
-		return e
+	r := fc.ready()
+	if r.Canvas.ContentEncoding != "" {
+		return r.Canvas.ContentEncoding
 	}
 
-	return cmp.Or(fc.effectiveBase().ContentEncoding, fc.refBase().ContentEncoding)
+	return cmp.Or(r.Base.ContentEncoding, fc.refBase().ContentEncoding)
 }
 
 // EffectiveContentMediaType reports the effective contentMediaType keyword.
 // See [FieldContext.EffectiveFormat].
 func (fc FieldContext) EffectiveContentMediaType() string {
-	if m := fc.effectiveCanvas().ContentMediaType; m != "" {
-		return m
+	r := fc.ready()
+	if r.Canvas.ContentMediaType != "" {
+		return r.Canvas.ContentMediaType
 	}
 
-	return cmp.Or(fc.effectiveBase().ContentMediaType, fc.refBase().ContentMediaType)
+	return cmp.Or(r.Base.ContentMediaType, fc.refBase().ContentMediaType)
 }
 
 // refBase returns the schema of the definition the field's payload defers to,
