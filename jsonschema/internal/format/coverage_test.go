@@ -101,14 +101,20 @@ var formatCoverage = map[string]coverage{
 		corpus:        []coverageSource{TestEmailCorpus},
 		vectors:       true,
 	},
-	"idn-email":             {corpus: []coverageSource{TestIDNEmailCorpus}, vectors: true},
-	"hostname":              {differentials: []coverageSource{FuzzFormatHostnameVsIDNA}, vectors: true},
-	"idn-hostname":          {differentials: []coverageSource{FuzzFormatIDNHostnameVsIDNA}, vectors: true},
-	"uri":                   {differentials: []coverageSource{FuzzFormatURIVsNetURL}, vectors: true},
-	"uri-reference":         {differentials: []coverageSource{FuzzFormatURIReferenceVsNetURL}, vectors: true},
+	"idn-email":    {corpus: []coverageSource{TestIDNEmailCorpus}, vectors: true},
+	"hostname":     {differentials: []coverageSource{FuzzFormatHostnameVsIDNA}, vectors: true},
+	"idn-hostname": {differentials: []coverageSource{FuzzFormatIDNHostnameVsIDNA}, vectors: true},
+	"uri": {
+		differentials: []coverageSource{FuzzFormatURIVsNetURL, FuzzFormatURIVsABNF},
+		vectors:       true,
+	},
+	"uri-reference": {
+		differentials: []coverageSource{FuzzFormatURIReferenceVsNetURL, FuzzFormatURIReferenceVsABNF},
+		vectors:       true,
+	},
 	"uri-template":          {corpus: []coverageSource{TestURITemplateCorpus}},
-	"iri":                   {vectors: true},
-	"iri-reference":         {vectors: true},
+	"iri":                   {differentials: []coverageSource{FuzzFormatIRIVsABNF}, vectors: true},
+	"iri-reference":         {differentials: []coverageSource{FuzzFormatIRIReferenceVsABNF}, vectors: true},
 	"uuid":                  {differentials: []coverageSource{FuzzFormatUUIDVsGrammar}, vectors: true},
 	"ipv4":                  {differentials: []coverageSource{FuzzFormatIPv4VsNetip}},
 	"ipv6":                  {differentials: []coverageSource{FuzzFormatIPv6VsNetip}},
@@ -330,7 +336,7 @@ func indexTestSources(t *testing.T) map[string]testFunc {
 // nothing the index can read.
 func formatHelper(name string) bool {
 	switch name {
-	case "validator", "runISEmailCorpus", "fuzzFormatRobust":
+	case "validator", "runISEmailCorpus", "fuzzFormatRobust", "fuzzFormatVsGrammar":
 		return true
 	default:
 		return false

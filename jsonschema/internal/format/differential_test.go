@@ -4,6 +4,7 @@ import (
 	"net/mail"
 	"net/netip"
 	"net/url"
+	"path/filepath"
 	"regexp"
 	"regexp/syntax"
 	"strings"
@@ -11,7 +12,10 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/stretchr/testify/assert"
 	"golang.org/x/net/idna"
+
+	"go.jacobcolvin.com/x/jsonschema/internal/uriabnf"
 )
 
 // Rig 3, layer 2 -- differential against stdlib oracles. No stdlib parser is a
@@ -754,4 +758,88 @@ func FuzzFormatHostnameVsIDNA(f *testing.F) {
 			t.Fatalf("idna.Lookup leaves the ASCII name %q unchanged but hostname rejects it: %v", s, err)
 		}
 	})
+}
+
+// FuzzFormatURIVsABNF differentials the uri validator against the RFC 3986
+// grammar written out in internal/uriabnf, in both directions: the format
+// accepts s exactly when the grammar does. The grammar package descends the
+// ABNF itself and shares nothing with net/url, so a disagreement is a reading
+// one side got wrong rather than a gap both inherit. Every input the two are
+// known to read differently is a documented carve-out in uriGrammarCarveOut.
+func FuzzFormatURIVsABNF(f *testing.F) {
+	fuzzFormatVsGrammar(f, "uri", uriabnf.URI)
+}
+
+// FuzzFormatURIReferenceVsABNF is the two-sided differential for
+// uri-reference.
+func FuzzFormatURIReferenceVsABNF(f *testing.F) {
+	fuzzFormatVsGrammar(f, "uri-reference", uriabnf.URIReference)
+}
+
+// FuzzFormatIRIVsABNF is the two-sided differential for iri, against the RFC
+// 3987 grammar.
+func FuzzFormatIRIVsABNF(f *testing.F) {
+	fuzzFormatVsGrammar(f, "iri", uriabnf.IRI)
+}
+
+// FuzzFormatIRIReferenceVsABNF is the two-sided differential for
+// iri-reference.
+func FuzzFormatIRIReferenceVsABNF(f *testing.F) {
+	fuzzFormatVsGrammar(f, "iri-reference", uriabnf.IRIReference)
+}
+
+// fuzzFormatVsGrammar is the shared body of the four grammar differentials.
+func fuzzFormatVsGrammar(f *testing.F, name string, grammar func(string) bool) {
+	f.Helper()
+
+	fn := validator(f, name)
+	addURISeeds(f)
+
+	f.Fuzz(func(t *testing.T, s string) {
+		sutValid := fn(s) == nil
+		oracleValid := grammar(s)
+
+		if sutValid == oracleValid || uriGrammarCarveOut(s) {
+			return
+		}
+
+		t.Fatalf("%s disagrees with the RFC grammar on %q: sut=%v grammar=%v", name, s, sutValid, oracleValid)
+	})
+}
+
+// uriGrammarCarveOut skips the inputs the format and the grammar are known to
+// read differently. It is empty until a differential names one, and each
+// entry records why the format keeps its reading.
+func uriGrammarCarveOut(_ string) bool {
+	return false
+}
+
+// TestURIVectorsAgreeWithGrammar runs every row of the four URI and IRI vector
+// files through the grammar, so a vector the format pins and the grammar
+// refuses (or the reverse) is a finding about one of the three rather than a
+// row both quietly agree to skip.
+func TestURIVectorsAgreeWithGrammar(t *testing.T) {
+	t.Parallel()
+
+	grammars := map[string]func(string) bool{
+		"uri":           uriabnf.URI,
+		"uri-reference": uriabnf.URIReference,
+		"iri":           uriabnf.IRI,
+		"iri-reference": uriabnf.IRIReference,
+	}
+
+	for name, grammar := range grammars {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			for quoted, vector := range loadVectorFile(t, filepath.Join(vectorDir, name+".tsv")) {
+				if uriGrammarCarveOut(vector.instance) {
+					continue
+				}
+
+				assert.Equal(t, vector.valid, grammar(vector.instance),
+					"the %s vector %s and the RFC grammar disagree", name, quoted)
+			}
+		})
+	}
 }

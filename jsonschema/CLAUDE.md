@@ -100,6 +100,8 @@ is the only one that imports the parent package.
   extraction and cross-package name collision tests; real source packages so
   `go/packages` can load their doc comments.
 - `regexcache`, `uriref`, `vocab`: pattern cache, RFC 3986, vocabulary gating.
+- `uriabnf`: the RFC 3986 and 3987 grammars by descent, an oracle for
+  `format` that shares nothing with net/url.
 
 ## Guard tests
 
@@ -145,6 +147,9 @@ is the only one that imports the parent package.
 - `FuzzValidatorTaggedShapes`, `FuzzValidatorRequiredNullableShapes`
   (`interpreters/validate/differentialtest`): the validate tag agrees with
   go-playground where the marshaled object lets it.
+- `FuzzFormat*VsABNF` (format): the four URI and IRI formats agree with
+  `uriabnf` in both directions, and `TestURIVectorsAgreeWithGrammar` runs every
+  vector row through the grammar.
 - `tags_shape_oracle_test.go`: the `Form` a field classifies to is the JSON v2
   writes for it. `suite_test.go` runs the vendored official suite with reasoned
   skips; `conformance_test.go` checks generated schemas against the metaschemas.
