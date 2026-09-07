@@ -13,6 +13,7 @@ import (
 	"go.jacobcolvin.com/x/jsonschema/internal/schemafield"
 	"go.jacobcolvin.com/x/jsonschema/internal/schemashape"
 	"go.jacobcolvin.com/x/jsonschema/internal/tagmodel"
+	"go.jacobcolvin.com/x/jsonschema/internal/tagparse"
 	"go.jacobcolvin.com/x/jsonschema/internal/typename"
 )
 
@@ -81,10 +82,11 @@ type node struct {
 	// reports in [run.checkNullLiterals]. A field node carries it, and so
 	// does every element node beneath that field. Nil for every other node.
 	origin *fieldOrigin
-	// The overrode field, on a node a jsonschema tag's type= pair rebuilt,
-	// is the node it replaced. The tag's remaining directives read that node's
-	// null decision, since the pair replaced the occurrence they were parsed
-	// against.
+	// The overrode field, on a node a jsonschema tag's type= pair rewrote in
+	// place ([node.overrideType]), is a value copy of the node as reflected.
+	// The null pass decides that copy too, and the tag's remaining directives
+	// read its decision, since the pair replaced the occurrence they were
+	// parsed against.
 	overrode *node
 	props    []nodeProp  // struct properties, declaration order
 	prefix   []*node     // array elements (prefixItems / itemsArray)
@@ -605,6 +607,57 @@ func (n *node) view(draft Draft) *Schema {
 	}
 
 	return v
+}
+
+// overrideType rewrites the node in place for a jsonschema tag's type= pair:
+// the pair names a JSON type, so it is a transform over the reflected node,
+// never a second reflection. The first pair on a node keeps the node as
+// reflected in overrode, a value copy sharing the child pointers, whose null
+// decision the directives before the pair read.
+//
+// The payload takes the override on a private clone, so the copy still
+// carries the reflected one. The type-derived facts reset: the def link (an
+// explicit type replaces a $ref outright), the occurrence, a hook's stance,
+// and the verbatim mark, so an overridden field admits no null and takes the
+// null encoding like any other. Every other field keeps its value: the
+// authored canvas, the field origin, the hooked mark, and the field, body,
+// and composed roles are facts of the position, not of the type.
+//
+// Children stay only where the new type keeps the container kind: an array
+// keeps a list's element node or a tuple's prefix nodes, an object keeps a
+// map's value node or a struct's properties, embeds, and fallback value node.
+// Each kept node still carries its own null decision, canvas, and hooks. Any
+// other pairing is a leaf.
+func (n *node) overrideType(typeName string) {
+	if n.overrode == nil {
+		replaced := *n
+		n.overrode = &replaced
+		n.payload = schemaclone.Clone(n.payload)
+	}
+
+	tagparse.ApplyTypeOverride(n.payload, typeName)
+
+	n.def = nil
+	n.occ = occurrence{}
+	n.stance = NullFromReflection
+	n.null = nullDecision{}
+	n.verbatim = false
+
+	switch {
+	case n.kind == kindList && typeName == typename.Array,
+		n.kind == kindTuple && typeName == typename.Array,
+		n.kind == kindMap && typeName == typename.Object,
+		n.kind == kindObject && typeName == typename.Object:
+		return
+	}
+
+	n.kind = kindValue
+	n.typ = nil
+	n.items = nil
+	n.prefix = nil
+	n.props = nil
+	n.embeds = nil
+	n.fallback = slotNone
 }
 
 // absorbView takes a hook's edited view as the node's new base and classifies

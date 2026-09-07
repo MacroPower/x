@@ -1093,6 +1093,30 @@ func TestTagTypeOverride(t *testing.T) {
 		assert.Equal(t, "string", s.Properties["dur"].Type)
 	})
 
+	t.Run("verbatim hook type takes the override", func(t *testing.T) {
+		t.Parallel()
+
+		// A type= pair rewrites the node whatever declared it, so a verbatim
+		// hook payload loses its verbatim standing: the new type replaces it,
+		// the pointer's null goes with the occurrence, and the tag's other
+		// keys compose onto the result like any leaf.
+		type opaque struct{}
+
+		type T struct {
+			V *opaque `json:"v" jsonschema:"type=string,minLength=1"`
+		}
+
+		s, err := jsonschema.GenerateFor[T](t.Context(),
+			jsonschema.WithTypeSchemaFor[opaque](jsonschema.TypeSchema{
+				Verbatim: &jsonschema.Schema{Type: "object", AdditionalProperties: &jsonschema.Schema{}},
+			}))
+		require.NoError(t, err)
+
+		got, err := json.Marshal(s.Properties["v"])
+		require.NoError(t, err)
+		assert.JSONEq(t, `{"type":"string","minLength":1}`, string(got))
+	})
+
 	t.Run("string keywords dropped for non-string type", func(t *testing.T) {
 		t.Parallel()
 

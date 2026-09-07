@@ -756,10 +756,10 @@ func (fc FieldContext) Constraints() *Constraints {
 // falls back to the pointer-derived answer.
 //
 // A type= pair in the jsonschema tag never reaches this method. The generator
-// rebuilds an overridden field as a non-nullable, non-reference node before it
-// runs the tag interpreters, so an interpreter classifies against the
-// overridden payload and never against the shape the field carried before the
-// override.
+// rewrites an overridden field in place as a non-nullable, non-reference node
+// before it runs the tag interpreters, so an interpreter classifies against
+// the overridden payload and never against the shape the field carried before
+// the override.
 //
 // The decision this method reports is final. The generator runs every tag
 // interpreter after it has decided the null admission of every occurrence,

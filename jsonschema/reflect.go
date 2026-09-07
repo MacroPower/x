@@ -183,7 +183,7 @@ func (g *run) generate(t reflect.Type) (*Schema, error) {
 
 	// Phase 1: reflect the graph. Every node records the facts of its
 	// occurrence, every type-level hook runs, and the jsonschema tag's type=
-	// pair rebuilds the field it overrides.
+	// pair rewrites the field it overrides in place.
 	root, err := g.schemaForType(t, false)
 	if err != nil {
 		return nil, err
@@ -1318,7 +1318,7 @@ func (g *run) buildFieldSchema(
 	// The jsonschema tag's type= pair replaces the field's type wholesale, a
 	// fact the null pass needs, so it applies here; the tag's other
 	// directives wait for the pass.
-	fieldNode = g.applyTypeOverrideDirective(fieldNode, fi)
+	g.applyTypeOverrideDirective(fieldNode, fi)
 
 	// Encoding/json/v2's omitempty omits a field only when its encoded value
 	// is an empty JSON value (null, "", {}, []), so a field whose type never
@@ -1346,46 +1346,29 @@ func (g *run) buildFieldSchema(
 }
 
 // applyTypeOverrideDirective applies the type= pairs of a field's jsonschema
-// tag to a view of the field's base and rebuilds the node over it, so the
-// override is a fact of the graph before the null pass runs. The rebuilt node
-// keeps the node it replaced, whose decision the tag's other directives read
-// in [run.applyFieldTag]. A tag with no valid type= pair, or one the
-// parser refuses, leaves the node as built.
-func (g *run) applyTypeOverrideDirective(fieldNode *node, fi fieldset.Field) *node {
+// tag to the field's node in place ([node.overrideType]), so the override is
+// a fact of the graph before the null pass runs. The node keeps the
+// occurrence it replaced, whose decision the tag's other directives read in
+// [run.applyFieldTag]. A tag with no valid type= pair, or one the parser
+// refuses, leaves the node as built.
+func (g *run) applyTypeOverrideDirective(fieldNode *node, fi fieldset.Field) {
 	tag, ok := fi.StructField.Tag.Lookup("jsonschema")
 	if !ok {
-		return fieldNode
+		return
 	}
 
 	// A malformed tag is reported where the tag is applied, in
 	// [run.applyFieldTag], which parses it again.
 	directives, _, err := tagparse.Parse(tag)
 	if err != nil {
-		return fieldNode
+		return
 	}
-
-	var view *Schema
 
 	for _, d := range directives {
-		if d.Key != keyword.Type || !typename.Valid(d.Value) {
-			continue
+		if d.Key == keyword.Type && typename.Valid(d.Value) {
+			fieldNode.overrideType(d.Value)
 		}
-
-		if view == nil {
-			view = fieldNode.view(g.draft)
-		}
-
-		tagparse.ApplyTypeOverride(view, d.Value)
 	}
-
-	if view == nil {
-		return fieldNode
-	}
-
-	rebuilt := rebuildOverriddenField(fieldNode, view)
-	rebuilt.overrode = fieldNode
-
-	return rebuilt
 }
 
 // applyFieldHooks runs the field-level hooks over every struct in the graph
@@ -1607,77 +1590,6 @@ func (g *run) omitsZero(fi fieldset.Field) bool {
 	omitted, err := g.probe.OmitsZero(fi.StructField)
 
 	return err == nil && omitted
-}
-
-// rebuildOverriddenField rebuilds a field node after a type= override replaced
-// its type wholesale: a plain value node over the overridden view, dropping
-// the def link, children, and null bits in one place, while carrying the
-// authored canvas and the field origin across. Reachability drops any def
-// the detached ref orphaned.
-//
-// An override that keeps the field's container kind keeps its child nodes.
-// A type=array override on a sequence field keeps the element structure
-// (applyTypeOverride drops it for every other type, which the view's cleared
-// element slot reports), and a type=object override on a map or an inline
-// struct keeps the value node or the property and embed nodes. Each kept
-// node still carries its own null decision, authored canvas, and hooks, so a
-// pointer property keeps its null branch, a nested tag still applies, and a
-// ref child renders under its final def name rather than the provisional
-// token the view holds. The view's own child slots are cleared for the kept
-// nodes, since render fills them from the nodes; a slot a hook authored as a
-// literal stays as written.
-func rebuildOverriddenField(fieldNode *node, payload *Schema) *node {
-	rebuilt := &node{
-		kind:     kindValue,
-		payload:  payload,
-		authored: fieldNode.authored,
-		origin:   fieldNode.origin,
-		isField:  true,
-	}
-
-	switch {
-	case fieldNode.kind == kindList && payload.Items != nil:
-		rebuilt.kind = kindList
-		rebuilt.items = fieldNode.items
-		payload.Items = nil
-
-	case fieldNode.kind == kindTuple && (len(payload.PrefixItems) > 0 || len(payload.ItemsArray) > 0):
-		rebuilt.kind = kindTuple
-		rebuilt.prefix = fieldNode.prefix
-		payload.PrefixItems = nil
-		payload.ItemsArray = nil
-
-	case fieldNode.kind == kindMap && payload.Type == typename.Object && fieldNode.items != nil:
-		rebuilt.kind = kindMap
-		rebuilt.items = fieldNode.items
-		payload.AdditionalProperties = nil
-
-	case fieldNode.kind == kindObject && payload.Type == typename.Object:
-		rebuilt.kind = kindObject
-		rebuilt.typ = fieldNode.typ
-		rebuilt.props = fieldNode.props
-		rebuilt.embeds = fieldNode.embeds
-
-		for i := range fieldNode.props {
-			delete(payload.Properties, fieldNode.props[i].name)
-		}
-
-		if len(payload.Properties) == 0 {
-			payload.Properties = nil
-		}
-
-		// An inline struct field carrying an embedded fallback keeps the
-		// fallback value node, so render still fills the extra-member slot
-		// from it (null wrap and final $ref name included).
-		if fieldNode.items != nil {
-			rebuilt.items = fieldNode.items
-			rebuilt.fallback = fieldNode.fallback
-			payload.AdditionalProperties = nil
-			payload.UnevaluatedProperties = nil
-		}
-	}
-
-	return rebuilt
 }
 
 // fieldContext builds the FieldContext passed to tag interpreters and the

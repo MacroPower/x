@@ -21,7 +21,9 @@ one generation derives from a config. `run.generate` is eight phases, in order:
    (`ir.go`) from the type resolution priority below. Every node records the
    facts of its occurrence (pointer-ness, container kind, a type hook's
    `Nullability` stance) and decides nothing. Type-level hooks run here, and so
-   does the jsonschema tag's `type=` pair, which replaces the field's type.
+   does the jsonschema tag's `type=` pair, which rewrites the field's node in
+   place (`node.overrideType`) and keeps the reflected occurrence as a value
+   copy for the directives before the pair.
 2. **Assign def names** (`names.go`): every `$defs` entry gets its final key
    before any `$ref` string is emitted.
 3. **Resolve nullability** (`ir.go`): `resolveNullability` fills `node.null`
@@ -132,6 +134,9 @@ is the only one that imports the parent package.
   `testdata/tags/cases.json` covers every shape and both dialects agree.
 - `TestHookPointersArePrivateCopies` (ir_test.go): a hook write through
   `Parent` or `Base` never reaches the output.
+- `TestOverrideTypeClassifiesEveryNodeField`, `TestOverrideTypeMatchesReflection`
+  (ir_internal_test.go): every `node` field has a declared fate under a
+  `type=` override, and the in-place rewrite honors it for every kind.
 - `TestFieldContextZeroValueSurvives` (interfaces_test.go),
   `TestConstraintsFacadeNilCanvasWrites`, `TestConstraintsFacadeInvalidRule`
   (constraints_test.go): every method on the zero context and facade returns,
