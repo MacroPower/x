@@ -2992,6 +2992,28 @@ func TestValidateInterpreterGoPlaygroundParity(t *testing.T) {
 		require.ErrorContains(t, err, "empty OR alternative")
 	})
 
+	t.Run("a parameter on a control tag is an unrecognized validator", func(t *testing.T) {
+		t.Parallel()
+
+		// Go-playground matches a control tag as the whole part, so
+		// omitempty= is an undefined validator there, not omitempty.
+		type T struct {
+			F string `json:"f" validate:"omitempty=,min=1"`
+		}
+
+		_, err := jsonschema.GenerateFor[T](t.Context(), opt)
+		require.ErrorIs(t, err, validate.ErrUnrecognizedValidator)
+		require.ErrorContains(t, err, `"omitempty="`)
+
+		type D struct {
+			F []string `json:"f" validate:"dive=1"`
+		}
+
+		_, err = jsonschema.GenerateFor[D](t.Context(), opt)
+		require.ErrorIs(t, err, validate.ErrUnrecognizedValidator)
+		require.ErrorContains(t, err, `"dive=1"`)
+	})
+
 	t.Run("an integer literal outside the JSON grammar is refused", func(t *testing.T) {
 		t.Parallel()
 

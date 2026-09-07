@@ -108,7 +108,7 @@ func applyParts(parts []string, field jsonschema.FieldContext) error {
 		// dive,keys,dive,endkeys for collection-typed map keys), which is not
 		// modeled; it must be skipped by the inKeys guard below rather than
 		// treated as a value-element dive. Only handle dive outside the block.
-		if part == "dive" && !inKeys {
+		if part == diveTag && !inKeys {
 			// Descend into the element type. A trailing dive applies nothing
 			// to the elements, a no-op as in go-playground, but the descent
 			// itself still needs elements to reach: go-playground panics on a
@@ -130,8 +130,10 @@ func applyParts(parts []string, field jsonschema.FieldContext) error {
 		// Skip cross-field validators, and the control tags that govern when
 		// validation runs rather than expressing a value constraint (e.g.
 		// omitempty, structonly). Neither has a schema representation, and
-		// neither may be treated as an unknown validator.
-		if isCrossFieldValidator(key) || isControlTag(key) {
+		// neither may be treated as an unknown validator. A control tag is
+		// matched as the whole part, as go-playground matches it, so a
+		// parameter on one (omitempty=) is refused below rather than skipped.
+		if isCrossFieldValidator(key) || isControlTag(part) {
 			continue
 		}
 
@@ -140,7 +142,7 @@ func applyParts(parts []string, field jsonschema.FieldContext) error {
 		// matching endkeys is malformed; rather than swallowing every later
 		// constraint, the keys marker is ignored so the remaining constraints
 		// still apply to the value schema.
-		if key == "keys" {
+		if part == keysTag {
 			if hasEndkeys(parts[idx+1:]) {
 				inKeys = true
 			}
@@ -148,13 +150,19 @@ func applyParts(parts []string, field jsonschema.FieldContext) error {
 			continue
 		}
 
-		if key == "endkeys" {
+		if part == endkeysTag {
 			inKeys = false
 			continue
 		}
 
 		if inKeys {
 			continue
+		}
+
+		// A structural key carrying a parameter names no validator on either
+		// side. The error carries the whole part, as go-playground's does.
+		if hasValue && isStructuralKey(key) {
+			return fmt.Errorf("%w %q", ErrUnrecognizedValidator, part)
 		}
 
 		err := applyValidator(key, value, hasValue, field)
@@ -317,10 +325,10 @@ func hasConstraint(parts []string) bool {
 
 		// A control tag such as omitempty or structonly, or a cross-field
 		// validator, governs when validation runs rather than constraining a
-		// value, so it does not satisfy a trailing dive. Match on the key before
-		// any equals sign.
+		// value, so it does not satisfy a trailing dive. A control tag is the
+		// whole part; a cross-field validator is the key before its parameter.
 		key, _, _ := strings.Cut(p, "=")
-		if isControlTag(key) || isCrossFieldValidator(key) {
+		if isControlTag(p) || isCrossFieldValidator(key) {
 			continue
 		}
 
@@ -333,7 +341,7 @@ func hasConstraint(parts []string) bool {
 // hasEndkeys reports whether parts contains an "endkeys" marker.
 func hasEndkeys(parts []string) bool {
 	for _, p := range parts {
-		if strings.TrimSpace(p) == "endkeys" {
+		if strings.TrimSpace(p) == endkeysTag {
 			return true
 		}
 	}

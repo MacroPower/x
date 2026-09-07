@@ -120,6 +120,21 @@ func isControlTag(key string) bool {
 	return false
 }
 
+// The parts go-playground matches whole rather than as a validator.
+const (
+	diveTag    = "dive"
+	keysTag    = "keys"
+	endkeysTag = "endkeys"
+)
+
+// isStructuralKey reports whether a key names a part go-playground matches
+// whole rather than as a validator with a parameter: dive, the keys block
+// markers, and the control tags. Such a key followed by a parameter is an
+// undefined validator there, and unrecognized here.
+func isStructuralKey(key string) bool {
+	return key == diveTag || key == keysTag || key == endkeysTag || isControlTag(key)
+}
+
 // isCrossFieldValidator reports whether a key is a cross-field validator that
 // should be silently ignored.
 func isCrossFieldValidator(key string) bool {

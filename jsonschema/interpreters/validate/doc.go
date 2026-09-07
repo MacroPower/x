@@ -273,7 +273,10 @@
 // conditional validators (eqfield, required_if, skip_unless, ...), control tags
 // that govern when validation runs (omitempty, structonly, ...), and the
 // constraints inside a keys...endkeys block (map-key constraints are not
-// modeled). A trailing dive with nothing after it applies nothing to the
+// modeled). A control tag, dive, keys, and endkeys are each matched as a whole
+// part, as go-playground matches them, so one carrying a parameter
+// (omitempty=) is an unrecognized validator rather than the tag it starts
+// with. A trailing dive with nothing after it applies nothing to the
 // elements and is a no-op, as it is in go-playground, while a dive on a field
 // with no elements to reach is an error whatever follows it, since
 // go-playground panics on a dive over anything but a slice, array, or map. A
