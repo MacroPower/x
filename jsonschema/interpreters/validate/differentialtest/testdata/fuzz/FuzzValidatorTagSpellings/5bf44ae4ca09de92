@@ -1,0 +1,4 @@
+go test fuzz v1
+string("oneof=0,oneof=0")
+byte('\x04')
+[]byte("0")

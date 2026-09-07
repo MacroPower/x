@@ -1,0 +1,4 @@
+go test fuzz v1
+string("min=7,min")
+byte('~')
+[]byte("0")

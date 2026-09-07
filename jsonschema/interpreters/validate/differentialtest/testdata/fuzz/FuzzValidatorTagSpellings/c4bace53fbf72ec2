@@ -1,0 +1,4 @@
+go test fuzz v1
+string("dive,min=10000000000000000")
+byte('\x7f')
+[]byte("0")

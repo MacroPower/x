@@ -147,6 +147,10 @@ is the only one that imports the parent package.
 - `FuzzValidatorTaggedShapes`, `FuzzValidatorRequiredNullableShapes`
   (`interpreters/validate/differentialtest`): the validate tag agrees with
   go-playground where the marshaled object lets it.
+- `FuzzValidatorTagSpellings` (same module): a fuzzed tag string is usable on
+  both sides or neither, and the verdicts agree where both use it. Every
+  spelling left out is a reasoned entry in `spellingExclusions`, pinned by
+  `TestSpellingExclusionsAreReasoned` and `TestSpellingSeedsReachEveryCell`.
 - `FuzzFormat*VsABNF` (format): the four URI and IRI formats agree with
   `uriabnf` in both directions, and `TestURIVectorsAgreeWithGrammar` runs every
   vector row through the grammar.

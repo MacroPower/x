@@ -1,0 +1,4 @@
+go test fuzz v1
+string("omitempty=")
+byte('`')
+[]byte("0")
