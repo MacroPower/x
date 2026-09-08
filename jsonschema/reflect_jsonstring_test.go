@@ -1,6 +1,7 @@
 package jsonschema_test
 
 import (
+	"context"
 	"encoding/json/v2"
 	"reflect"
 	"testing"
@@ -105,6 +106,85 @@ func TestGenerateFor_JSONStringDurationRefused(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "^[0-9]+s$", s.Properties["d"].Pattern)
 	})
+}
+
+// quotedHookString is a string-kind type a WithTypeSchemaFor override
+// describes; v2 accepts it unflagged and refuses it under json:",string".
+type quotedHookString string
+
+// TestGenerateFor_JSONStringHookDeclaredTypeRefused pins that a hook
+// exempts a json:",string" field from v2's refusal only where v2 refuses
+// the type unflagged too. A string kind, a time.Time, and a provider type
+// all marshal unflagged, and v2 refuses each under the flag, so a schema
+// built from the hook would describe a struct v2 never marshals; generation
+// refuses the field with ErrInvalidJSONField as it does without the hook.
+func TestGenerateFor_JSONStringHookDeclaredTypeRefused(t *testing.T) {
+	t.Parallel()
+
+	type hookString struct {
+		S quotedHookString `json:"s,string"`
+	}
+
+	type hookTime struct {
+		T time.Time `json:"t,string"` //nolint:staticcheck // SA5008 flags the option v2 refuses; the refusal is the case.
+	}
+
+	type hookPointer struct {
+		P *quotedHookString `json:"p,string"`
+	}
+
+	type provider struct {
+		S Status `json:"s,string"`
+	}
+
+	stringOverride := jsonschema.WithTypeSchemaFor[quotedHookString](jsonschema.TypeSchema{
+		Value: &jsonschema.Schema{Type: "string", Pattern: "^x"},
+	})
+	timeOverride := jsonschema.WithTypeSchemaFor[time.Time](jsonschema.TypeSchema{
+		Value: &jsonschema.Schema{Type: "string", Format: "date-time"},
+	})
+
+	tests := map[string]struct {
+		generate func(ctx context.Context) (*jsonschema.Schema, error)
+		marshal  func() ([]byte, error)
+	}{
+		"string kind": {
+			generate: func(ctx context.Context) (*jsonschema.Schema, error) {
+				return jsonschema.GenerateFor[hookString](ctx, stringOverride)
+			},
+			marshal: func() ([]byte, error) { return json.Marshal(hookString{S: "x"}) },
+		},
+		"time.Time": {
+			generate: func(ctx context.Context) (*jsonschema.Schema, error) {
+				return jsonschema.GenerateFor[hookTime](ctx, timeOverride)
+			},
+			marshal: func() ([]byte, error) { return json.Marshal(hookTime{}) },
+		},
+		"pointer to string kind": {
+			generate: func(ctx context.Context) (*jsonschema.Schema, error) {
+				return jsonschema.GenerateFor[hookPointer](ctx, stringOverride)
+			},
+			marshal: func() ([]byte, error) { return json.Marshal(hookPointer{P: new(quotedHookString("x"))}) },
+		},
+		"provider type": {
+			generate: func(ctx context.Context) (*jsonschema.Schema, error) {
+				return jsonschema.GenerateFor[provider](ctx)
+			},
+			marshal: func() ([]byte, error) { return json.Marshal(provider{S: "active"}) },
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := tc.marshal()
+			require.Error(t, err, "encoding/json/v2 must refuse the flagged field")
+
+			_, err = tc.generate(t.Context())
+			require.ErrorIs(t, err, jsonschema.ErrInvalidJSONField)
+		})
+	}
 }
 
 // pointerChain wraps elem in depth pointer levels.

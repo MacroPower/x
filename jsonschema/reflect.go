@@ -1270,12 +1270,11 @@ func (g *run) buildFieldSchema(
 	// [encoding/json.Number] are quoted at any pointer depth, a type whose
 	// method set carries a marshal interface is written by the method, which
 	// ignores the flag, and every other type is a SemanticError. A refusal is
-	// the field's answer only where the type resolves through kind-based
-	// reflection: a type a [WithTypeSchemaFor] override or a provider declares
-	// is the caller's to describe, and a type v2 refuses with or without the
-	// flag ([time.Duration]) is answered as it is unflagged, so the field
-	// builds through [run.schemaForType] first and the flag's refusal
-	// stands only when that build was kind-based.
+	// the field's answer unless v2 refuses the type with or without the flag
+	// ([time.Duration]) and a [WithTypeSchemaFor] override or a provider
+	// declares it: such a type is answered as it is unflagged, the shape the
+	// hook declares. A type v2 accepts unflagged is refused under the flag
+	// whatever a hook declares, since v2 never marshals the struct.
 	var (
 		fieldNode      *node
 		stringOverride bool
@@ -1602,9 +1601,13 @@ func defBodyPayload(def *defEntry) func() *Schema {
 }
 
 // stringOptionField answers a field carrying json:",string". It returns the
-// node a hook built for a type v2 refuses under the flag (nil otherwise),
-// whether the field takes the string override, and the refusal when neither
-// applies; see the override discussion in [run.buildFieldSchema].
+// node a hook built for a type v2 refuses with or without the flag (nil
+// otherwise), whether the field takes the string override, and the refusal
+// when neither applies; see the override discussion in
+// [run.buildFieldSchema]. A type v2 accepts unflagged is refused under the
+// flag before any build, so the refused field registers no orphan
+// definition; a type refused either way builds as it is unflagged, which
+// reports the kind-based refusal itself.
 func (g *run) stringOptionField(fi fieldset.Field) (*node, bool, error) {
 	stringified, probeErr := g.probe.Field(fi.StructField)
 	if probeErr == nil {
@@ -1612,6 +1615,10 @@ func (g *run) stringOptionField(fi fieldset.Field) (*node, bool, error) {
 	}
 
 	fieldType := fi.StructField.Type
+
+	if g.probe.Type(fieldType) == nil {
+		return nil, false, fmt.Errorf("%w: %w", ErrInvalidJSONField, probeErr)
+	}
 
 	fieldNode, err := g.schemaForType(fieldType, false)
 	if err != nil {
