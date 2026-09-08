@@ -40,8 +40,9 @@ one generation derives from a config. `run.generate` is eight phases, in order:
    `FieldContext.Parent.Required`.
 5. **Inline the root** (`render.go`): a bare `$ref` root reached from nowhere
    else becomes its body.
-6. **Scan null literals** (`ir.go`): every field and element canvas is refused
-   a null literal against an occurrence that admits none.
+6. **Scan canvas literals** (`ir.go`): every field and element canvas is
+   refused a null literal against an occurrence that admits none, and an
+   empty enum.
 7. **Seed defaults** (`generate.go`): `WithDefaultsFrom` writes onto canvases
    and hook-declared literals, gated by the decision from phase 3.
 8. **Render** (`render.go`, `reconcile.go`): one fresh `Schema` per node. The

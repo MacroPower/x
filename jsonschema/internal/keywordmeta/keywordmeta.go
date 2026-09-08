@@ -508,7 +508,8 @@ var (
 		{
 			// Enum conjoins soundly, yet an enum on the wrapper would reject the
 			// null branch, so it stays value-scoped. Presence is nil-based, not
-			// length-based, so a deliberate empty enum still overlays.
+			// length-based; the canvas scan refuses an empty enum before the
+			// overlay runs, so none reaches here.
 			Differs:  func(a, b *Schema) bool { return (a.Enum == nil) != (b.Enum == nil) },
 			Assign:   func(src, dst *Schema) { dst.Enum = src.Enum },
 			Fields:   []string{"Enum"},

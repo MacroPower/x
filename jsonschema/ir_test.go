@@ -11,6 +11,7 @@ import (
 	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/x/jsonschema"
+	"go.jacobcolvin.com/x/jsonschema/internal/tagmodel"
 	"go.jacobcolvin.com/x/jsonschema/internal/testtypes/alpha"
 	"go.jacobcolvin.com/x/jsonschema/internal/testtypes/beta"
 )
@@ -464,6 +465,56 @@ func TestHookCanvasContainersAreNotAliased(t *testing.T) {
 
 	assert.Equal(t, []any{"a"}, s.Properties["x"].Enum)
 	assert.Equal(t, []any{"a"}, s.Properties["x"].Examples)
+}
+
+// TestHookCanvasEmptyEnumRefused pins that an empty enum written straight
+// onto a field's canvas fails generation. The facade refuses one, but a
+// direct canvas write consults nothing, and an empty enum would leave a
+// struct that rejects every instance while its JSON form, which omits the
+// keyword, accepts them all.
+func TestHookCanvasEmptyEnumRefused(t *testing.T) {
+	t.Parallel()
+
+	type doc struct {
+		X string   `empty:"x" json:"x"`
+		Y []string `json:"y"`
+	}
+
+	tests := map[string]struct {
+		write func(field jsonschema.FieldContext)
+		want  string
+	}{
+		"field canvas": {
+			write: func(field jsonschema.FieldContext) { field.Canvas.Enum = []any{} },
+			want:  `field "x": authored canvas: keyword "enum"`,
+		},
+		"nil enum is absent": {
+			write: func(field jsonschema.FieldContext) { field.Canvas.Enum = nil },
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := jsonschema.GenerateFor[doc](t.Context(),
+				jsonschema.WithTagInterpreter("empty", jsonschema.TagInterpreterFunc(
+					func(_ context.Context, field jsonschema.FieldContext, _ jsonschema.Tag) error {
+						tc.write(field)
+
+						return nil
+					},
+				)))
+			if tc.want == "" {
+				require.NoError(t, err)
+
+				return
+			}
+
+			require.ErrorIs(t, err, tagmodel.ErrNoValues)
+			assert.Contains(t, err.Error(), tc.want)
+		})
+	}
 }
 
 // TestFieldHookSeesFinalRefUnderCollision pins that a field-level hook, which

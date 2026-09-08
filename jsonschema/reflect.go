@@ -224,7 +224,7 @@ func (g *run) generate(t reflect.Type) (*Schema, error) {
 
 	// Phase 6: refuse a null literal an interpreter wrote onto a canvas
 	// against an occurrence that admits none.
-	err = g.checkNullLiterals(root)
+	err = g.checkCanvasLiterals(root)
 	if err != nil {
 		return nil, err
 	}
@@ -1372,7 +1372,7 @@ func (g *run) buildFieldSchema(
 	allocCanvasTree(fieldNode, g.draft)
 
 	// Record the field position on the node and on every element beneath it, so
-	// checkNullLiterals can name the field a late-refused null literal sits in.
+	// checkCanvasLiterals can name the field a late-refused null literal sits in.
 	assignFieldOrigins(fieldNode, &fieldOrigin{
 		parent: parentType,
 		typ:    numkind.DerefType(fieldType),

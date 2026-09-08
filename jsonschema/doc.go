@@ -502,8 +502,9 @@
 //     and [Constraints.SetMultipleOf] remain as named conveniences for the
 //     value set, where an interpreter usually runs its own conflict check
 //     with its own wording first. An empty enumeration is refused through
-//     either entry point: it would admit nothing, and the JSON form omits an
-//     empty enum, so the generated schema could not express it.
+//     either entry point, and one written straight onto the canvas fails
+//     generation: it would admit nothing, and the JSON form omits an empty
+//     enum, so the generated schema could not express it.
 //
 // One Apply call settles everything the rule needs:
 //

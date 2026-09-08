@@ -80,7 +80,7 @@ type node struct {
 	authored *Schema
 
 	// The origin field names the field position this node occupies, for the
-	// reports in [run.checkNullLiterals]. A field node carries it, and so
+	// reports in [run.checkCanvasLiterals]. A field node carries it, and so
 	// does every element node beneath that field. Nil for every other node.
 	origin *fieldOrigin
 	// The overrode field, on a node a jsonschema tag's type= pair rewrote in
@@ -340,7 +340,7 @@ func allocCanvasTree(n *node, draft Draft) {
 }
 
 // assignFieldOrigins records the field position on a field node and on every
-// sequence or map element beneath it, so [run.checkNullLiterals] can name
+// sequence or map element beneath it, so [run.checkCanvasLiterals] can name
 // the field a late-refused null literal sits in. It descends only into
 // elements (items and prefix), wherever a node carries them. A struct property
 // is a separate field node, which takes its own origin when the generator
@@ -962,13 +962,15 @@ func keepsOwnFields(edited, pristine *Schema, slots []string) bool {
 	return true
 }
 
-// checkNullLiterals scans the authored canvas of every field and element
-// node for a null literal a field-level writer committed against an
-// occurrence whose final decision admits none, and reports the first. The
-// jsonschema tag refuses such a literal at parse time, since it runs after
-// the null pass; a tag interpreter writes onto the canvas without consulting
-// the decision, through [FieldContext.Canvas] or a [Constraints] setter, so
-// this pass is where its literal meets the decision.
+// checkCanvasLiterals scans the authored canvas of every field and element
+// node for a literal no rendered schema can carry, and reports the first: a
+// null literal a field-level writer committed against an occurrence whose
+// final decision admits none, or an empty enum, which admits nothing while
+// its JSON form omits the keyword. The jsonschema tag refuses such a literal
+// at parse time, since it runs after the null pass, and the [Constraints]
+// setters refuse an empty enumeration; a tag interpreter writing through
+// [FieldContext.Canvas] consults neither, so this pass is where its literal
+// meets the rule.
 //
 // The walk is [run.walkReachable] rather than [walkNodes], so the check
 // covers exactly the defs render emits. A def whose only surviving reference is
@@ -976,16 +978,38 @@ func keepsOwnFields(edited, pristine *Schema, slots []string) bool {
 // scan alone. The visitor returns nothing, so the pass keeps the first report
 // and lets the walk finish. Walk order is deterministic, which is what makes
 // the first report name one occurrence rather than an arbitrary one.
-func (g *run) checkNullLiterals(root *node) error {
+func (g *run) checkCanvasLiterals(root *node) error {
 	var reported error
 
 	g.walkReachable(root, map[*defEntry]bool{}, func(n *node) {
 		if reported == nil {
 			reported = nullLiteralReport(n)
 		}
+
+		if reported == nil {
+			reported = emptyEnumReport(n)
+		}
 	}, nil)
 
 	return reported
+}
+
+// emptyEnumReport returns the rejection a node's authored canvas earns for a
+// non-nil empty enum, or nil when the node carries no origin or its canvas
+// holds no enum or a populated one. The report names the field the enum
+// sits in and marks an element position, as [nullLiteralReport] does.
+func emptyEnumReport(n *node) error {
+	if n.origin == nil || n.authored == nil || n.authored.Enum == nil || len(n.authored.Enum) > 0 {
+		return nil
+	}
+
+	if n.origin.element {
+		return fmt.Errorf("%s field %q: element: authored canvas: keyword %q: %w",
+			n.origin.parent, n.origin.field, "enum", tagmodel.ErrNoValues)
+	}
+
+	return fmt.Errorf("%s field %q: authored canvas: keyword %q: %w",
+		n.origin.parent, n.origin.field, "enum", tagmodel.ErrNoValues)
 }
 
 // nullLiteralReport returns the rejection a node's authored canvas earns
