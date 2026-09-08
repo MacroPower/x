@@ -471,10 +471,14 @@ func (in *inliner) run(s *Schema) (*Schema, error) {
 
 	// A JSON-pointer fallback target (a sub-schema carried as raw JSON in an
 	// unknown keyword) is materialized fresh by the session and spliced into
-	// the output, so [inliner.fallbackVet] freezes and checks it at
+	// the output, so the [newFallbackVet] vet freezes and checks it at
 	// materialization; without this an ill-formed target would inline into a
-	// malformed output schema this package's own [Compile] rejects.
-	in.session = reg.NewSession(in.fallbackVet)
+	// malformed output schema this package's own [Compile] rejects. The
+	// session keeps the minted proof, which [inliner.vetTarget] reads where
+	// the walk records the target. The vet wraps a violation in
+	// [ErrRefResolve], so it surfaces through the referencing ref exactly
+	// like a malformed-document violation.
+	in.session = reg.NewSession(newFallbackVet(in.vetProfile(), true))
 
 	in.recordDoc(rootDoc, "", in.session.SchemaBase(pristine).String())
 
@@ -521,7 +525,7 @@ func (in *inliner) run(s *Schema) (*Schema, error) {
 // expansion for a policy to answer, so walkPair replays each other failure
 // at the references that do reach it.
 //
-// The mode decides a target that [inliner.fallbackVet] rejects the same way it
+// The mode decides a target that the [newFallbackVet] vet rejects the same way it
 // decides a document. Under a strict walk the rejection refuses the run at
 // materialization, the same point at which Compile refuses it. Under a
 // tolerant walk it waits in the session's pointer cache until the ref that
@@ -632,7 +636,7 @@ func (in *inliner) grow() {
 // vetTarget returns the [schemavet.Node] currency [inliner.recordNode]
 // demands for a resolved target the walk has not recorded yet. Every such
 // target is a node of a tree the session's JSON-pointer fallback froze and
-// vetted through [inliner.fallbackVet] before returning it, and the session
+// vetted through the [newFallbackVet] vet before returning it, and the session
 // kept the proof, so the call reads that proof rather than running a second
 // pass. The target is the tree's root, or a node below it that an $id or
 // $anchor inside the tree registered, reached when the ref naming it expands
@@ -1201,11 +1205,7 @@ func (in *inliner) resolveTarget(node *Schema, ref string) (*Schema, string, str
 // [RefResolver], the [RefFallback] policy), falling back to
 // [context.Background] when none was set.
 func (in *inliner) runContext() context.Context {
-	if in.ctx == nil {
-		return context.Background()
-	}
-
-	return in.ctx
+	return runContext(in.ctx)
 }
 
 // vetProfile is the structural-vetting and freezing policy the run applies
@@ -1220,24 +1220,6 @@ func (in *inliner) vetProfile() schemavet.Profile {
 	profile.InertIDs = in.retrievalBase
 
 	return profile
-}
-
-// fallbackVet is the session's [refresolve.FallbackVet]: it freezes each
-// JSON-pointer fallback target and runs the structural checks over it before
-// the session registers it. A target carved out of raw JSON in an unknown
-// keyword never passed through a document-level vet, so the check runs at
-// materialization, minus the identifier pass, which needs a document base no
-// pointer target carries. The session keeps the minted proof, which
-// [inliner.vetTarget] reads where the walk records the target. A violation
-// wraps [ErrRefResolve], so it surfaces through the referencing ref exactly
-// like a malformed-document violation.
-func (in *inliner) fallbackVet(sc *Schema, base uriref.DocKey, locator string) (schemavet.Node, error) {
-	node, err := schemavet.FreezeNode(sc, locator, base, in.vetProfile())
-	if err != nil {
-		return schemavet.Node{}, fmt.Errorf("%w: %w", ErrRefResolve, err)
-	}
-
-	return node, nil
 }
 
 // fetchDoc is the inliner's [refresolve.Fetch] closure: it fetches the

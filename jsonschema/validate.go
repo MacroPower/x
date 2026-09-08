@@ -957,11 +957,18 @@ func computeBounds(schema *Schema) *precomputedBounds {
 // for hook invocations (the [RefResolver], registered [FormatValidator]
 // values), falling back to [context.Background] when no entry point set one.
 func (v *validator) runContext() context.Context {
-	if v.ctx == nil {
+	return runContext(v.ctx)
+}
+
+// runContext returns ctx, or [context.Background] when no entry point set
+// one, so every hook invocation the validator and the inliner make receives
+// a non-nil context.
+func runContext(ctx context.Context) context.Context {
+	if ctx == nil {
 		return context.Background()
 	}
 
-	return v.ctx
+	return ctx
 }
 
 // callResolver invokes resolver for uri under ctx, with ok reporting whether
