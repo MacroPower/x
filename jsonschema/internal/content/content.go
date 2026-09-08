@@ -56,7 +56,10 @@ func MediaTypeIsJSON(mediaType string) bool {
 //     and so cannot be decoded for the media-type check (both keywords stay
 //     annotations).
 //
-// strictBase64 selects the draft's base64 grammar: Draft 2020-12 cites
+// The encoding name is matched without regard to case, as RFC 2045 section
+// 6.1 defines the token, so "Base64" and "BASE64" take the base64 branch.
+//
+// The strictBase64 flag selects the draft's base64 grammar: Draft 2020-12 cites
 // RFC 4648, which forbids characters outside the base alphabet including line
 // breaks, while Draft-07 cites the MIME base64 of RFC 2045, which ignores
 // them. [encoding/base64] silently skips \r and \n, so the strict form rejects
@@ -65,7 +68,7 @@ func Assert(encoding, mediaType, str string, strictBase64 bool) (string, error) 
 	decoded := []byte(str)
 	decodedKnown := true
 
-	switch encoding {
+	switch strings.ToLower(encoding) {
 	case "":
 		// No encoding: the instance string is the content itself.
 	case Base64:

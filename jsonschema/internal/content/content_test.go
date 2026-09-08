@@ -62,6 +62,20 @@ func TestAssert(t *testing.T) {
 			keyword:   "contentEncoding",
 			decodeErr: true,
 		},
+		// RFC 2045 section 6.1, which Draft-07 cites for the encoding
+		// names, makes the token case-insensitive, so a spelling in another
+		// case is asserted rather than left as an annotation.
+		"uppercase Base64 is asserted": {
+			encoding:  "Base64",
+			str:       "not!base64!",
+			keyword:   "contentEncoding",
+			decodeErr: true,
+		},
+		"BASE64 then valid json": {
+			encoding:  "BASE64",
+			mediaType: "application/json",
+			str:       validB64,
+		},
 		"json media type valid": {
 			mediaType: "application/json",
 			str:       `{"a":1}`,

@@ -1338,14 +1338,15 @@
 //     run asserts format under Draft-07 and treats it as annotation-only
 //     under Draft 2020-12 unless the format-assertion vocabulary is active.
 //   - [WithContent] asserts contentEncoding (base64) and contentMediaType
-//     (application/json) for string instances. Both are annotation-only by
-//     default. Base64 follows the draft's citation, RFC 4648 under 2020-12
-//     (line breaks rejected) and MIME base64 under Draft-07 (line breaks
-//     ignored). The media-type assertion judges the decoded content as
-//     application/json per RFC 8259, so duplicate member names and invalid
-//     UTF-8 pass there even though the validation entry points reject both
-//     in the instance document itself. The keywords belong to the content
-//     vocabulary and are skipped when it is inactive.
+//     (application/json) for string instances. Both names are matched
+//     without regard to case, as RFC 2045 defines them. Both keywords are
+//     annotation-only by default. Base64 follows the draft's citation, RFC
+//     4648 under 2020-12 (line breaks rejected) and MIME base64 under
+//     Draft-07 (line breaks ignored). The media-type assertion judges the
+//     decoded content as application/json per RFC 8259, so duplicate member
+//     names and invalid UTF-8 pass there even though the validation entry
+//     points reject both in the instance document itself. The keywords
+//     belong to the content vocabulary and are skipped when it is inactive.
 //   - [WithVocabularies] directly specifies the active vocabularies for the
 //     validation run. The listed URIs are active, and every other vocabulary
 //     is inactive.
