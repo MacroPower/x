@@ -158,6 +158,11 @@
 //     wrapper, or the $defs entry that schema references. When a
 //     self-referential root stays in $defs, the defaults apply to that
 //     definition, shared by every recursive occurrence.
+//   - A name a composed embed promotes (see Struct Fields) takes a default
+//     only where the parent declares it as a property. [Draft2020] emits a
+//     true placeholder for it beside allOf, which takes the default, while
+//     [Draft7] emits none, so the name keeps whatever the embed's branch
+//     carries.
 //   - Under [Draft7], a default landing on a $ref'd property moves the $ref
 //     into an allOf wrap, the same shape tag defaults produce, because
 //     Draft-07 readers ignore $ref siblings.
