@@ -88,10 +88,10 @@ type Knot struct {
 	R *KnotRoot `json:"r,omitempty"`
 }
 
-// KnotRoot is the root type for the reachability false-suppression test: its
+// KnotRoot is the root type for the reachability false-suppression test. Its
 // A field registers alpha.Knot first and then orphans it via a type=
-// override, while B references beta.Knot, whose provisional ref token
-// ("#/$defs/Knot") collides with the orphaned def's base name.
+// override, while B references beta.Knot, whose base name "Knot" collides
+// with the orphaned def's.
 type KnotRoot struct {
 	A Knot      `json:"a" jsonschema:"type=string"`
 	B beta.Knot `json:"b"`

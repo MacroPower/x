@@ -9,8 +9,8 @@ type Widget struct {
 }
 
 // Knot is a test type whose name intentionally collides with alpha.Knot, for
-// the reachability test that pins provisional ref-token resolution under a
-// base-name collision.
+// the reachability test that pins $ref resolution under a base-name
+// collision.
 type Knot struct {
 	// N is an arbitrary field so the colliding Knot has content.
 	N int `json:"n"`
