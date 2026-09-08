@@ -58,6 +58,17 @@ func TestCompileChecksIDDomain(t *testing.T) {
 				"allOf": [{"$ref": "#/definitions/t", "$id": "relative.json"}]
 			}`,
 		},
+		"draft-07 unparsable id beside ref is ignored": {
+			// The draft ignores the $id outright, so the check reads nothing
+			// of it, not even whether it parses. The parse step used to run
+			// ahead of the sibling exemption and refused a document the
+			// registry would have resolved without consulting the $id.
+			schema: `{
+				"$schema": "http://json-schema.org/draft-07/schema#",
+				"definitions": {"t": {"type": "integer"}},
+				"allOf": [{"$ref": "#/definitions/t", "$id": "http://[::1"}]
+			}`,
+		},
 		"draft-07 id beside ref rebases no child": {
 			// The ignored $id changes no base, so the child's relative $id
 			// resolves against the root's absent base and is refused where

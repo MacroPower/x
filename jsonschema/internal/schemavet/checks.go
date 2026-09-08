@@ -344,13 +344,18 @@ func checkVocabularyPlacement(schema *Schema, schemaPath string, profile Profile
 // checkSchemaID checks one node's non-empty $id against the keyword's domain,
 // judged against the base in effect at the node. Under Draft-07 two forms go
 // unchecked: an $id beside a $ref (the draft ignores it, so [applyID]
-// registers nothing for it and rebases nothing) and a fragment-carrying $id
-// (the anchor spelling); Draft 2020-12 rejects any fragment in $id (core
-// section 8.2.1). A checked $id must parse, and its resolved form must be an
+// registers nothing for it and rebases nothing, and this check reads no
+// further into it, not even to parse it) and a fragment-carrying $id (the
+// anchor spelling); Draft 2020-12 rejects any fragment in $id (core section
+// 8.2.1). A checked $id must parse, and its resolved form must be an
 // absolute URI; a relative $id with no absolute base registers no resolvable
 // URI, so every ref targeting it would silently miss.
 func checkSchemaID(schema *Schema, schemaPath string, base uriref.DocKey, profile Profile) error {
 	id := schema.ID
+
+	if profile.Draft7 && schema.Ref != "" {
+		return nil
+	}
 
 	if uriref.IsFragmentOnly(id) {
 		if profile.RejectIDFragment {
@@ -365,11 +370,6 @@ func checkSchemaID(schema *Schema, schemaPath string, base uriref.DocKey, profil
 	resolved, fragment, err := uriref.Resolve(base, id)
 	if err != nil {
 		return fmt.Errorf("%w: cannot parse $id %q at %s/$id", ErrInvalidID, id, schemaPath)
-	}
-
-	// Draft-07 ignores an $id beside a $ref, so its domain goes unchecked.
-	if profile.Draft7 && schema.Ref != "" {
-		return nil
 	}
 
 	if !fragment.IsEmpty() {
