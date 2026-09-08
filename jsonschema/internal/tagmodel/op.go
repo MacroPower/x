@@ -20,6 +20,11 @@ var (
 	// in one place.
 	ErrUnsupported = errors.New("constraint not supported for this shape")
 
+	// ErrNoValues reports an enumeration rule or an enumeration write that
+	// names no value at all. A rule with no values pins nothing, and an
+	// empty enum admits nothing while its JSON form omits the keyword.
+	ErrNoValues = errors.New("requires at least one value")
+
 	// The opNames table labels each operation for the matrix dump, the panic messages,
 	// and the rejection text.
 	opNames = [opCount]string{
@@ -321,12 +326,12 @@ func bindParams(rule KeyRule, raw string, hasValue bool) (Params, error) {
 
 	case ParamList:
 		if !hasValue {
-			return Params{}, errors.New("requires at least one value")
+			return Params{}, ErrNoValues
 		}
 
 		values := rule.Split(raw)
 		if len(values) == 0 {
-			return Params{}, errors.New("requires at least one value")
+			return Params{}, ErrNoValues
 		}
 
 		return Params{values: values}, nil
@@ -342,7 +347,7 @@ func bindParams(rule KeyRule, raw string, hasValue bool) (Params, error) {
 func checkParams(op Op, params Params) error {
 	if op == OpOneOf {
 		if params.Len() == 0 {
-			return errors.New("requires at least one value")
+			return ErrNoValues
 		}
 
 		return nil

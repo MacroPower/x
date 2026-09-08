@@ -2,7 +2,6 @@ package tagmodel
 
 import (
 	"cmp"
-	"errors"
 	"fmt"
 	"reflect"
 	"slices"
@@ -612,7 +611,7 @@ func SetConst(t Target, v any) error {
 // would.
 func SetEnum(t Target, vals []any) error {
 	if len(vals) == 0 {
-		return errors.New("tagmodel: an enumeration needs at least one value")
+		return fmt.Errorf("tagmodel: enumeration %w", ErrNoValues)
 	}
 
 	if c := t.Canvas.Const; c != nil && !constraint.ValuesContain(vals, *c) {
