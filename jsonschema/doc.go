@@ -804,13 +804,16 @@
 //     const and default on a string field, where it means the empty string
 //     ({"type":"string","const":""}).
 //   - An integer value is a JSON integer: an optional minus, then a single
-//     zero or a digit run with no leading zero. That covers a numeric value
-//     on an integer-kind field and every length or count, so minimum=+1,
-//     minimum=010, const=0x10, and minLength=010 are errors. A float-kind
-//     field takes any decimal spelling, including a leading plus and an
-//     exponent, so long as the value is one the field's width holds:
-//     10.0000001 on a float32 field is an error, since every float32 near
-//     it renders as 10.
+//     zero or a digit run with no leading zero. That covers a const, enum,
+//     default, or examples value on an integer-kind field and every length
+//     or count, so const=+1, const=010, const=0x10, and minLength=010 are
+//     errors. A numeric bound (minimum and its siblings, and multipleOf) is
+//     a keyword value rather than a field value and takes the decimal
+//     grammar on every kind, so minimum=1.5 and maximum=1e15 are legal on
+//     an int field. A float-kind field takes any decimal spelling, including
+//     a leading plus and an exponent, so long as the value is one the
+//     field's width holds: 10.0000001 on a float32 field is an error, since
+//     every float32 near it renders as 10.
 //   - For values the tag cannot express, use [JSONSchemaExtender] or doc
 //     comments through [WithDescriptionProvider].
 //
