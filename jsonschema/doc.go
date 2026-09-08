@@ -798,8 +798,11 @@
 //
 //   - "|" separates enum and examples values, so a value cannot contain "|".
 //   - Commas separate pairs, so a value containing a comma escapes it with a
-//     backslash; jsonschema:"description=Hello\, World" sets the description
-//     "Hello, World". A literal backslash is "\\".
+//     backslash. Go's struct-tag syntax consumes one level of escaping
+//     first, so the source spelling is
+//     jsonschema:"description=Hello\\, World", which reaches the tag as
+//     description=Hello\, World and sets the description "Hello, World". A
+//     literal backslash is "\\\\" in source.
 //   - An empty value (const= or default=) is an error for every key except
 //     const and default on a string field, where it means the empty string
 //     ({"type":"string","const":""}).
