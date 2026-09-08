@@ -50,7 +50,9 @@ func (f validateOptionFunc) applyValidate(v *validator) { f(v) }
 // at the registration site, so one checker implementation can serve several
 // names. [FormatValidatorFunc] adapts a bare function. Registering a name
 // again, including a built-in format name, replaces the previous checker. A
-// nil f or an empty name is ignored.
+// nil f or an empty name is ignored. A registered checker runs only when the
+// run asserts format: always under Draft-07, and under Draft 2020-12 only
+// with [WithFormats](true) or an active format-assertion vocabulary.
 func WithFormatValidator(name string, f FormatValidator) ValidateOption {
 	return validateOptionFunc(func(v *validator) {
 		if f != nil && name != "" {

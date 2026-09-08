@@ -1330,7 +1330,10 @@
 //   - [WithFormatValidator] registers a custom format checker (a
 //     [FormatValidator]) under the format name it checks, with
 //     [FormatValidatorFunc] adapting a bare function. The checker receives
-//     the validation run's context and the name each check runs under.
+//     the validation run's context and the name each check runs under. A
+//     registered checker runs only when the run asserts format: always under
+//     Draft-07, and under Draft 2020-12 only with [WithFormats](true) or an
+//     active format-assertion vocabulary.
 //   - [WithFormats] forces built-in format assertion on or off. By default a
 //     run asserts format under Draft-07 and treats it as annotation-only
 //     under Draft 2020-12 unless the format-assertion vocabulary is active.
