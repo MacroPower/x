@@ -195,10 +195,13 @@ func TestValidateContainsFloorWithoutValidationVocab(t *testing.T) {
 // TestValidateUnknownFormatUnderFormatAssertionVocabulary locks in the 2020-12
 // requirement (validation section 7.2.3) that an implementation fails on
 // unknown formats when the format-assertion vocabulary is specified: with
-// assertion driven by that vocabulary, a format name with no registered
-// checker rejects every string instance. The WithFormats(true) opt-in and
+// that vocabulary active, a format name with no registered checker rejects
+// every string instance, whether the vocabulary or WithFormats(true) turned
+// assertion on. The WithFormats(true) opt-in without the vocabulary and
 // Draft-07's default assertion are the package's own contracts and stay
-// lenient for unknown names.
+// lenient for unknown names. WithFormats(true) beside the vocabulary once
+// dropped the failure, so an option documented as opting in to assertion
+// silently relaxed the spec's MUST.
 func TestValidateUnknownFormatUnderFormatAssertionVocabulary(t *testing.T) {
 	t.Parallel()
 
@@ -246,9 +249,15 @@ func TestValidateUnknownFormatUnderFormatAssertionVocabulary(t *testing.T) {
 			instance: "x",
 			valid:    true,
 		},
-		"WithFormats force overrides the vocabulary-driven strictness": {
+		"WithFormats force keeps the vocabulary-driven strictness": {
 			schema:   &jsonschema.Schema{Format: "no-such-format"},
 			opts:     []jsonschema.ValidateOption{assertionVocabs, jsonschema.WithFormats(true)},
+			instance: "x",
+			keyword:  jsonschema.KeywordFormat,
+		},
+		"WithFormats off disables assertion under the vocabulary": {
+			schema:   &jsonschema.Schema{Format: "no-such-format"},
+			opts:     []jsonschema.ValidateOption{assertionVocabs, jsonschema.WithFormats(false)},
 			instance: "x",
 			valid:    true,
 		},

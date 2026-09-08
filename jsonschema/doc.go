@@ -1537,10 +1537,11 @@
 // one with format-assertion: false still asserts format. A vocabulary is
 // inactive only when its URI is absent from the map.
 //
-// When the format-assertion vocabulary drives assertion, a format name with
-// no registered checker rejects every string instance, per the 2020-12
-// requirement that implementations fail upon encountering unknown formats
-// (validation section 7.2.3). Assertion enabled by [WithFormats] or by
+// When the format-assertion vocabulary is active and assertion is on (by that
+// vocabulary or by [WithFormats](true)), a format name with no registered
+// checker rejects every string instance, per the 2020-12 requirement that
+// implementations fail upon encountering unknown formats (validation section
+// 7.2.3). Assertion enabled by [WithFormats] without the vocabulary or by
 // Draft-07's default instead treats an unknown format name as
 // annotation-only, asserting nothing.
 //

@@ -66,7 +66,9 @@ func WithFormatValidator(name string, f FormatValidator) ValidateOption {
 // under Draft 2020-12 unless the format-assertion vocabulary is active (per
 // validation §7.2.1, which requires format-assertion to be disabled by
 // default). WithFormats(true) opts in to assertion regardless of draft or
-// vocabulary; WithFormats(false) disables it entirely.
+// vocabulary; WithFormats(false) disables it entirely. WithFormats(true)
+// does not relax the unknown-format failure an active format-assertion
+// vocabulary mandates.
 func WithFormats(enabled bool) ValidateOption {
 	return validateOptionFunc(func(v *validator) { v.formatsForce = &enabled })
 }
@@ -668,11 +670,15 @@ func (v *validator) resolveFormats() {
 		v.formatsEnabled = true
 	default:
 		v.formatsEnabled = v.vocabs.FormatAssertion
-		// Only vocabulary-driven assertion is spec-bound to fail on unknown
-		// formats (2020-12 validation section 7.2.3); the WithFormats opt-in
-		// and Draft-07's default assertion keep unknown names annotation-only.
-		v.formatsVocabDriven = v.formatsEnabled
 	}
+
+	// Only an active format-assertion vocabulary is spec-bound to fail on
+	// unknown formats (2020-12 validation section 7.2.3), whether it or a
+	// WithFormats(true) opt-in turned assertion on; the vocabulary still
+	// governs the run. Assertion under Draft-07's default or under
+	// WithFormats(true) without the vocabulary keeps unknown names
+	// annotation-only, and WithFormats(false) asserts nothing at all.
+	v.formatsVocabDriven = v.formatsEnabled && v.profile.vocabularies && v.vocabs.FormatAssertion
 }
 
 // precomputedBounds holds the numeric bound keywords of a schema as rationals,
@@ -2530,11 +2536,12 @@ func evalFormat(ctx evalContext) []*ValidationError {
 
 	fv, exists := ctx.v.formatCheckers[schema.Format]
 	if !exists {
-		// When the format-assertion vocabulary drives assertion, 2020-12
+		// When the format-assertion vocabulary is active, 2020-12
 		// validation section 7.2.3 mandates failure on unknown formats, so a
 		// name with no registered checker rejects the instance. Assertion via
-		// WithFormats(true) or Draft-07's default stays lenient: those are the
-		// package's own opt-in contracts, and an unknown name asserts nothing.
+		// WithFormats(true) without the vocabulary or via Draft-07's default
+		// stays lenient: those are the package's own opt-in contracts, and an
+		// unknown name asserts nothing.
 		if ctx.v.formatsVocabDriven {
 			return []*ValidationError{
 				leafError(ctx.instancePath, ctx.schemaPath, KeywordFormat,
