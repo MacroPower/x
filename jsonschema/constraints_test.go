@@ -643,6 +643,55 @@ func TestConstraintsForbidComposesTypeNot(t *testing.T) {
 	})
 }
 
+// TestConstraintsForbidSchemaSparesNull pins that a forbidden subschema judges
+// the value branch alone, so a nullable field's null passes it whichever
+// order the forbids arrive in. A schema forbid used to take the free not slot,
+// which the null split scopes to the wrapper, so a bare length range (one
+// naming no type) matched null vacuously and the not rejected it, while the
+// same forbid after a value forbid moved under allOf and let the null through.
+func TestConstraintsForbidSchemaSparesNull(t *testing.T) {
+	t.Parallel()
+
+	type doc struct {
+		Alone *string `forbid:"x" json:"alone"`
+		After *string `forbid:"x" json:"after"`
+		Plain string  `forbid:"x" json:"plain"`
+	}
+
+	exact := &jsonschema.Schema{MinLength: new(3), MaxLength: new(3)}
+
+	forbid := jsonschema.TagInterpreterFunc(
+		func(_ context.Context, field jsonschema.FieldContext, _ jsonschema.Tag) error {
+			c := field.Constraints()
+			if field.Name == "after" {
+				require.NoError(t, c.Forbid("zzz"))
+			}
+
+			require.NoError(t, c.ForbidSchema(exact))
+
+			return nil
+		},
+	)
+
+	s, err := jsonschema.GenerateFor[doc](t.Context(), jsonschema.WithTagInterpreter("forbid", forbid))
+	require.NoError(t, err)
+
+	require.NoError(t, jsonschema.Validate(t.Context(), s,
+		map[string]any{"alone": nil, "after": nil, "plain": "ab"}),
+		"a null the field's decision admits is never judged by a forbidden subschema")
+	require.NoError(t, jsonschema.Validate(t.Context(), s,
+		map[string]any{"alone": "ab", "after": "ab", "plain": "abcd"}),
+		"a value outside the forbidden range passes on every occurrence")
+
+	for _, name := range []string{"alone", "after", "plain"} {
+		instance := map[string]any{"alone": "ab", "after": "ab", "plain": "ab"}
+		instance[name] = "abc"
+
+		require.Error(t, jsonschema.Validate(t.Context(), s, instance),
+			"field %q must still reject the forbidden length", name)
+	}
+}
+
 // TestConstraintsFacadeNilCanvasWrites pins the facade's write boundary:
 // every write on a facade with no canvas, the zero Constraints or one a
 // caller-built context handed out without a Canvas, is ErrNilCanvas and

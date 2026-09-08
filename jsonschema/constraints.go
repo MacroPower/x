@@ -326,10 +326,11 @@ func (c *Constraints) Forbid(value any) error {
 	return nil
 }
 
-// ForbidSchema forbids a whole subschema (a length range, say), taking the free
-// not slot or moving an existing not under allOf so both apply conjunctively.
-// A nil subschema is [ErrInvalidRule], and a facade with no canvas returns
-// [ErrNilCanvas].
+// ForbidSchema forbids a whole subschema (a length range, say). It lands as a
+// not branch under allOf on the value side, so a nullable field's null is never
+// judged by it and an existing not keeps applying beside it; [Constraints.Forbid]
+// is the way to forbid the null itself. A nil subschema is [ErrInvalidRule],
+// and a facade with no canvas returns [ErrNilCanvas].
 func (c *Constraints) ForbidSchema(forbidden *Schema) error {
 	err := c.ready()
 	if err != nil {

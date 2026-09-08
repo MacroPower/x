@@ -22,11 +22,11 @@ import (
 // forbid that lost the slot would stop applying to a null instance, which is how
 // required on a nullable field asserts anything at all.
 //
-// A forbidden subschema takes the slot only when it arrives first and alone.
-// That case is the one asymmetry left: a subschema naming no type validates null
-// vacuously, so from the wrapper it rejects null, where the same subschema beside
-// any other forbid moves to allOf and does not. Every caller in this module
-// names a type on the schema it forbids, which makes the two placements agree.
+// A forbidden subschema never takes the slot. A subschema naming no type
+// validates null vacuously, so from the wrapper it would reject the null the
+// field's own decision admits, and only when it arrived first and alone. Under
+// allOf it judges the value branch alone, in every order, on a nullable and a
+// non-nullable field alike.
 type ValueSet struct {
 	not       *jsonschema.Schema
 	allOfNots []*jsonschema.Schema
@@ -64,25 +64,18 @@ func (vs *ValueSet) Forbid(v any) {
 }
 
 // ForbidSchema forbids a whole subschema (a length range, from a collection ne),
-// which cannot ride on the not.const/not.enum accumulation. It takes the single
-// not slot when free, and otherwise moves under allOf so both apply
-// conjunctively. A not already holding forbidden values keeps the slot, since
-// those apply to a null instance only from there.
+// which cannot ride on the not.const/not.enum accumulation. It always lands
+// under allOf as its own not, so the null split leaves it on the value branch.
+// A not already holding forbidden values keeps the slot, since those apply to a
+// null instance only from there; a seeded not holding anything else is a
+// conjunction of its own and moves under allOf beside the new one.
 func (vs *ValueSet) ForbidSchema(forbidden *jsonschema.Schema) {
-	switch {
-	case vs.not == nil:
-		vs.not = forbidden
-
-	case forbidsValuesOnly(vs.not):
-		vs.allOfNots = append(vs.allOfNots, &jsonschema.Schema{Not: forbidden})
-
-	default:
-		vs.allOfNots = append(vs.allOfNots,
-			&jsonschema.Schema{Not: vs.not},
-			&jsonschema.Schema{Not: forbidden},
-		)
+	if vs.not != nil && !forbidsValuesOnly(vs.not) {
+		vs.allOfNots = append(vs.allOfNots, &jsonschema.Schema{Not: vs.not})
 		vs.not = nil
 	}
+
+	vs.allOfNots = append(vs.allOfNots, &jsonschema.Schema{Not: forbidden})
 }
 
 // forbidsValuesOnly reports whether s forbids values and nothing else. Only

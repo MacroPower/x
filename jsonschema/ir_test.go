@@ -55,8 +55,12 @@ func (h *heldPointers) keepingInterpreter(_ context.Context, field jsonschema.Fi
 
 	switch tag.Value {
 	case "forbid":
-		c.ForbidSchema(&jsonschema.Schema{MinLength: h.forbiddenMin})
-		c.ForbidSchema(h.forbiddenBody)
+		for _, forbidden := range []*jsonschema.Schema{{MinLength: h.forbiddenMin}, h.forbiddenBody} {
+			err := c.ForbidSchema(forbidden)
+			if err != nil {
+				return fmt.Errorf("forbid schema: %w", err)
+			}
+		}
 
 		field.Canvas.ContentSchema = h.content
 

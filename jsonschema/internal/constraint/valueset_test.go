@@ -111,7 +111,7 @@ func TestValueSetForbidSchemaLeavesForbiddenValuesInTheNotSlot(t *testing.T) {
 func TestValueSetForbidSchema(t *testing.T) {
 	t.Parallel()
 
-	t.Run("takes the free not slot", func(t *testing.T) {
+	t.Run("lands under allOf with the not slot free", func(t *testing.T) {
 		t.Parallel()
 
 		var vs constraint.ValueSet
@@ -120,7 +120,9 @@ func TestValueSetForbidSchema(t *testing.T) {
 		vs.ForbidSchema(forbidden)
 
 		s := renderValues(vs)
-		assert.Same(t, forbidden, s.Not)
+		assert.Nil(t, s.Not, "a subschema forbid never takes the slot the null split reads")
+		require.Len(t, s.AllOf, 1)
+		assert.Same(t, forbidden, s.AllOf[0].Not)
 	})
 
 	t.Run("moves under allOf beside forbidden values", func(t *testing.T) {
@@ -141,7 +143,7 @@ func TestValueSetForbidSchema(t *testing.T) {
 		assert.Same(t, forbidden, s.AllOf[0].Not)
 	})
 
-	t.Run("moves an existing subschema forbid under allOf", func(t *testing.T) {
+	t.Run("two subschema forbids each get their own not under allOf", func(t *testing.T) {
 		t.Parallel()
 
 		var vs constraint.ValueSet
@@ -157,6 +159,24 @@ func TestValueSetForbidSchema(t *testing.T) {
 		require.Len(t, s.AllOf, 2)
 		assert.Same(t, first, s.AllOf[0].Not)
 		assert.Same(t, second, s.AllOf[1].Not)
+	})
+
+	t.Run("moves a seeded conjunction not under allOf", func(t *testing.T) {
+		t.Parallel()
+
+		var vs constraint.ValueSet
+
+		seeded := &jsonschema.Schema{Const: new(any(5)), MinLength: new(3)}
+		forbidden := &jsonschema.Schema{MaxItems: new(9)}
+
+		vs.SeedNot(seeded)
+		vs.ForbidSchema(forbidden)
+
+		s := renderValues(vs)
+		assert.Nil(t, s.Not, "a seeded not carrying sibling keywords cannot keep the slot")
+		require.Len(t, s.AllOf, 2)
+		assert.Same(t, seeded, s.AllOf[0].Not)
+		assert.Same(t, forbidden, s.AllOf[1].Not)
 	})
 }
 

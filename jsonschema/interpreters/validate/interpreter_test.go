@@ -2029,19 +2029,25 @@ func TestValidateInterpreter_CollectionNe(t *testing.T) {
 	)
 	require.NoError(t, err)
 
+	// A forbidden subschema lands under allOf rather than in the not slot, so
+	// the null split keeps it on the value branch.
 	tags := s.Properties["tags"]
-	require.NotNil(t, tags.Not)
-	assert.Equal(t, "array", tags.Not.Type,
-		"the forbidden subschema is type-gated so it cannot vacuously match the permitted null")
-	assert.Equal(t, new(3), tags.Not.MinItems)
-	assert.Equal(t, new(3), tags.Not.MaxItems)
+	assert.Nil(t, tags.Not)
+	require.Len(t, tags.AllOf, 1)
+	require.NotNil(t, tags.AllOf[0].Not)
+	assert.Equal(t, "array", tags.AllOf[0].Not.Type,
+		"the forbidden subschema is type-gated so it cannot vacuously match an instance of another type")
+	assert.Equal(t, new(3), tags.AllOf[0].Not.MinItems)
+	assert.Equal(t, new(3), tags.AllOf[0].Not.MaxItems)
 
 	labels := s.Properties["labels"]
-	require.NotNil(t, labels.Not)
-	assert.Equal(t, "object", labels.Not.Type,
-		"the forbidden subschema is type-gated so it cannot vacuously match the permitted null")
-	assert.Equal(t, new(2), labels.Not.MinProperties)
-	assert.Equal(t, new(2), labels.Not.MaxProperties)
+	assert.Nil(t, labels.Not)
+	require.Len(t, labels.AllOf, 1)
+	require.NotNil(t, labels.AllOf[0].Not)
+	assert.Equal(t, "object", labels.AllOf[0].Not.Type,
+		"the forbidden subschema is type-gated so it cannot vacuously match an instance of another type")
+	assert.Equal(t, new(2), labels.AllOf[0].Not.MinProperties)
+	assert.Equal(t, new(2), labels.AllOf[0].Not.MaxProperties)
 
 	// The type gate keeps the forbidden subschema from vacuously matching an
 	// instance of another type, where the size keywords are inert.
@@ -2054,8 +2060,8 @@ func TestValidateInterpreter_CollectionNe(t *testing.T) {
 func TestValidateInterpreter_CollectionNeComposesWithAllOf(t *testing.T) {
 	t.Parallel()
 
-	// A second ne=N on the same collection cannot ride on the first not, so the
-	// existing not moves under allOf and each forbidden length gets its own not.
+	// A second ne=N on the same collection cannot ride on the first, so each
+	// forbidden length gets its own not under allOf.
 	type Lists struct {
 		Tags []string `json:"tags" validate:"ne=2,ne=3"`
 	}
@@ -2066,7 +2072,7 @@ func TestValidateInterpreter_CollectionNeComposesWithAllOf(t *testing.T) {
 	require.NoError(t, err)
 
 	tags := s.Properties["tags"]
-	assert.Nil(t, tags.Not, "the first not is moved under allOf")
+	assert.Nil(t, tags.Not, "a subschema forbid never takes the not slot")
 	require.Len(t, tags.AllOf, 2)
 	require.NotNil(t, tags.AllOf[0].Not)
 	require.NotNil(t, tags.AllOf[1].Not)

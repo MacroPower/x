@@ -1068,7 +1068,8 @@
 // wrapper by a fixed rule, so it resolves to the same value on a nullable
 // field as on a non-nullable one:
 //
-//   - const, enum, the string-content keywords, and the replacing keywords
+//   - const, enum, the string-content keywords, a subschema
+//     [Constraints.ForbidSchema] forbids, and the replacing keywords
 //     pattern, format, and multipleOf stay on the value branch.
 //   - Annotations and the authored bounds move to the wrapper.
 //
