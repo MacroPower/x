@@ -341,9 +341,12 @@ func valueHasType(v any, typeName string) bool {
 func (s *applyState) applyKey(key, value string) error {
 	switch key {
 	case keyword.Description, keyword.Title, keyword.Default, keyword.Examples,
-		keyword.Deprecated, keyword.ReadOnly, keyword.WriteOnly:
+		keyword.Deprecated, keyword.ReadOnly, keyword.WriteOnly, keyword.Type:
 		// The annotation appliers all overwrite, so a repeat in one tag is
-		// two stated intentions with no precedence to pick between.
+		// two stated intentions with no precedence to pick between. A second
+		// type= pair overwrites too, and drops with the first override the
+		// structure it had already discarded, so the items a type=array
+		// would keep are gone once a type=string came before it.
 		err := s.checkRepeat(key)
 		if err != nil {
 			return err

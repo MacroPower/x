@@ -3980,6 +3980,22 @@ func TestTagUniqueItemsTwiceIsRejected(t *testing.T) {
 	require.ErrorContains(t, err, `key "uniqueItems" is set twice in one tag`)
 }
 
+// TestTagTypeTwiceIsRejected pins that type= named twice in one tag is the
+// repeated-key error every other overwriting key gets. Each pair used to
+// apply in turn, so type=string,type=array on a []int generated
+// {"type":"array"} with the items schema silently gone: the first override
+// dropped it and the second restored nothing.
+func TestTagTypeTwiceIsRejected(t *testing.T) {
+	t.Parallel()
+
+	type T struct {
+		V []int `json:"v" jsonschema:"type=string,type=array"`
+	}
+
+	_, err := jsonschema.GenerateFor[T](t.Context())
+	require.ErrorContains(t, err, `key "type" is set twice in one tag`)
+}
+
 // enumeratedName is a string type whose hook-supplied schema pins an
 // enumeration, so a type= override over it has values of the old type to drop.
 type enumeratedName string

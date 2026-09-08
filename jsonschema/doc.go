@@ -990,7 +990,8 @@
 //     since the tag names the keyword outright (a tag interpreter defers to
 //     both). Naming any of them twice in one tag is an error, because no
 //     precedence applies there and dropping one of two stated values would
-//     be silent. A repeated uniqueItems is an error for the same reason.
+//     be silent. A repeated uniqueItems or type is an error for the same
+//     reason.
 //
 // Numeric, length, and count bounds from the Go kind, the jsonschema tag, and
 // tag interpreters compose by one rule, whichever source set them:
