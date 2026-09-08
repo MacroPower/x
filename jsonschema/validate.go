@@ -621,7 +621,10 @@ func (v *validator) resolveVocabularies() error {
 			return fmt.Errorf("resolve metaschema %q: %w", v.root.Schema, err)
 		}
 
-		if err == nil && ms != nil && len(ms.Vocabulary) > 0 {
+		// A present but empty $vocabulary is a declaration, not an absence:
+		// it reaches the core-required check below and fails there, as the
+		// spec's non-conformance rule demands (2020-12 core section 8.1.2).
+		if err == nil && ms != nil && ms.Vocabulary != nil {
 			rawVocabs = ms.Vocabulary
 		}
 	}

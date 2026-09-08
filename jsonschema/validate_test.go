@@ -6463,26 +6463,48 @@ func TestCompileValidateJSON(t *testing.T) {
 	assert.Contains(t, err.Error(), "JSON decode")
 }
 
+// TestCompileError pins that a metaschema $vocabulary map which does not
+// require core fails Compile with ErrUnknownVocabulary, so the failure
+// surfaces once at compile time rather than per validation. The empty map
+// is the JSON spelling {"$vocabulary":{}}: a declaration that omits core
+// entirely, which the spec makes non-conformant, and which once slipped
+// through as if the keyword were absent and left every vocabulary active.
 func TestCompileError(t *testing.T) {
 	t.Parallel()
 
-	// A 2020-12 $vocabulary map that does not require core is invalid, so the
-	// failure surfaces at compile time rather than per validation.
-	meta := &jsonschema.Schema{
-		ID: "https://example.com/core-not-required-meta",
-		Vocabulary: map[string]bool{
-			jsonschema.VocabCore2020: false,
+	tests := map[string]struct {
+		vocabulary map[string]bool
+	}{
+		"core disabled": {
+			vocabulary: map[string]bool{jsonschema.VocabCore2020: false},
+		},
+		"core omitted": {
+			vocabulary: map[string]bool{jsonschema.VocabValidation2020: true},
+		},
+		"empty map": {
+			vocabulary: map[string]bool{},
 		},
 	}
-	schema := &jsonschema.Schema{
-		Schema: "https://example.com/core-not-required-meta",
-		Type:   "string",
-	}
 
-	_, err := jsonschema.Compile(t.Context(), schema,
-		jsonschema.WithMetaSchemaResolver(jsonschema.SchemaMap{meta.ID: meta}))
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "core vocabulary must be required")
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			meta := &jsonschema.Schema{
+				ID:         "https://example.com/core-not-required-meta",
+				Vocabulary: tt.vocabulary,
+			}
+			schema := &jsonschema.Schema{
+				Schema: "https://example.com/core-not-required-meta",
+				Type:   "string",
+			}
+
+			_, err := jsonschema.Compile(t.Context(), schema,
+				jsonschema.WithMetaSchemaResolver(jsonschema.SchemaMap{meta.ID: meta}))
+			require.ErrorIs(t, err, jsonschema.ErrUnknownVocabulary)
+			assert.Contains(t, err.Error(), "core vocabulary must be required")
+		})
+	}
 }
 
 // TestCompileNilSchema pins that a nil *Schema is reported through the error
