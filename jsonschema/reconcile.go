@@ -6,7 +6,6 @@ import (
 	"go.jacobcolvin.com/x/jsonschema/internal/constraint"
 	"go.jacobcolvin.com/x/jsonschema/internal/keywordmeta"
 	"go.jacobcolvin.com/x/jsonschema/internal/schemaclone"
-	"go.jacobcolvin.com/x/jsonschema/internal/schemafield"
 	"go.jacobcolvin.com/x/jsonschema/internal/schemashape"
 	"go.jacobcolvin.com/x/jsonschema/internal/typename"
 )
@@ -246,13 +245,6 @@ func overlayAuthored(merged, canvas, base *Schema) {
 			kw.Assign(canvas, merged)
 		}
 	}
-
-	// An Assign copies a container's header (an enum, an examples list) from
-	// the canvas as is, and the canvas is the very schema a field hook wrote
-	// through, so the output would alias a slice the hook still holds.
-	// Reallocate every container so the rendered schema shares nothing with
-	// a hook.
-	schemafield.CloneContainers(merged)
 
 	// A forbidValue accumulation lands in the canvas's allOf; append it after the
 	// payload's own allOf (a composite's embed branches) so both apply
