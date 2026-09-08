@@ -59,6 +59,21 @@ var (
 	// (dur-hour = nH [dur-minute], dur-minute = nM [dur-second]). Components
 	// must appear contiguously in this order.
 	durationTimeOrder = map[byte]int{'H': 0, 'M': 1, 'S': 2}
+
+	// The rejections more than one site reports. The validator caller
+	// renders each with %v, so the text is the message a user sees; sharing
+	// one value per message keeps the sites in step and lets [errors.Is]
+	// name a verdict.
+	errInvalidHostname            = errors.New("invalid hostname")
+	errInvalidUUID                = errors.New("invalid UUID")
+	errInvalidTime                = errors.New("invalid time")
+	errInvalidDateTime            = errors.New("invalid date-time")
+	errInvalidTimeOffset          = errors.New("invalid time offset")
+	errInvalidIPv4                = errors.New("invalid IPv4 address")
+	errInvalidIPv6                = errors.New("invalid IPv6 address")
+	errDurationNoComponents       = errors.New("invalid duration: no components")
+	errRegexUnbalancedParenthesis = errors.New("invalid regex: unbalanced parenthesis")
+	errRegexNothingToRepeat       = errors.New("invalid regex: nothing to repeat")
 )
 
 func validateDateTime(s string) error {
@@ -70,12 +85,12 @@ func validateDateTime(s string) error {
 	// unchanged before it is handed to validateDate.
 	datePart, timePart, ok := strings.Cut(upper, "T")
 	if !ok {
-		return errors.New("invalid date-time")
+		return errInvalidDateTime
 	}
 
 	err := validateDate(datePart)
 	if err != nil {
-		return errors.New("invalid date-time")
+		return errInvalidDateTime
 	}
 
 	// The time half is already a substring of the uppercased timestamp, so
@@ -106,7 +121,7 @@ func validateTimeUpper(upper string) error {
 	// enforce the fixed-width "hh:mm:ss" shape explicitly; this also keeps the
 	// fixed byte offsets in validateLeapSecond aligned.
 	if !hasTwoDigitClock(upper) {
-		return errors.New("invalid time")
+		return errInvalidTime
 	}
 
 	// RFC 3339 time-secfrac permits only a period as the fractional-second
@@ -115,7 +130,7 @@ func validateTimeUpper(upper string) error {
 	// separator can occupy, so reject a comma there explicitly (before leap-
 	// second normalization, so "23:59:60,5Z" is caught too).
 	if len(upper) > 8 && upper[8] == ',' {
-		return errors.New("invalid time")
+		return errInvalidTime
 	}
 
 	// Handle leap second: temporarily replace the seconds ":60" with ":59" for
@@ -136,7 +151,7 @@ func validateTimeUpper(upper string) error {
 	}
 
 	if err != nil {
-		return errors.New("invalid time")
+		return errInvalidTime
 	}
 
 	err = validateTimeOffset(upper)
@@ -266,10 +281,10 @@ func validateTimeOffset(s string) error {
 	case offsetNone:
 		return nil
 	case offsetMalformed:
-		return errors.New("invalid time offset")
+		return errInvalidTimeOffset
 	case offsetNumeric:
 		if off.hour > 23 || off.minute > 59 {
-			return errors.New("invalid time offset")
+			return errInvalidTimeOffset
 		}
 	}
 
@@ -527,7 +542,7 @@ func validateHostname(s string) error {
 // production.
 func validateHostnameLabels(s string, banNumericTLD, allowTrailingDot bool) error {
 	if s == "" {
-		return errors.New("invalid hostname")
+		return errInvalidHostname
 	}
 
 	// Allow a single trailing dot on a multi-label FQDN (e.g. "example.com."),
@@ -535,7 +550,7 @@ func validateHostnameLabels(s string, banNumericTLD, allowTrailingDot bool) erro
 	if allowTrailingDot && strings.HasSuffix(s, ".") {
 		trimmed := s[:len(s)-1]
 		if !strings.Contains(trimmed, ".") {
-			return errors.New("invalid hostname")
+			return errInvalidHostname
 		}
 
 		s = trimmed
@@ -544,13 +559,13 @@ func validateHostnameLabels(s string, banNumericTLD, allowTrailingDot bool) erro
 	// Measure the 253-octet limit after trimming the trailing dot, which RFC
 	// 1035/1123 do not count toward it.
 	if len(s) > 253 {
-		return errors.New("invalid hostname")
+		return errInvalidHostname
 	}
 
 	labels := strings.Split(s, ".")
 	for _, label := range labels {
 		if !isLDHLabel(label) {
-			return errors.New("invalid hostname")
+			return errInvalidHostname
 		}
 
 		// Only labels carrying the "xn--" ACE prefix are A-labels and must
@@ -562,7 +577,7 @@ func validateHostnameLabels(s string, banNumericTLD, allowTrailingDot bool) erro
 		if hasACEPrefix(label) {
 			u, err := idna.Lookup.ToUnicode(label)
 			if err != nil {
-				return errors.New("invalid hostname")
+				return errInvalidHostname
 			}
 
 			err = checkContextualRules(u)
@@ -1088,19 +1103,19 @@ func isHexDigit(c byte) bool {
 
 func validateUUID(s string) error {
 	if len(s) != 36 {
-		return errors.New("invalid UUID")
+		return errInvalidUUID
 	}
 
 	for i := range 36 {
 		switch i {
 		case 8, 13, 18, 23:
 			if s[i] != '-' {
-				return errors.New("invalid UUID")
+				return errInvalidUUID
 			}
 
 		default:
 			if !isHexDigit(s[i]) {
-				return errors.New("invalid UUID")
+				return errInvalidUUID
 			}
 		}
 	}
@@ -1111,12 +1126,12 @@ func validateUUID(s string) error {
 func validateIPv4(s string) error {
 	ip := net.ParseIP(s)
 	if ip == nil || ip.To4() == nil {
-		return errors.New("invalid IPv4 address")
+		return errInvalidIPv4
 	}
 
 	// Ensure it's actually written in dotted-decimal, not ::ffff:a.b.c.d.
 	if strings.Contains(s, ":") {
-		return errors.New("invalid IPv4 address")
+		return errInvalidIPv4
 	}
 
 	return nil
@@ -1125,12 +1140,12 @@ func validateIPv4(s string) error {
 func validateIPv6(s string) error {
 	ip := net.ParseIP(s)
 	if ip == nil {
-		return errors.New("invalid IPv6 address")
+		return errInvalidIPv6
 	}
 
 	// Must contain a colon to be IPv6.
 	if !strings.Contains(s, ":") {
-		return errors.New("invalid IPv6 address")
+		return errInvalidIPv6
 	}
 
 	return nil
@@ -1242,7 +1257,7 @@ func validateRegex(s string) error {
 
 		case c == ')':
 			if depth == 0 {
-				return errors.New("invalid regex: unbalanced parenthesis")
+				return errRegexUnbalancedParenthesis
 			}
 
 			depth--
@@ -1253,7 +1268,7 @@ func validateRegex(s string) error {
 
 		case c == '*', c == '+':
 			if state != regexAtom {
-				return errors.New("invalid regex: nothing to repeat")
+				return errRegexNothingToRepeat
 			}
 
 			state = regexQuantifier
@@ -1265,7 +1280,7 @@ func validateRegex(s string) error {
 			case regexQuantifier:
 				state = regexNothing // the lazy suffix
 			case regexNothing:
-				return errors.New("invalid regex: nothing to repeat")
+				return errRegexNothingToRepeat
 			}
 
 		case c == '{':
@@ -1277,7 +1292,7 @@ func validateRegex(s string) error {
 			}
 
 			if state != regexAtom {
-				return errors.New("invalid regex: nothing to repeat")
+				return errRegexNothingToRepeat
 			}
 
 			if !ordered {
@@ -1297,7 +1312,7 @@ func validateRegex(s string) error {
 	}
 
 	if depth != 0 {
-		return errors.New("invalid regex: unbalanced parenthesis")
+		return errRegexUnbalancedParenthesis
 	}
 
 	if inClass {
@@ -1489,7 +1504,7 @@ func validateDuration(s string) error {
 
 	s = s[1:]
 	if s == "" {
-		return errors.New("invalid duration: no components")
+		return errDurationNoComponents
 	}
 
 	hasComponent := false
@@ -1558,7 +1573,7 @@ func validateDuration(s string) error {
 	}
 
 	if !hasComponent {
-		return errors.New("invalid duration: no components")
+		return errDurationNoComponents
 	}
 
 	// Weeks cannot be combined with other date or time components.
