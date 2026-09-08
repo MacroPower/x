@@ -357,7 +357,9 @@
 //   - [TypeSchema.Value] is a bare value schema. The [Nullability] stance
 //     ([NullAllowed] or [NullForbidden]) makes every occurrence of the type
 //     admit null (or none), combined with each occurrence's pointer-ness, so
-//     a hook never hand-shapes an anyOf[value, null] wrapper.
+//     a hook never hand-shapes an anyOf[value, null] wrapper. A slice or map
+//     type follows the [WithJSONOptions] nil-as-null options like a
+//     reflected one, unless its stance is [NullForbidden].
 //   - [TypeSchema.Verbatim] renders exactly as authored, with no null
 //     encoding.
 //   - [TypeSchema.Ref] aliases the whole type to another Go type and renders

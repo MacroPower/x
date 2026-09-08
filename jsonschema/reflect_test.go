@@ -1313,6 +1313,107 @@ func TestGenerateFor_NullForbiddenNamedSliceUnderFormatNull(t *testing.T) {
 	}
 }
 
+type (
+	// The hookNames type is a named slice a WithTypeSchemaFor override
+	// describes inline.
+	hookNames []string
+	// The hookTable type is a named map its own provider describes, the
+	// registration path shouldExtract routes into $defs.
+	hookTable map[string]int
+	// The forbidHookNames type is a named slice whose override declares
+	// NullForbidden.
+	forbidHookNames []string
+)
+
+func (hookTable) JSONSchema(context.Context, jsonschema.TypeContext) (jsonschema.TypeSchema, error) {
+	return jsonschema.TypeSchema{Value: &jsonschema.Schema{
+		Type:                 "object",
+		AdditionalProperties: &jsonschema.Schema{Type: "integer", Minimum: new(float64(0))},
+	}}, nil
+}
+
+// TestGenerateFor_HookDeclaredContainerFollowsFormatNull pins that a slice
+// or map type a hook describes follows FormatNilSliceAsNull and
+// FormatNilMapAsNull like a reflected one. Encoding/json/v2 never consults
+// the hook, so a nil value of the type still marshals as null under the
+// flags; the hook's node once recorded no container kind, and the schema
+// rejected the null v2 wrote. A NullForbidden stance still vetoes it.
+func TestGenerateFor_HookDeclaredContainerFollowsFormatNull(t *testing.T) {
+	t.Parallel()
+
+	type doc struct {
+		Names  hookNames            `json:"names"`
+		Table  hookTable            `json:"table"`
+		Byte   map[string]hookNames `json:"byte"`
+		Forbid forbidHookNames      `json:"forbid"`
+		Plain  []string             `json:"plain"`
+	}
+
+	overrides := []jsonschema.GenerateOption{
+		jsonschema.WithTypeSchemaFor[hookNames](jsonschema.TypeSchema{
+			Value: &jsonschema.Schema{Type: "array", Items: &jsonschema.Schema{Type: "string"}, MinItems: new(0)},
+		}),
+		jsonschema.WithTypeSchemaFor[forbidHookNames](jsonschema.TypeSchema{
+			Value:       &jsonschema.Schema{Type: "array", Items: &jsonschema.Schema{Type: "string"}},
+			Nullability: jsonschema.NullForbidden,
+		}),
+	}
+
+	tests := map[string]struct {
+		marshal   []json.Options
+		gen       []jsonschema.GenerateOption
+		wantNames []string
+		wantTable []string
+	}{
+		"defaults": {
+			wantNames: []string{"array"},
+			wantTable: []string{"object"},
+		},
+		"nil as null": {
+			gen: []jsonschema.GenerateOption{
+				jsonschema.WithJSONOptions(json.FormatNilSliceAsNull(true), json.FormatNilMapAsNull(true)),
+			},
+			marshal:   []json.Options{json.FormatNilSliceAsNull(true), json.FormatNilMapAsNull(true)},
+			wantNames: []string{"null", "array"},
+			wantTable: []string{"null", "object"},
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			s, err := jsonschema.GenerateFor[doc](t.Context(), append(overrides, tc.gen...)...)
+			require.NoError(t, err)
+
+			assert.Equal(t, tc.wantNames, typeList(s.Properties["names"]), "the overridden slice")
+			assert.Equal(t, tc.wantNames, typeList(s.Properties["plain"]), "the reflected slice")
+			assert.Equal(t, tc.wantNames, typeList(s.Properties["byte"].AdditionalProperties), "the map value")
+			assert.Equal(t, []string{"array"}, typeList(s.Properties["forbid"]), "the NullForbidden override")
+
+			require.Contains(t, s.Defs, "hookTable")
+			assert.Equal(t, tc.wantTable, typeList(s.Defs["hookTable"]), "the provider map body")
+			assert.Equal(t, "#/$defs/hookTable", s.Properties["table"].Ref, "the reference stays bare")
+
+			instance := doc{Byte: map[string]hookNames{"a": nil}, Forbid: forbidHookNames{}}
+
+			data, err := json.Marshal(instance, tc.marshal...)
+			require.NoError(t, err)
+			require.NoError(t, validateJSON(t.Context(), s, data),
+				"generated schema rejected the struct's own serialization: %s", data)
+		})
+	}
+}
+
+// typeList reads a schema's type as a list, whichever slot holds it.
+func typeList(s *jsonschema.Schema) []string {
+	if s.Types != nil {
+		return s.Types
+	}
+
+	return []string{s.Type}
+}
+
 // numberOmitEmpty holds the one string-kind field omitempty never omits:
 // jsonv1.Number's MarshalJSONTo writes 0 for the empty value, so encoding/json/v2
 // always encodes it and the field stays required. A pointer to it is omitted

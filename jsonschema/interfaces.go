@@ -92,9 +92,10 @@ const (
 // [ErrConflictingTypeSchema].
 type TypeSchema struct {
 	// Value is the bare value schema (no null wrapper). Generation applies the
-	// null encoding per Nullability and each occurrence's pointer-ness. A zero
-	// TypeSchema (nil Value, NullFromReflection, nil Verbatim/Ref) marks the type
-	// unrestricted ({}).
+	// null encoding per Nullability and each occurrence's pointer-ness; a
+	// slice or map type follows the [WithJSONOptions] nil-as-null options like
+	// a reflected one. A zero TypeSchema (nil Value, NullFromReflection, nil
+	// Verbatim/Ref) marks the type unrestricted ({}).
 	Value *Schema
 	// Verbatim is an opaque escape hatch: the schema is emitted exactly as given,
 	// with no null encoding applied. Use it for a fully-formed schema (e.g. one

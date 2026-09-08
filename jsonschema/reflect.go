@@ -564,13 +564,24 @@ func (g *run) finishTypeOverride(t reflect.Type, ts TypeSchema, pointer bool) (*
 		return nil, err
 	}
 
+	// A hook never changes what v2 writes for a nil slice or map, so the
+	// declared value is a nilable container exactly as a reflected one is,
+	// and follows the nil-as-null format flags through the same occurrence
+	// fact. An unrestricted declaration admits null already and takes no
+	// container, so it renders as the bare {} it declares.
+	var container containerKind
+
+	if !schemashape.IsEmpty(s) {
+		container = containerOf(t)
+	}
+
 	// Apply type-level comments.
 	err = g.applyTypeDescription(t, s)
 	if err != nil {
 		return nil, err
 	}
 
-	vnode := &node{kind: kindValue, payload: s, occ: occurrence{pointer: pointer}}
+	vnode := &node{kind: kindValue, payload: s, occ: occurrence{pointer: pointer, container: container}}
 
 	if g.shouldExtract(t) {
 		return g.defineType(t, vnode, ts.Nullability, pointer), nil
@@ -579,6 +590,32 @@ func (g *run) finishTypeOverride(t reflect.Type, ts TypeSchema, pointer bool) (*
 	vnode.stance = ts.Nullability
 
 	return vnode, nil
+}
+
+// containerOf names the nilable container a type is, the way the kind-based
+// step records it: a slice is a slice container (the base64 form for an
+// exact []byte) and a map a map container. A type whose method set carries a
+// marshaler is none, since v2 writes the method's output for a nil value
+// rather than the null the format flags name.
+func containerOf(t reflect.Type) containerKind {
+	if reflectkind.ImplementsAnyMarshaler(t) {
+		return containerNone
+	}
+
+	switch t.Kind() {
+	case reflect.Slice:
+		if reflectkind.IsBase64ByteSlice(t) {
+			return containerBytes
+		}
+
+		return containerSlice
+
+	case reflect.Map:
+		return containerMap
+
+	default:
+		return containerNone
+	}
 }
 
 // checkTypeSchemaExclusive reports an [ErrConflictingTypeSchema] when ts sets
