@@ -9,6 +9,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"go.jacobcolvin.com/x/jsonschema"
+	"go.jacobcolvin.com/x/jsonschema/internal/testtypes/alpha"
+	"go.jacobcolvin.com/x/jsonschema/internal/testtypes/beta"
 )
 
 // replacingExtender swaps the whole reflected schema for a fresh one via
@@ -150,4 +152,50 @@ func TestGenerateFor_InterfaceWithExtenderSkipped(t *testing.T) {
 			assert.JSONEq(t, tc.want, string(got))
 		})
 	}
+}
+
+// TestGenerateFor_ExtenderCopiedRefResolvesUnderCollision pins that a $ref an
+// extender copies out of its view into a literal of its own resolves in the
+// output. The extender runs before $defs names are final, so the view names
+// each definition by a provisional token; under a base-name collision the
+// final key differs from it. Generation rewrites the copied token to the
+// final key and emits the definition it names, so the schema compiles and
+// accepts the marshaled value.
+func TestGenerateFor_ExtenderCopiedRefResolvesUnderCollision(t *testing.T) {
+	t.Parallel()
+
+	type root struct {
+		A alpha.Widget `json:"a"`
+		B beta.Widget  `json:"b"`
+	}
+
+	s, err := jsonschema.GenerateFor[root](t.Context(),
+		jsonschema.WithTypeSchemaExtenderFor[root](
+			func(_ context.Context, _ jsonschema.TypeContext, ts *jsonschema.TypeSchema) error {
+				b := ts.Value.Properties["b"]
+				ts.Value.Properties["b"] = &jsonschema.Schema{
+					AnyOf: []*jsonschema.Schema{{Ref: b.Ref}, {Type: "null"}},
+				}
+
+				return nil
+			},
+		))
+	require.NoError(t, err)
+
+	require.Contains(t, s.Defs, "alpha_Widget")
+	require.Contains(t, s.Defs, "beta_Widget")
+	assert.Equal(t, "#/$defs/alpha_Widget", s.Properties["a"].Ref)
+
+	b := s.Properties["b"]
+	require.Len(t, b.AnyOf, 2)
+	assert.Equal(t, "#/$defs/beta_Widget", b.AnyOf[0].Ref,
+		"the copied provisional reference must be rewritten to the final key")
+
+	v, err := jsonschema.Compile(t.Context(), s)
+	require.NoError(t, err, "every $ref the output carries must resolve")
+
+	instance, err := json.Marshal(root{B: beta.Widget{Color: "red"}})
+	require.NoError(t, err)
+	require.NoError(t, v.ValidateJSON(t.Context(), instance))
+	require.NoError(t, v.ValidateJSON(t.Context(), []byte(`{"a":{"label":"x","size":1},"b":null}`)))
 }

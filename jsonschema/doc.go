@@ -367,7 +367,12 @@
 // beside what it derives for the position, such as its null admission and its
 // struct-tag facts. A property or element whose type-derived keywords the
 // extender changed or replaced is emitted as written, and generation derives
-// nothing further for it.
+// nothing further for it. A $ref the view shows for a $defs-extracted type is
+// a provisional name, since the extender runs before generation settles the
+// $defs keys; an extender may test, clear, or copy it, and a copy placed
+// anywhere in the value (a branch of its own, say) is emitted with the final
+// key and keeps that definition in the output. A field-level hook runs after
+// the keys are settled and reads the final $ref in its Base.
 //
 // When a registered provider ([WithTypeSchemaProvider] or [WithTypeSchema])
 // or [JSONSchemaProvider] supplies the schema, [JSONSchemaExtender] does not

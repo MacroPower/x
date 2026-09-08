@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"go.jacobcolvin.com/x/jsonschema/internal/jsonptr"
+	"go.jacobcolvin.com/x/jsonschema/internal/schemafield"
 )
 
 // defaultNamer returns a definition name for a Go type. Characters that are not
@@ -66,7 +67,9 @@ func (g *run) shouldExtract(t reflect.Type) bool {
 // name collisions by prefixing with the package's base directory name, then
 // with the full import path if collisions persist. It runs before render, so
 // renderRef emits final names directly; because refs are defEntry pointer
-// links, no ref re-pointing pass is needed.
+// links, no ref re-pointing pass is needed for them. The provisional tokens
+// the reflection phase wrote into payloads are rewritten afterward by
+// [run.finalizeRefs].
 func (g *run) assignDefNames() {
 	// Group entries by their pre-disambiguation base name.
 	byBase := map[string][]*defEntry{}
@@ -139,6 +142,65 @@ func (g *run) assignDefNames() {
 			finalName := uniqueName(chosen[i], used)
 			e.name = finalName
 			used[finalName] = true
+		}
+	}
+}
+
+// finalizeRefs rewrites every provisional def token in the IR to the final
+// $ref string assignDefNames settled, so no phase after it sees a token. A
+// token sits in a ref node's own payload, and in any literal a type-level
+// hook copied it into, such as a branch grafted beside a property or a slot
+// replaced wholesale. The walk covers the root graph, every def body whether
+// or not the root reaches it, and the node a type= override replaced, whose
+// view the jsonschema tag reads later. Payload subtrees are scanned once each
+// through the scanned set, so a subtree a hook aliased into two slots is
+// rewritten once.
+func (g *run) finalizeRefs(root *node) {
+	prefix := g.profile.refPrefix()
+
+	final := make(map[string]string, len(g.defs))
+	for _, e := range g.defs {
+		final[e.token] = prefix + e.name
+	}
+
+	scanned := map[*Schema]bool{}
+
+	var rewrite func(s *Schema)
+
+	rewrite = func(s *Schema) {
+		if s == nil || scanned[s] {
+			return
+		}
+
+		scanned[s] = true
+
+		if name, ok := final[s.Ref]; ok {
+			s.Ref = name
+		}
+
+		for _, child := range schemafield.Children(s) {
+			rewrite(child)
+		}
+	}
+
+	seen := map[*defEntry]bool{}
+
+	var visit func(n *node)
+
+	visit = func(n *node) {
+		rewrite(n.payload)
+
+		if n.overrode != nil {
+			walkNodes(n.overrode, seen, visit)
+		}
+	}
+
+	walkNodes(root, seen, visit)
+
+	for _, e := range g.defs {
+		if !seen[e] {
+			seen[e] = true
+			walkNodes(e.body, seen, visit)
 		}
 	}
 }

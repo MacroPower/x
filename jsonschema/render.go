@@ -35,7 +35,8 @@ func (g *run) render(n *node) *Schema {
 // its payload. For a composite it fills the copy's slots from the rendered
 // child nodes. A slot a build-time extender authored as a literal (a property
 // replaced with the extender's own schema, say) is no longer node-backed, so
-// the copy carries it as written.
+// the copy carries it as written; a $ref inside it already names the final
+// key, which [run.finalizeRefs] settled before any hook ran again.
 func (g *run) renderBase(n *node) *Schema {
 	if n.kind == kindRef {
 		return g.renderRef(n.payload, n.def)
@@ -106,10 +107,12 @@ func (g *run) renderBase(n *node) *Schema {
 	return base
 }
 
-// renderRef emits a $ref schema from a copy of payload, replacing the
-// provisional name with the def's final name. Under Draft-07 a $ref beside any
-// sibling keyword moves into allOf, since Draft-07 readers ignore keywords next
-// to $ref; under 2020-12 the siblings stay alongside.
+// renderRef emits a $ref schema from a copy of payload, writing the def's
+// final name from the node link; the payload already carries it since
+// [run.finalizeRefs], so the write restates the link rather than resolving a
+// string. Under Draft-07 a $ref beside any sibling keyword moves into allOf,
+// since Draft-07 readers ignore keywords next to $ref; under 2020-12 the
+// siblings stay alongside.
 func (g *run) renderRef(payload *Schema, def *defEntry) *Schema {
 	s := schemaclone.Clone(payload)
 	s.Ref = g.profile.refPrefix() + def.name

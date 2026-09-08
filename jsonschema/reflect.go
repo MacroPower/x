@@ -190,10 +190,14 @@ func (g *run) generate(t reflect.Type) (*Schema, error) {
 	}
 
 	// Phase 2: assign final $defs names (disambiguating collisions) before
-	// render emits any $ref string. Names are keyed on defEntry identity, so
-	// reachability and root inlining below key on identity too and need no
-	// renamed-entry lookup.
+	// render emits any $ref string, then rewrite every provisional token the
+	// reflection phase wrote into a payload, whether a ref node's own or one
+	// a type-level hook copied into a literal, so nothing after this phase
+	// sees a token. Names are keyed on defEntry identity, so reachability and
+	// root inlining below key on identity too and need no renamed-entry
+	// lookup.
 	g.assignDefNames()
+	g.finalizeRefs(root)
 
 	// Phase 3: decide the null admission of every node from the facts the
 	// build recorded and the stances the type-level hooks declared.

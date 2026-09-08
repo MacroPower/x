@@ -871,7 +871,7 @@ func (fc FieldContext) targetOf(shape tagmodel.Shape) tagmodel.Target {
 	target := tagmodel.NewTarget(shape, fc.Canvas, fc.Base, elems)
 
 	// A $defs-extracted type declares its keywords on the definition, not on
-	// the provisional $ref payload the base holds, so the model reads the
+	// the bare $ref payload the base holds, so the model reads the
 	// type-declared values through the same seam the classification read.
 	if read := fc.defPayload(); read != nil {
 		target = target.WithRefBase(read)
@@ -934,7 +934,7 @@ func (fc FieldContext) ready() FieldContext {
 // unit test, for example) never panics here.
 //
 // A $defs-extracted type declares its keywords on the definition rather than
-// on the provisional $ref payload the Base holds, so the accessors read
+// on the bare $ref payload the Base holds, so the accessors read
 // through the reference: a format declared by the definition is in force on
 // the field exactly as an inline one is, and the first-wins write gate sees
 // the same value these report.

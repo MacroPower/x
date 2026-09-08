@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"reflect"
 	"slices"
+	"strconv"
 
 	"go.jacobcolvin.com/x/jsonschema/internal/fieldset"
 	"go.jacobcolvin.com/x/jsonschema/internal/jsonvalue"
@@ -244,8 +245,14 @@ type embedNode struct {
 type defEntry struct {
 	typ      reflect.Type
 	body     *node  // bare value node; nil while a cycle placeholder
-	baseName string // namer output, pre-disambiguation; the provisional $ref token
+	baseName string // namer output, pre-disambiguation; collisions are grouped on it
 	name     string // final $defs key; set by assignDefNames before render
+	// Token is the provisional $ref string every reference to the entry
+	// carries until assignDefNames settles the final key. It is unique per
+	// run, and its "@" separator is a character no final key contains, so a
+	// token never spells another entry's key and a hook that copies one into
+	// a literal of its own is rewritten to the final key by finalizeRefs.
+	token string
 	// Container is the body's nilable container kind, recorded when the body
 	// is defined so every reference reads the fact off the entry rather than
 	// the body's decision. It is containerNone for a hook-declared body.
@@ -267,7 +274,12 @@ func (g *run) newDefEntry(t reflect.Type) *defEntry {
 		return e
 	}
 
-	e := &defEntry{typ: t, baseName: g.schemaName(t)}
+	baseName := g.schemaName(t)
+	e := &defEntry{
+		typ:      t,
+		baseName: baseName,
+		token:    g.profile.refPrefix() + baseName + "@" + strconv.Itoa(len(g.defs)),
+	}
 	g.typeToDef[t] = e
 	g.defs = append(g.defs, e)
 
@@ -366,15 +378,16 @@ func assignFieldOrigins(n *node, origin *fieldOrigin) {
 // pointer-ness. [run.resolveNullability] later combines it with the def
 // entry's recorded stance: a pointer occurrence of a NullForbidden type still
 // admits no null, and a non-pointer occurrence of a NullAllowed type does. Its
-// payload holds the provisional $ref string (the pre-disambiguation name), so
-// a hook reading .Ref sees a real reference; render re-emits the final name
-// via renderRef and grafts any siblings.
+// payload holds the entry's provisional token, so a type-level hook reading
+// .Ref sees a reference it can test, clear, or copy; [run.finalizeRefs]
+// rewrites the token to the final key once assignDefNames settles it, and
+// renderRef emits that key and grafts any siblings.
 func (g *run) refNode(e *defEntry, pointer bool) *node {
 	return &node{
 		kind:    kindRef,
 		def:     e,
 		occ:     occurrence{pointer: pointer},
-		payload: &Schema{Ref: g.profile.refPrefix() + e.baseName},
+		payload: &Schema{Ref: e.token},
 	}
 }
 
@@ -647,7 +660,8 @@ func walkNodes(root *node, seen map[*defEntry]bool, visit func(*node)) {
 
 // view returns a private copy of the node's bare base for a hook: a deep clone
 // of the payload, with each node-backed child slot holding the child's own
-// view and a ref child as its provisional $ref. The tuple form follows the
+// view and a ref child as its $ref (the provisional token before
+// [run.finalizeRefs] runs, the final key after). The tuple form follows the
 // draft. A hook may mutate the copy freely; the generator reads a declaration
 // back from it only where it chooses to ([node.absorbView]).
 func (n *node) view(draft Draft) *Schema {
@@ -1065,22 +1079,17 @@ func isJSONNull(v any) bool {
 	return ok && dv.Kind() == jsonvalue.Null
 }
 
-// payloadRefTargets maps every $defs ref string a hook may have authored to its
-// def entry: the final assigned name of each def, plus its provisional baseName
-// where no final name claims it (a ref node's own payload carries the
-// provisional form until render). It must be built after assignDefNames.
+// payloadRefTargets maps the final $ref string of every def entry to the
+// entry. It reads the final keys, so it is only meaningful once
+// assignDefNames and [run.finalizeRefs] have run; from then on a payload
+// carries a def reference only in this form, whether a ref node's own, one
+// a hook copied out of a view, or one a hook spelled by hand.
 func (g *run) payloadRefTargets() map[string]*defEntry {
 	prefix := g.profile.refPrefix()
 
 	targets := make(map[string]*defEntry, len(g.defs))
 	for _, e := range g.defs {
 		targets[prefix+e.name] = e
-	}
-
-	for _, e := range g.defs {
-		if _, claimed := targets[prefix+e.baseName]; !claimed {
-			targets[prefix+e.baseName] = e
-		}
 	}
 
 	return targets
@@ -1092,15 +1101,14 @@ func (g *run) payloadRefTargets() map[string]*defEntry {
 // declared: a Verbatim payload ([TypeSchema.Verbatim]), a provider's Value, a
 // slot a build-time extender replaced or a branch it grafted. A $defs
 // reference inside any of those is a reachability edge only a string scan
-// sees. The one payload Ref not scanned is a kindRef node's own: that edge is
-// node-backed (walkNodes follows it via n.def) and its string is the
-// provisional token, which a base-name collision would resolve to the wrong
-// def; the siblings a hook grafted onto that payload are still scanned. Each
-// def reached by a string hit has its body walked too, and onPayloadRef (when
-// non-nil) observes every payload ref hit, seen or not. Payload subtrees are
-// assumed acyclic, as everywhere else in the generator (hook schemas arrive
-// JSON-decoded or JSON-round-trip cloned); the scanned set is a dedup,
-// keeping shared payload subtrees scanned once.
+// sees. A kindRef node's own Ref is scanned too; it is node-backed (walkNodes
+// follows it via n.def) and holds the same final key the string scan
+// resolves, so the hit is a repeat. Each def reached by a string hit has its
+// body walked too, and onPayloadRef (when non-nil) observes every payload ref
+// hit, seen or not. Payload subtrees are assumed acyclic, as everywhere else
+// in the generator (hook schemas arrive JSON-decoded or JSON-round-trip
+// cloned); the scanned set is a dedup, keeping shared payload subtrees
+// scanned once.
 func (g *run) walkReachable(
 	root *node,
 	seen map[*defEntry]bool,
@@ -1112,21 +1120,8 @@ func (g *run) walkReachable(
 
 	var scanPayload func(s *Schema)
 
-	scanChildren := func(s *Schema) {
-		for _, child := range schemafield.Children(s) {
-			scanPayload(child)
-		}
-	}
-
 	visitAndScan := func(n *node) {
 		visit(n)
-
-		if n.kind == kindRef {
-			scanChildren(n.payload)
-
-			return
-		}
-
 		scanPayload(n.payload)
 	}
 
@@ -1148,7 +1143,9 @@ func (g *run) walkReachable(
 			}
 		}
 
-		scanChildren(s)
+		for _, child := range schemafield.Children(s) {
+			scanPayload(child)
+		}
 	}
 
 	walkNodes(root, seen, visitAndScan)

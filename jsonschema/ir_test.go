@@ -270,14 +270,15 @@ func TestExtenderNestedSlotEditsReachTheChild(t *testing.T) {
 	}
 }
 
+// TestGenerateFor_TypeOverrideDropsOrphanedDefUnderCollision pins that
+// reachability keys on def identity under a base-name collision. Field A
+// registers alpha.Widget's def first, then the type= override detaches its
+// only reference. Field B's reference to beta.Widget shares the base name
+// "Widget"; resolving it to the earlier-registered alpha.Widget would retain
+// that def as an unreferenced $defs entry.
 func TestGenerateFor_TypeOverrideDropsOrphanedDefUnderCollision(t *testing.T) {
 	t.Parallel()
 
-	// Field A registers alpha.Widget's def first, then its only reference is
-	// detached by the type= override. Field B's reference to beta.Widget carries
-	// the provisional "#/$defs/Widget" token until render; reachability must not
-	// resolve that token to the earlier-registered alpha.Widget def, which would
-	// retain it as an unreferenced $defs entry.
 	type Root struct {
 		A alpha.Widget `json:"a" jsonschema:"type=integer"`
 		B beta.Widget  `json:"b"`
@@ -295,13 +296,14 @@ func TestGenerateFor_TypeOverrideDropsOrphanedDefUnderCollision(t *testing.T) {
 }
 
 // TestGenerateFor_RootInliningUnderBaseNameCollision pins that the
-// reachability walk never string-resolves a ref node's provisional token.
-// Each field ref's payload is aliased into its parent's Properties, so the
-// scan can reach it through the parent before the node walk claims it; the
-// provisional "#/$defs/Knot" on B's ref would then resolve to the
-// first-registered claimant -- the orphaned alpha.Knot def, whose body's
-// back-reference to KnotRoot would falsely report the root's def as
-// referenced elsewhere and suppress root inlining.
+// reachability walk resolves a ref node's $ref string to the def the node
+// links, under a base-name collision. Each field ref's payload is aliased
+// into its parent's Properties, so the scan can reach it through the parent
+// before the node walk claims it; a bare "#/$defs/Knot" on B's ref would then
+// resolve to the first-registered claimant -- the orphaned alpha.Knot def,
+// whose body's back-reference to KnotRoot would falsely report the root's def
+// as referenced elsewhere and suppress root inlining. The string the scan
+// sees is the final key finalizeRefs wrote, which names beta.Knot alone.
 func TestGenerateFor_RootInliningUnderBaseNameCollision(t *testing.T) {
 	t.Parallel()
 
@@ -351,4 +353,36 @@ func TestHookCanvasContainersAreNotAliased(t *testing.T) {
 
 	assert.Equal(t, []any{"a"}, s.Properties["x"].Enum)
 	assert.Equal(t, []any{"a"}, s.Properties["x"].Examples)
+}
+
+// TestFieldHookSeesFinalRefUnderCollision pins that a field-level hook, which
+// runs after the $defs keys are settled, reads the final $ref in its Base
+// rather than the provisional token a type-level hook sees. The interpreter
+// records what it read for each field and the test compares it against the
+// keys the output carries, under a base-name collision so the two differ
+// from the bare type name.
+func TestFieldHookSeesFinalRefUnderCollision(t *testing.T) {
+	t.Parallel()
+
+	type root struct {
+		A alpha.Widget `json:"a" seen:"x"`
+		B beta.Widget  `json:"b" seen:"x"`
+	}
+
+	seen := map[string]string{}
+
+	s, err := jsonschema.GenerateFor[root](t.Context(),
+		jsonschema.WithTagInterpreter("seen", jsonschema.TagInterpreterFunc(
+			func(_ context.Context, field jsonschema.FieldContext, _ jsonschema.Tag) error {
+				seen[field.Name] = field.Base.Ref
+
+				return nil
+			},
+		)))
+	require.NoError(t, err)
+
+	want := map[string]string{"a": "#/$defs/alpha_Widget", "b": "#/$defs/beta_Widget"}
+	assert.Equal(t, want, seen)
+	assert.Equal(t, want["a"], s.Properties["a"].Ref)
+	assert.Equal(t, want["b"], s.Properties["b"].Ref)
 }
