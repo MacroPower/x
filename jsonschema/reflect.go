@@ -678,8 +678,13 @@ func (g *run) refTypeOverride(t reflect.Type, ts TypeSchema, pointer bool) (*nod
 	// The precedence is target stance, then alias stance, then pointer-ness:
 	// a Ref alias inherits the target type's stance, and its own Nullability
 	// applies only when the target is NullFromReflection (the common case,
-	// where the folded value passes through unchanged).
-	ref.stance = ts.Nullability
+	// where the folded value passes through unchanged). Along a chain of
+	// aliases the reference node is shared, and each alias writes its stance
+	// on the way out only when it declares one, so the outermost declared
+	// stance wins and an alias declaring nothing keeps the inner alias's.
+	if ts.Nullability != NullFromReflection {
+		ref.stance = ts.Nullability
+	}
 
 	return ref, nil
 }

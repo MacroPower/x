@@ -2699,6 +2699,73 @@ func TestGenerateFor_TypeSchemaRefMutualCycleRejected(t *testing.T) {
 	require.ErrorIs(t, err, jsonschema.ErrConflictingTypeSchema)
 }
 
+// The chain types alias one another: chainOuter -> chainInner -> chainTarget,
+// each registered through WithTypeSchemaFor with a Ref, so a stance declared
+// on either alias must reach the shared reference node.
+type (
+	chainOuter  struct{}
+	chainInner  struct{}
+	chainTarget struct {
+		Name string `json:"name"`
+	}
+)
+
+// TestGenerateFor_TypeSchemaRefChainStance pins which alias's stance a Ref
+// chain applies: the outermost alias that declares one. The outer alias once
+// wrote its stance unconditionally on the way out, so an outer alias
+// declaring nothing erased the inner alias's NullAllowed.
+func TestGenerateFor_TypeSchemaRefChainStance(t *testing.T) {
+	t.Parallel()
+
+	type doc struct {
+		A chainOuter `json:"a"`
+	}
+
+	tests := map[string]struct {
+		outer jsonschema.Nullability
+		inner jsonschema.Nullability
+		want  string
+	}{
+		"outer declares nothing, inner allows": {
+			inner: jsonschema.NullAllowed,
+			want:  `{"anyOf":[{"$ref":"#/$defs/chainTarget"},{"type":"null"}]}`,
+		},
+		"outer forbids, inner allows": {
+			outer: jsonschema.NullForbidden,
+			inner: jsonschema.NullAllowed,
+			want:  `{"$ref":"#/$defs/chainTarget"}`,
+		},
+		"outer allows, inner forbids": {
+			outer: jsonschema.NullAllowed,
+			inner: jsonschema.NullForbidden,
+			want:  `{"anyOf":[{"$ref":"#/$defs/chainTarget"},{"type":"null"}]}`,
+		},
+		"neither declares": {
+			want: `{"$ref":"#/$defs/chainTarget"}`,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			s, err := jsonschema.GenerateFor[doc](t.Context(),
+				jsonschema.WithTypeSchemaFor[chainOuter](jsonschema.TypeSchema{
+					Ref: reflect.TypeFor[chainInner](), Nullability: tc.outer,
+				}),
+				jsonschema.WithTypeSchemaFor[chainInner](jsonschema.TypeSchema{
+					Ref: reflect.TypeFor[chainTarget](), Nullability: tc.inner,
+				}),
+			)
+			require.NoError(t, err)
+
+			got, err := json.Marshal(s.Properties["a"])
+			require.NoError(t, err)
+			assert.JSONEq(t, tc.want, string(got))
+		})
+	}
+}
+
 // selfRefParent supplies, verbatim, a raw $ref back to the enclosing type's own
 // $defs entry -- a hand-built recursive parent link expressed through the
 // TypeSchema envelope rather than a raw $ref injected into a reflected payload.
