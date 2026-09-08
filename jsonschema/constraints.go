@@ -300,12 +300,19 @@ func (c *Constraints) SetConst(value any) error {
 // empty intersection is [ErrConstraintConflict]. For a $defs-extracted type
 // the definition's enum is not visible on the base (the provisional {$ref}
 // payload); the canvas enum rides beside the $ref and the conjunction
-// intersects the two sets there instead. An interpreter that needs its own
-// wording checks [Constraints.Enum] first.
+// intersects the two sets there instead. An empty values is [ErrInvalidRule],
+// as it is through [Constraints.Apply] with [OpOneOf]: it would admit nothing,
+// and the JSON form omits an empty enum, so the generated schema could not
+// express it. An interpreter that needs its own wording checks
+// [Constraints.Enum] first.
 func (c *Constraints) SetEnum(values []any) error {
 	err := c.ready()
 	if err != nil {
 		return err
+	}
+
+	if len(values) == 0 {
+		return fmt.Errorf("%w: an enumeration needs at least one value", ErrInvalidRule)
 	}
 
 	//nolint:wrapcheck // The model owns the conflict sentinel and its wording.

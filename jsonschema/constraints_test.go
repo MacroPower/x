@@ -764,6 +764,10 @@ func TestConstraintsFacadeInvalidRule(t *testing.T) {
 			return c.Apply(jsonschema.OpEqual, jsonschema.AxisAuto, "a", "b")
 		},
 		"empty enumeration": func(c *jsonschema.Constraints) error { return c.Apply(jsonschema.OpOneOf, jsonschema.AxisAuto) },
+		// SetEnum used to accept an empty list, leaving a non-nil empty Enum the
+		// compiled struct rejected every instance with while its JSON form,
+		// which omits an empty enum, accepted them.
+		"empty enumeration through SetEnum": func(c *jsonschema.Constraints) error { return c.SetEnum([]any{}) },
 		"unique non-boolean": func(c *jsonschema.Constraints) error {
 			return c.Apply(jsonschema.OpUnique, jsonschema.AxisAuto, "yes")
 		},

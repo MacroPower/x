@@ -2,6 +2,7 @@ package tagmodel
 
 import (
 	"cmp"
+	"errors"
 	"fmt"
 	"reflect"
 	"slices"
@@ -588,10 +589,18 @@ func SetConst(t Target, v any) error {
 // the canvas or supplied by the type rather than shadowing it: the two assert
 // conjunctively, so the allowed set is what both admit, in the order the
 // enumeration in force lists it. An empty intersection is [ErrConflict], a
-// schema no instance satisfies. A const already pinned -- by another rule or
-// by the type -- must be a member, for the same reason [SetConst] checks the
-// enumeration.
+// schema no instance satisfies. An empty vals is refused up front for the
+// same reason, and because the JSON form omits an empty enum, so a schema
+// carrying one would validate differently from its own marshaled bytes; the
+// facade reports it as its invalid-rule sentinel before reaching here, the
+// way [Apply] refuses an enumeration rule with no values. A const already
+// pinned -- by another rule or by the type -- must be a member, for the same
+// reason [SetConst] checks the enumeration.
 func SetEnum(t Target, vals []any) error {
+	if len(vals) == 0 {
+		return errors.New("tagmodel: an enumeration needs at least one value")
+	}
+
 	if c := t.Canvas.Const; c != nil && !constraint.ValuesContain(vals, *c) {
 		return fmt.Errorf("%w: the enumeration excludes a value already pinned", ErrConflict)
 	}
