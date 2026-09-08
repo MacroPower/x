@@ -160,6 +160,35 @@ func TestParseNumericBound(t *testing.T) {
 	}
 }
 
+// TestParseNumericBoundNegativeZero pins that a bound spelled as a negative
+// zero carries the positive zero. The float path used to keep the sign bit,
+// so minimum=-0 rendered as {"minimum":-0}, a literal the author never asked
+// for over the kind's own 0.
+func TestParseNumericBoundNegativeZero(t *testing.T) {
+	t.Parallel()
+
+	for name, tc := range map[string]struct {
+		value string
+		kind  reflect.Kind
+	}{
+		"keyword domain":     {value: "-0", kind: reflect.Invalid},
+		"float kind":         {value: "-0.0", kind: reflect.Float64},
+		"float32 kind":       {value: "-0e0", kind: reflect.Float32},
+		"integer kind":       {value: "-0", kind: reflect.Int},
+		"positive zero kept": {value: "0", kind: reflect.Invalid},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := constraint.ParseNumericBound(tc.value, tc.kind)
+			require.NoError(t, err)
+			assert.InDelta(t, 0, got.Val, 0)
+			assert.False(t, math.Signbit(got.Val), "a zero bound carries no sign")
+			assert.Equal(t, 0, got.Rat.Sign())
+		})
+	}
+}
+
 func TestParseNumericBoundRatIsShortestDecimal(t *testing.T) {
 	t.Parallel()
 

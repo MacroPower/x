@@ -1089,6 +1089,55 @@ func TestFloat32BoundWidthCheck(t *testing.T) {
 	}
 }
 
+// TestTagNegativeZeroBoundShipsAsZero pins that a bound spelled -0 ships as
+// the plain 0. The keyword-shaped parse kept the float's sign bit, so
+// minimum=-0 on a uint8 rendered {"minimum":-0,"maximum":255} and the same
+// on a float64 rendered {"minimum":-0}, a literal the author never asked for
+// over the kind's own floor. A const keeps the author's spelling.
+func TestTagNegativeZeroBoundShipsAsZero(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		generate func() (*jsonschema.Schema, error)
+		want     string // marshaled property schema
+	}{
+		"minimum on an unsigned field": {
+			generate: func() (*jsonschema.Schema, error) {
+				type doc struct {
+					V uint8 `json:"v" jsonschema:"minimum=-0"`
+				}
+
+				return jsonschema.GenerateFor[doc](t.Context())
+			},
+			want: `{"type":"integer","minimum":0,"maximum":255}`,
+		},
+		"exclusive maximum on a float field": {
+			generate: func() (*jsonschema.Schema, error) {
+				type doc struct {
+					V float64 `json:"v" jsonschema:"exclusiveMaximum=-0.0"`
+				}
+
+				return jsonschema.GenerateFor[doc](t.Context())
+			},
+			want: `{"type":"number","exclusiveMaximum":0}`,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			s, err := tc.generate()
+			require.NoError(t, err)
+
+			got, err := json.Marshal(s.Properties["v"])
+			require.NoError(t, err)
+			// JSONEq reads -0 and 0 as one number, so the text is compared.
+			assert.Equal(t, tc.want, string(got))
+		})
+	}
+}
+
 // TestTagTypeOverride pins the type= tag key: it replaces the reflected type
 // assertion, removes the nullable anyOf wrapper a pointer field generates,
 // and drops kind-derived numeric bounds when the new type is not numeric, so

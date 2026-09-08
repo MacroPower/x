@@ -147,6 +147,12 @@ func ParseDecimalFloat(value string) (float64, error) {
 
 // parseFloatBound parses a decimal-float bound: the shared spelling policy,
 // then the width check, so the endpoint carries the number the tag wrote.
+//
+// A bound spelled -0 or -0.0 is the value 0, and the endpoint carries the
+// positive zero: encoding/json writes the sign bit, so the schema would
+// otherwise ship {"minimum":-0}, a literal the author never asked for over the
+// kind's own 0. A field value keeps its sign, since there -0 is the author's
+// stated value and JSON Schema treats the two as equal anyway.
 func parseFloatBound(value string, kind reflect.Kind) (Endpoint, error) {
 	n, err := ParseDecimalFloat(value)
 	if err != nil {
@@ -156,6 +162,10 @@ func parseFloatBound(value string, kind reflect.Kind) (Endpoint, error) {
 	err = CheckFloatLiteral(value, kind)
 	if err != nil {
 		return Endpoint{}, err
+	}
+
+	if n == 0 {
+		n = 0
 	}
 
 	return numericEndpoint(n, numrat.Float64ToRat(n)), nil
