@@ -1346,9 +1346,11 @@
 //     validation run. The listed URIs are active, and every other vocabulary
 //     is inactive.
 //   - [WithMetaSchemaResolver] sets a [RefResolver] consulted with the root
-//     schema's $schema URI to look up the metaschema whose $vocabulary map
-//     controls which keyword groups are active. A [SchemaMap] serves fixed
-//     metaschemas by exact $id, and [ChainResolvers] composes resolvers.
+//     schema's $schema URI, passed verbatim, to look up the metaschema whose
+//     $vocabulary map controls which keyword groups are active. A
+//     [SchemaMap] serves fixed metaschemas by exact $id, so its key must
+//     match the $schema spelling exactly (a trailing empty fragment is not
+//     stripped), and [ChainResolvers] composes resolvers.
 //
 // A validation run detects the draft from the root schema's $schema field,
 // and a [WithDraft] option overrides the detection. The draft decides:
@@ -1557,9 +1559,11 @@
 //
 //  1. [WithVocabularies], the direct override.
 //  2. [WithMetaSchemaResolver], consulted once per compile with the root
-//     schema's $schema URI; a miss ([ErrNotResolved]) falls through to the
-//     default. A [SchemaMap] serves fixed metaschemas by exact $id, and
-//     [ChainResolvers] composes resolvers.
+//     schema's $schema URI, passed verbatim; a miss ([ErrNotResolved]) falls
+//     through to the default. A [SchemaMap] serves fixed metaschemas by
+//     exact $id, so its key must match the $schema spelling exactly (a
+//     trailing empty fragment is not stripped), and [ChainResolvers]
+//     composes resolvers.
 //  3. The built-in standard vocabulary set, every group active except
 //     format-assertion, so format is annotation-only by default.
 //

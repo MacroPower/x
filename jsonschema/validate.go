@@ -107,7 +107,9 @@ func WithVocabularies(uris ...string) ValidateOption {
 }
 
 // WithMetaSchemaResolver sets a [RefResolver] consulted with the root
-// schema's $schema URI to look up its metaschema. The resolved metaschema's
+// schema's $schema URI to look up its metaschema. The URI is passed
+// verbatim, so a [SchemaMap] key must match the $schema spelling exactly (a
+// trailing empty fragment is not stripped). The resolved metaschema's
 // $vocabulary map determines the active vocabularies. The resolver decides
 // the lookup's shape: a [SchemaMap] serves fixed metaschemas by exact $id,
 // a [FileResolver] serves a directory of documents, and [ChainResolvers]
