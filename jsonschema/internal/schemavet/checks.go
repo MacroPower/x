@@ -360,19 +360,9 @@ func checkSchemaID(schema *Schema, schemaPath string, base uriref.DocKey, profil
 		return nil
 	}
 
-	if uriref.IsFragmentOnly(id) {
-		// A bare "#" is the empty fragment, the one fragment 2020-12
-		// tolerates; it registers nothing and changes no base, as the
-		// trailing-"#" spelling of a URI does once its fragment drops.
-		if profile.RejectIDFragment && id != "#" {
-			return fmt.Errorf("%w: $id %q must not carry a fragment at %s/$id",
-				ErrInvalidID, id, schemaPath)
-		}
-
-		// Draft-07 anchor form: an anchor registration, no base change.
-		return nil
-	}
-
+	// The parse is the one reading [applyID] makes of every live $id, so a
+	// $id the freeze registers nothing for is refused here, the anchor
+	// spelling included.
 	resolved, fragment, err := uriref.Resolve(base, id)
 	if err != nil {
 		return fmt.Errorf("%w: cannot parse $id %q at %s/$id", ErrInvalidID, id, schemaPath)
@@ -384,7 +374,15 @@ func checkSchemaID(schema *Schema, schemaPath string, base uriref.DocKey, profil
 				ErrInvalidID, id, schemaPath)
 		}
 
-		// Draft-07 fragment-carrying $id: the anchor reading, unchecked.
+		// Draft-07 anchor spelling, fragment-only or on a URI: the anchor
+		// reading, unchecked.
+		return nil
+	}
+
+	// A bare "#" is the empty fragment, the one fragment 2020-12 tolerates;
+	// it registers nothing and changes no base, as the trailing-"#" spelling
+	// of a URI does once its fragment drops.
+	if uriref.IsFragmentOnly(id) {
 		return nil
 	}
 

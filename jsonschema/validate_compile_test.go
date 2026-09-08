@@ -65,6 +65,26 @@ func TestCompileChecksIDDomain(t *testing.T) {
 				"allOf": [{"$ref": "#frag"}]
 			}`,
 		},
+		"draft-07 escaped fragment-only id resolves by its decoded name": {
+			// The freeze used to register the raw fragment text while a
+			// reference resolves by the decoded text, so an escaped $id was
+			// reachable by neither spelling. Both spellings name one anchor.
+			schema: `{
+				"$schema": "http://json-schema.org/draft-07/schema#",
+				"definitions": {"a": {"$id": "#a%2Db", "type": "integer"}},
+				"allOf": [{"$ref": "#a-b"}, {"$ref": "#a%2Db"}]
+			}`,
+		},
+		"draft-07 unparsable fragment-only id rejected": {
+			// The freeze registers nothing for a $id it cannot parse, so the
+			// check refuses it rather than let every reference to it miss.
+			schema: `{
+				"$schema": "http://json-schema.org/draft-07/schema#",
+				"definitions": {"a": {"$id": "#a%zz", "type": "integer"}}
+			}`,
+			err:  jsonschema.ErrInvalidID,
+			path: "/definitions/a/$id",
+		},
 		"draft-07 fragment on the root URI id resolves as an anchor": {
 			// The anchor spelling on a URI: the fragment names an anchor
 			// within the document the URI part names, here the root, so the

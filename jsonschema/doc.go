@@ -1216,9 +1216,10 @@
 //     its enclosing base (the parent $id chain, or [WithBaseURI] for the
 //     root, so a relative root $id compiles exactly when a base supplies the
 //     absolute prefix). Under Draft-07 two forms go unchecked, an $id beside
-//     a $ref (the draft ignores it) and a $id carrying a plain-name fragment
-//     (the anchor spelling, fragment-only or on a URI; the fragment names an
-//     anchor within the document the URI part names).
+//     a $ref (the draft ignores it, so not even the parse runs) and a $id
+//     carrying a plain-name fragment (the anchor spelling, fragment-only or
+//     on a URI; the fragment names an anchor within the document the URI
+//     part names, and only the parse runs).
 //   - [ErrInvalidBaseURI]: a [WithBaseURI] value that does not parse.
 //   - [ErrMisplacedVocabulary]: a $vocabulary on a schema whose $schema does
 //     not establish the 2020-12 dialect. A non-empty $schema must be exactly

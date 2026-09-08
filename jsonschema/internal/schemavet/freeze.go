@@ -245,23 +245,17 @@ func identifiers(s *Schema, parent uriref.DocKey, profile Profile) declared {
 
 // applyID folds the $id registration and the child scope into d. A $id the run
 // reads as inert (under [Profile.InertIDs], or beside a $ref under
-// [Profile.Draft7]) registers nothing; a fragment-only $id is a Draft-07 anchor
-// and nothing under 2020-12; a plain-name fragment on a URI is the same
-// Draft-07 anchor, declared within the document the URI part names, which
-// registers and rebases as it would without the fragment; and an $id that
-// does not resolve to a key registers no URI and leaves the scope on the
-// parent base.
+// [Profile.Draft7]) registers nothing; a plain-name fragment is a Draft-07
+// anchor and nothing under 2020-12, declared within the enclosing document
+// for a fragment-only $id and within the document the URI part names
+// otherwise, where the URI part registers and rebases as it would without
+// the fragment; and an $id that does not resolve to a key registers no URI
+// and leaves the scope on the parent base. The anchor takes the decoded
+// fragment text, the same form a reference's fragment resolves by, so an
+// escaped spelling registers under the name a reference reaches it by.
 func applyID(d *declared, s *Schema, parent uriref.DocKey, profile Profile) {
 	ignoreID := profile.Draft7 && s.Ref != ""
 	if s.ID == "" || profile.InertIDs || ignoreID {
-		return
-	}
-
-	if uriref.IsFragmentOnly(s.ID) {
-		if profile.Draft7 {
-			d.anchors = append(d.anchors, parent.Anchor(s.ID[1:]))
-		}
-
 		return
 	}
 
@@ -272,6 +266,10 @@ func applyID(d *declared, s *Schema, parent uriref.DocKey, profile Profile) {
 
 	if profile.Draft7 && !fragment.IsEmpty() && !fragment.IsPointer() {
 		d.anchors = append(d.anchors, key.Anchor(fragment.Name()))
+	}
+
+	if uriref.IsFragmentOnly(s.ID) {
+		return
 	}
 
 	d.uri, d.hasURI = key, true
