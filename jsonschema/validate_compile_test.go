@@ -58,6 +58,26 @@ func TestCompileChecksIDDomain(t *testing.T) {
 				"allOf": [{"$ref": "#/definitions/t", "$id": "relative.json"}]
 			}`,
 		},
+		"draft-07 id beside ref rebases no child": {
+			// The ignored $id changes no base, so the child's relative $id
+			// resolves against the root's absent base and is refused where
+			// the same child directly under the root is. The check used to
+			// thread the ignored $id's resolution to the children while the
+			// registry kept the parent scope, so the child compiled and
+			// every ref naming it missed at validation.
+			schema: `{
+				"$schema": "http://json-schema.org/draft-07/schema#",
+				"definitions": {
+					"wrap": {
+						"$id": "http://example.com/wrap.json",
+						"$ref": "#/definitions/wrap/definitions/leaf",
+						"definitions": {"leaf": {"$id": "leaf.json", "type": "integer"}}
+					}
+				}
+			}`,
+			err:  jsonschema.ErrInvalidID,
+			path: "/definitions/wrap/definitions/leaf/$id",
+		},
 		"relative root id without base rejected": {
 			schema: `{"$id": "sub/schema.json", "type": "string"}`,
 			err:    jsonschema.ErrInvalidID,
