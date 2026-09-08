@@ -222,9 +222,9 @@ func applySizeBound(t Target, r Rule, pol Policy) error {
 // stays in one place.
 //
 // The subschema is gated on the instance type, because a size keyword is inert
-// against a non-array (or non-object) instance: without the gate it would
-// vacuously validate against the null a nilable field's schema deliberately
-// admits, and the outer not would reject it.
+// against a non-array (or non-object) instance: without the gate the outer not
+// would reject every instance of another type, so the fragment only reads
+// right standing alone with the gate in place.
 func forbidSizeOn(axis Axis) func(Target, Rule, Policy) error {
 	return func(t Target, r Rule, _ Policy) error {
 		n, err := parseSizeLiteral(r.Params.One())
@@ -687,8 +687,10 @@ func Forbid(s *jsonschema.Schema, v any) {
 	vs.WriteForbidden(s)
 }
 
-// ForbidSchema forbids a whole subschema, taking the free not slot or moving an
-// existing one under allOf so both apply conjunctively.
+// ForbidSchema forbids a whole subschema. It lands under allOf as a not of
+// its own, so the null split keeps it on the value branch, and a not already
+// holding anything other than forbidden values moves under allOf beside it
+// so both apply conjunctively.
 func ForbidSchema(s, forbidden *jsonschema.Schema) {
 	var vs constraint.ValueSet
 
