@@ -1209,8 +1209,10 @@
 //     copy in which such a schema appears twice. A plain duplicate is
 //     accepted, but two copies of an identifier would claim one key.
 //   - [ErrInvalidID]: an $id outside the keyword's domain. That is one that
-//     does not parse, one carrying a fragment under Draft 2020-12 (core
-//     section 8.2.1), or one that does not resolve to an absolute URI against
+//     does not parse, one carrying a non-empty fragment under Draft 2020-12
+//     (core section 8.2.1; the empty fragment, a bare "#" or one trailing a
+//     URI, is accepted and names nothing beyond the URI part), or one that
+//     does not resolve to an absolute URI against
 //     its enclosing base (the parent $id chain, or [WithBaseURI] for the
 //     root, so a relative root $id compiles exactly when a base supplies the
 //     absolute prefix). Under Draft-07 two forms go unchecked, an $id beside

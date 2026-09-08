@@ -347,8 +347,10 @@ func checkVocabularyPlacement(schema *Schema, schemaPath string, profile Profile
 // registers nothing for it and rebases nothing, and this check reads no
 // further into it, not even to parse it) and a $id carrying a plain-name
 // fragment (the anchor spelling, fragment-only or on a URI); Draft 2020-12
-// rejects any fragment in $id (core section 8.2.1). A checked $id must
-// parse, and its resolved form must be an
+// rejects a non-empty fragment in $id (core section 8.2.1), while the empty
+// fragment the section tolerates, "#" alone or trailing a URI, passes and
+// names nothing beyond the URI part. A checked $id must parse, and its
+// resolved form must be an
 // absolute URI; a relative $id with no absolute base registers no resolvable
 // URI, so every ref targeting it would silently miss.
 func checkSchemaID(schema *Schema, schemaPath string, base uriref.DocKey, profile Profile) error {
@@ -359,7 +361,10 @@ func checkSchemaID(schema *Schema, schemaPath string, base uriref.DocKey, profil
 	}
 
 	if uriref.IsFragmentOnly(id) {
-		if profile.RejectIDFragment {
+		// A bare "#" is the empty fragment, the one fragment 2020-12
+		// tolerates; it registers nothing and changes no base, as the
+		// trailing-"#" spelling of a URI does once its fragment drops.
+		if profile.RejectIDFragment && id != "#" {
 			return fmt.Errorf("%w: $id %q must not carry a fragment at %s/$id",
 				ErrInvalidID, id, schemaPath)
 		}

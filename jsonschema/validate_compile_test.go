@@ -44,6 +44,20 @@ func TestCompileChecksIDDomain(t *testing.T) {
 			err:    jsonschema.ErrInvalidID,
 			path:   "/$id",
 		},
+		"2020-12 empty fragment id accepted": {
+			// Core section 8.2.1 forbids a non-empty fragment and tolerates
+			// the empty one. The bare "#" used to be refused while the
+			// trailing-"#" spelling below compiled, although both carry the
+			// same empty fragment.
+			schema: `{"$defs": {"a": {"$id": "#", "type": "integer"}}, "allOf": [{"$ref": "#/$defs/a"}]}`,
+		},
+		"2020-12 trailing empty fragment id accepted": {
+			schema: `{
+				"$id": "http://example.com/root.json#",
+				"$defs": {"a": {"$id": "http://example.com/a.json#", "type": "integer"}},
+				"allOf": [{"$ref": "http://example.com/a.json"}]
+			}`,
+		},
 		"draft-07 fragment-only id compiles": {
 			schema: `{
 				"$schema": "http://json-schema.org/draft-07/schema#",
