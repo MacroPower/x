@@ -347,15 +347,15 @@ target's own module, so the module must be able to resolve this package (via a
 //go:generate go run go.jacobcolvin.com/x/jsonschema/cmd/gen -type Config -o config.schema.json
 ```
 
-| Flag                     | Default    | Description                              |
-| ------------------------ | ---------- | ---------------------------------------- |
-| `-type`                  | (required) | Go type name to generate a schema for.   |
-| `-o`                     | stdout     | Output file path.                        |
-| `-draft`                 | `2020`     | JSON Schema draft: `7` or `2020`.        |
-| `-comments`              | `false`    | Extract Go doc comments as descriptions. |
-| `-additional-properties` | `false`    | Allow additional properties.             |
-| `-indent`                | `"  "`     | JSON indentation string.                 |
-| `-validate`              | `false`    | Enable the `validate` tag interpreter.   |
+| Flag                     | Default    | Description                                        |
+| ------------------------ | ---------- | -------------------------------------------------- |
+| `-type`                  | (required) | Go type name to generate a schema for.             |
+| `-o`                     | stdout     | Output file path.                                  |
+| `-draft`                 | `2020`     | JSON Schema draft: `7` or `2020`.                  |
+| `-comments`              | `false`    | Extract Go doc comments as descriptions.           |
+| `-additional-properties` | `false`    | Allow additional properties.                       |
+| `-indent`                | `"  "`     | JSON indentation string; empty for compact output. |
+| `-validate`              | `false`    | Enable the `validate` tag interpreter.             |
 
 ## Design Notes
 

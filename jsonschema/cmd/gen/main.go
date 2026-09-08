@@ -60,7 +60,7 @@ func main() {
 	flag.StringVar(&cfg.Draft, "draft", "2020", `JSON Schema draft: "7" or "2020"`)
 	flag.BoolVar(&cfg.Comments, "comments", false, "extract Go doc comments as descriptions")
 	flag.BoolVar(&cfg.AdditionalProperties, "additional-properties", false, "allow additional properties")
-	flag.StringVar(&cfg.Indent, "indent", "  ", "JSON indentation string")
+	flag.StringVar(&cfg.Indent, "indent", "  ", "JSON indentation string (empty for compact output)")
 	flag.BoolVar(&cfg.Validate, "validate", false, "add validate tag interpreter")
 	flag.Parse()
 
@@ -522,7 +522,9 @@ var mainGoTmpl = template.Must(template.New("main.go").Parse(`package main
 
 import (
 	"context"
+	{{- if .Indented}}
 	"encoding/json/jsontext"
+	{{- end}}
 	"encoding/json/v2"
 	"fmt"
 	"os"
@@ -557,7 +559,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
 	}
-	data, err := json.Marshal(schema, jsontext.WithIndent({{.IndentLiteral}}))
+	data, err := json.Marshal(schema{{if .Indented}}, jsontext.WithIndent({{.IndentLiteral}}){{end}})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
@@ -580,6 +582,11 @@ type templateData struct {
 	Comments             bool
 	AdditionalProperties bool
 	Validate             bool
+	// Indented says whether the helper passes jsontext.WithIndent at all. An
+	// empty indent string would still put the encoder in multiline mode, one
+	// element per line with no indentation, where the flag's natural reading
+	// is compact output; the helper then calls json.Marshal bare.
+	Indented bool
 }
 
 // renderMainGo renders the helper program. The schema lands at outPath, a
@@ -615,6 +622,7 @@ func renderMainGo(w io.Writer, cfg config, importPath, outPath string) error {
 		AdditionalProperties: cfg.AdditionalProperties,
 		Validate:             cfg.Validate,
 		IndentLiteral:        fmt.Sprintf("%q", cfg.Indent),
+		Indented:             cfg.Indent != "",
 		OutputLiteral:        fmt.Sprintf("%q", outPath),
 	}
 

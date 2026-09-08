@@ -165,6 +165,53 @@ func main() {
 }
 `,
 		},
+		// An empty indent marshals compact. Passing it to WithIndent would
+		// still put the encoder in multiline mode, one element per line with
+		// nothing before it, so the helper omits the option and its import.
+		"compact": {
+			cfg: config{
+				TypeName: "Config",
+				Draft:    "2020",
+				Indent:   "",
+			},
+			importPath: "example.com/myapp",
+			want: `package main
+
+import (
+	"context"
+	"encoding/json/v2"
+	"fmt"
+	"os"
+	"reflect"
+
+	"go.jacobcolvin.com/x/jsonschema"
+
+	target "example.com/myapp"
+)
+
+func main() {
+	t := reflect.TypeFor[target.Config]()
+	opts := []jsonschema.GenerateOption{
+	}
+	schema, err := jsonschema.Generate(context.Background(), t, opts...)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		os.Exit(1)
+	}
+	data, err := json.Marshal(schema)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		os.Exit(1)
+	}
+	data = append(data, '\n')
+	err = os.WriteFile("/tmp/gen/schema.json", data, 0o600)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		os.Exit(1)
+	}
+}
+`,
+		},
 	}
 
 	for name, tc := range tests {
@@ -461,6 +508,44 @@ type Item struct {
 		"required": ["id"],
 		"additionalProperties": false
 	}`, string(data))
+}
+
+// TestIntegration_CompactIndent pins that an empty -indent writes the schema
+// on one line. The helper used to hand the empty string to WithIndent, which
+// emits one element per line with no indentation.
+func TestIntegration_CompactIndent(t *testing.T) {
+	t.Parallel()
+
+	binary := buildBinary(t)
+	dir := createTestModule(t, `package testmod
+
+type Item struct {
+	ID string `+"`"+`json:"id"`+"`"+`
+}
+`)
+
+	outFile := filepath.Join(t.TempDir(), "item.schema.json")
+	cmd := exec.CommandContext(t.Context(), binary, "-type", "Item", "-o", outFile, "-indent", "")
+	cmd.Dir = dir
+
+	cmdOut, err := cmd.CombinedOutput()
+	require.NoError(t, err, "output: %s", cmdOut)
+
+	data, err := os.ReadFile(outFile)
+	require.NoError(t, err)
+
+	body, found := strings.CutSuffix(string(data), "\n")
+	require.True(t, found, "the file ends in one newline")
+	assert.NotContains(t, body, "\n", "compact output has no other newline")
+	assert.JSONEq(t, `{
+		"$schema": "https://json-schema.org/draft/2020-12/schema",
+		"type": "object",
+		"properties": {
+			"id": {"type": "string"}
+		},
+		"required": ["id"],
+		"additionalProperties": false
+	}`, body)
 }
 
 func TestIntegration_MissingType(t *testing.T) {
