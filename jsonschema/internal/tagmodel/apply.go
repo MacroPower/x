@@ -150,8 +150,19 @@ func applyBound(t Target, r Rule, pol Policy) error {
 // applyNumericBound parses under the dialect's literal domain
 // ([Policy.BoundKind]) and the shared exact-representability policy, then
 // tightens the endpoint its operation names.
+//
+// The keyword-shaped domain settles the integer-or-fraction question only.
+// The width check still follows the field's float kind, so a float32 field
+// refuses a bound its width rounds (10.0000001, which every float32 near it
+// renders as 10) exactly as it refuses such a const: a bound the field's
+// values cannot land on excludes a value the schema then admits.
 func applyNumericBound(t Target, r Rule, pol Policy) error {
-	end, err := constraint.ParseNumericBound(r.Params.One(), pol.BoundKind)
+	kind := pol.BoundKind
+	if kind == reflect.Invalid && t.Shape.Form == FormNumber && numkind.IsFloat(t.Shape.Kind) {
+		kind = t.Shape.Kind
+	}
+
+	end, err := constraint.ParseNumericBound(r.Params.One(), kind)
 	if err != nil {
 		//nolint:wrapcheck // The shared policy owns the message and the sentinel.
 		return err

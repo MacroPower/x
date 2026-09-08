@@ -1014,6 +1014,80 @@ func TestFloat32ScalarOverflow(t *testing.T) {
 	}
 }
 
+// TestFloat32BoundWidthCheck pins that a numeric bound on a float32 field
+// takes the same width check a const on it does. The bound used to parse at
+// the keyword-shaped domain alone, so minimum=10.0000001 shipped as written
+// while const=10.0000001 was refused, and the bound excluded the float32
+// value 10 that renders as 10. The keyword domain still decides the
+// integer-or-fraction question, so an integer field keeps minimum=1.5.
+func TestFloat32BoundWidthCheck(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		generate func() (*jsonschema.Schema, error)
+		want     float64
+		err      error
+	}{
+		"float32 bound its width rounds is refused": {
+			generate: func() (*jsonschema.Schema, error) {
+				type doc struct {
+					V float32 `json:"v" jsonschema:"minimum=10.0000001"`
+				}
+
+				return jsonschema.GenerateFor[doc](t.Context())
+			},
+			err: jsonschema.ErrBoundNotRepresentable,
+		},
+		"float32 bound its width holds is kept": {
+			generate: func() (*jsonschema.Schema, error) {
+				type doc struct {
+					V float32 `json:"v" jsonschema:"minimum=0.1"`
+				}
+
+				return jsonschema.GenerateFor[doc](t.Context())
+			},
+			want: 0.1,
+		},
+		"float64 bound keeps the digits": {
+			generate: func() (*jsonschema.Schema, error) {
+				type doc struct {
+					V float64 `json:"v" jsonschema:"minimum=10.0000001"`
+				}
+
+				return jsonschema.GenerateFor[doc](t.Context())
+			},
+			want: 10.0000001,
+		},
+		"integer field keeps the keyword domain": {
+			generate: func() (*jsonschema.Schema, error) {
+				type doc struct {
+					V int8 `json:"v" jsonschema:"minimum=1.5"`
+				}
+
+				return jsonschema.GenerateFor[doc](t.Context())
+			},
+			want: 1.5,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			s, err := tc.generate()
+			if tc.err != nil {
+				require.ErrorIs(t, err, tc.err)
+
+				return
+			}
+
+			require.NoError(t, err)
+			require.NotNil(t, s.Properties["v"].Minimum)
+			assert.InDelta(t, tc.want, *s.Properties["v"].Minimum, 0)
+		})
+	}
+}
+
 // TestTagTypeOverride pins the type= tag key: it replaces the reflected type
 // assertion, removes the nullable anyOf wrapper a pointer field generates,
 // and drops kind-derived numeric bounds when the new type is not numeric, so

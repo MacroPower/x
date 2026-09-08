@@ -29,7 +29,9 @@ var (
 	// whose value may be fractional even on an integer schema, so minimum=1.5 on
 	// an int8 is correct. (The validate tag, which names go-playground rules,
 	// parses at the field kind instead, where gte=1.5 on an int is correctly an
-	// error.) A size literal is likewise a keyword value, and minLength's value
+	// error.) The width check still follows the field kind, so a float32 field
+	// refuses minimum=10.0000001 as it refuses that const. A size literal is
+	// likewise a keyword value, and minLength's value
 	// domain is non-negative, so a negative one is rejected rather than folded
 	// into the unsatisfiable range go-playground's max=-1 means. Null is
 	// spellable here, since this tag has a null literal. And because every key
