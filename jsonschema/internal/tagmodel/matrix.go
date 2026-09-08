@@ -66,6 +66,11 @@ var (
 		FormBool:          AxisAuto,
 		FormCoercedNumber: AxisAuto,
 		FormCoercedBool:   AxisAuto,
+		// A string that marshals itself as text is measured by go-playground
+		// on the Go string, which the schema never sees, so a rule-shaped
+		// length has nothing faithful to land on; the pinned minLength still
+		// applies to the text the instance really is.
+		FormCoercedString: AxisAuto,
 		FormRawBytes:      AxisAuto,
 		FormOpaque:        AxisAuto,
 		FormUnset:         AxisAuto,
@@ -85,12 +90,13 @@ var (
 	// length, so minLength constrains it, but it has no array, so a count does
 	// not.
 	formCarriesAxis = [formCount][axisCount]bool{
-		FormString:     {AxisLength: true},
-		FormNumber:     {AxisNumeric: true},
-		FormArray:      {AxisItems: true},
-		FormObject:     {AxisProperties: true},
-		FormTextString: {AxisLength: true},
-		FormByteString: {AxisLength: true},
+		FormString:        {AxisLength: true},
+		FormNumber:        {AxisNumeric: true},
+		FormArray:         {AxisItems: true},
+		FormObject:        {AxisProperties: true},
+		FormTextString:    {AxisLength: true},
+		FormByteString:    {AxisLength: true},
+		FormCoercedString: {AxisLength: true},
 		// Only the property count: the payload declares an object outright, so
 		// a named count keyword lands on it exactly as it does on the
 		// $defs-backed named spelling, and every other family is a shape the
@@ -105,6 +111,9 @@ var (
 	formAxisNote = [formCount]string{
 		FormByteString: "a bound on a []byte field has no array length to constrain " +
 			"(it encodes as a base64 string)",
+		FormCoercedString: "a length rule on a string that marshals itself as text measures " +
+			"the Go string, which the schema never sees (name minLength or maxLength " +
+			"to constrain the text the field emits)",
 	}
 )
 
@@ -175,7 +184,7 @@ func init() {
 func fillBounds() {
 	bounded := []Form{
 		FormString, FormNumber, FormArray, FormObject, FormTextString, FormByteString,
-		FormDeclaredObject,
+		FormCoercedString, FormDeclaredObject,
 	}
 
 	for _, op := range []Op{OpFloorIncl, OpFloorExcl, OpCeilIncl, OpCeilExcl, OpExactSize} {
@@ -207,7 +216,9 @@ func fillBounds() {
 // fillValues fills the value rows: pinning, forbidding, enumerating, uniqueness,
 // and the divisor.
 func fillValues() {
-	scalars := []Form{FormString, FormNumber, FormBool, FormCoercedNumber, FormCoercedBool}
+	scalars := []Form{
+		FormString, FormNumber, FormBool, FormCoercedNumber, FormCoercedBool, FormCoercedString,
+	}
 
 	for _, f := range scalars {
 		apply(OpEqual, f, applyEqual)
@@ -273,6 +284,7 @@ func fillNonZero() {
 	apply(OpNonZero, FormNumber, nonZeroForbidNumber)
 	apply(OpNonZero, FormCoercedNumber, nonZeroForbidCoerced)
 	apply(OpNonZero, FormCoercedBool, nonZeroForbidCoerced)
+	apply(OpNonZero, FormCoercedString, nonZeroForbidCoerced)
 
 	apply(OpNonZero, FormBool, nonZeroTrue)
 
@@ -305,6 +317,7 @@ func fillStringKeywords() {
 
 		for _, f := range []Form{
 			FormString, FormTextString, FormByteString, FormCoercedNumber, FormCoercedBool,
+			FormCoercedString,
 		} {
 			apply(op, f, applyStringKeyword)
 		}

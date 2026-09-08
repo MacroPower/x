@@ -58,6 +58,7 @@ func TestMatrixGolden(t *testing.T) {
 		|content encoding / string -> apply
 		|content encoding / string-coerced boolean -> apply
 		|content encoding / string-coerced number -> apply
+		|content encoding / string-coerced string -> apply
 		|content encoding / text-marshaled string -> apply
 		|content encoding / unresolved reference -> reject: content encoding cannot be checked against a reference whose definition is not readable here
 		|content media type / array -> reject: content media type is not supported on a array
@@ -71,6 +72,7 @@ func TestMatrixGolden(t *testing.T) {
 		|content media type / string -> apply
 		|content media type / string-coerced boolean -> apply
 		|content media type / string-coerced number -> apply
+		|content media type / string-coerced string -> apply
 		|content media type / text-marshaled string -> apply
 		|content media type / unresolved reference -> reject: content media type cannot be checked against a reference whose definition is not readable here
 		|divisor / array -> reject: divisor is not supported on a array
@@ -84,6 +86,7 @@ func TestMatrixGolden(t *testing.T) {
 		|divisor / string -> reject: divisor is not supported on a string
 		|divisor / string-coerced boolean -> reject: divisor is not supported on a string-coerced boolean
 		|divisor / string-coerced number -> reject: divisor is not supported on a string-coerced number
+		|divisor / string-coerced string -> reject: divisor is not supported on a string-coerced string
 		|divisor / text-marshaled string -> reject: divisor is not supported on a text-marshaled string
 		|divisor / unresolved reference -> reject: divisor cannot be checked against a reference whose definition is not readable here
 		|element uniqueness / array -> apply
@@ -97,6 +100,7 @@ func TestMatrixGolden(t *testing.T) {
 		|element uniqueness / string -> reject: unique has no array to constrain on a string
 		|element uniqueness / string-coerced boolean -> reject: unique has no array to constrain on a string-coerced boolean
 		|element uniqueness / string-coerced number -> reject: unique has no array to constrain on a string-coerced number
+		|element uniqueness / string-coerced string -> reject: unique has no array to constrain on a string-coerced string
 		|element uniqueness / text-marshaled string -> reject: unique has no array to constrain on a text-marshaled string
 		|element uniqueness / unresolved reference -> reject: element uniqueness cannot be checked against a reference whose definition is not readable here
 		|enumerated values / array -> apply
@@ -110,6 +114,7 @@ func TestMatrixGolden(t *testing.T) {
 		|enumerated values / string -> apply
 		|enumerated values / string-coerced boolean -> apply
 		|enumerated values / string-coerced number -> apply
+		|enumerated values / string-coerced string -> apply
 		|enumerated values / text-marshaled string -> reject: a text-marshaled value cannot be compared against a tag literal (the tag has no way to spell the marshaled form)
 		|enumerated values / unresolved reference -> reject: enumerated values cannot be checked against a reference whose definition is not readable here
 		|exact size / array -> apply
@@ -123,6 +128,7 @@ func TestMatrixGolden(t *testing.T) {
 		|exact size / string -> apply
 		|exact size / string-coerced boolean -> reject: exact size is not supported on a string-coerced boolean
 		|exact size / string-coerced number -> apply
+		|exact size / string-coerced string -> apply
 		|exact size / text-marshaled string -> apply
 		|exact size / unresolved reference -> reject: exact size cannot be checked against a reference whose definition is not readable here
 		|exclusive ceiling / array -> apply
@@ -136,6 +142,7 @@ func TestMatrixGolden(t *testing.T) {
 		|exclusive ceiling / string -> apply
 		|exclusive ceiling / string-coerced boolean -> reject: a bound is not supported on a json:",string" coerced numeric field (minimum constrains JSON numbers, and no keyword constrains the magnitude of a string)
 		|exclusive ceiling / string-coerced number -> reject: a bound is not supported on a json:",string" coerced numeric field (minimum constrains JSON numbers, and no keyword constrains the magnitude of a string)
+		|exclusive ceiling / string-coerced string -> apply
 		|exclusive ceiling / text-marshaled string -> apply
 		|exclusive ceiling / unresolved reference -> reject: exclusive ceiling cannot be checked against a reference whose definition is not readable here
 		|exclusive floor / array -> apply
@@ -149,6 +156,7 @@ func TestMatrixGolden(t *testing.T) {
 		|exclusive floor / string -> apply
 		|exclusive floor / string-coerced boolean -> reject: a bound is not supported on a json:",string" coerced numeric field (minimum constrains JSON numbers, and no keyword constrains the magnitude of a string)
 		|exclusive floor / string-coerced number -> reject: a bound is not supported on a json:",string" coerced numeric field (minimum constrains JSON numbers, and no keyword constrains the magnitude of a string)
+		|exclusive floor / string-coerced string -> apply
 		|exclusive floor / text-marshaled string -> apply
 		|exclusive floor / unresolved reference -> reject: exclusive floor cannot be checked against a reference whose definition is not readable here
 		|forbidden size / array -> apply
@@ -162,6 +170,7 @@ func TestMatrixGolden(t *testing.T) {
 		|forbidden size / string -> reject: forbidden size is not supported on a string
 		|forbidden size / string-coerced boolean -> reject: forbidden size is not supported on a string-coerced boolean
 		|forbidden size / string-coerced number -> reject: forbidden size is not supported on a string-coerced number
+		|forbidden size / string-coerced string -> reject: forbidden size is not supported on a string-coerced string
 		|forbidden size / text-marshaled string -> reject: forbidden size is not supported on a text-marshaled string
 		|forbidden size / unresolved reference -> reject: forbidden size cannot be checked against a reference whose definition is not readable here
 		|forbidden value / array -> reject: forbidden value is not supported on a array
@@ -175,6 +184,7 @@ func TestMatrixGolden(t *testing.T) {
 		|forbidden value / string -> apply
 		|forbidden value / string-coerced boolean -> apply
 		|forbidden value / string-coerced number -> apply
+		|forbidden value / string-coerced string -> apply
 		|forbidden value / text-marshaled string -> reject: a text-marshaled value cannot be compared against a tag literal (the tag has no way to spell the marshaled form)
 		|forbidden value / unresolved reference -> reject: forbidden value cannot be checked against a reference whose definition is not readable here
 		|format / array -> reject: format is not supported on a array
@@ -188,6 +198,7 @@ func TestMatrixGolden(t *testing.T) {
 		|format / string -> apply
 		|format / string-coerced boolean -> apply
 		|format / string-coerced number -> apply
+		|format / string-coerced string -> apply
 		|format / text-marshaled string -> apply
 		|format / unresolved reference -> reject: format cannot be checked against a reference whose definition is not readable here
 		|inclusive ceiling / array -> apply
@@ -201,6 +212,7 @@ func TestMatrixGolden(t *testing.T) {
 		|inclusive ceiling / string -> apply
 		|inclusive ceiling / string-coerced boolean -> reject: a bound is not supported on a json:",string" coerced numeric field (minimum constrains JSON numbers, and no keyword constrains the magnitude of a string)
 		|inclusive ceiling / string-coerced number -> reject: a bound is not supported on a json:",string" coerced numeric field (minimum constrains JSON numbers, and no keyword constrains the magnitude of a string)
+		|inclusive ceiling / string-coerced string -> apply
 		|inclusive ceiling / text-marshaled string -> apply
 		|inclusive ceiling / unresolved reference -> reject: inclusive ceiling cannot be checked against a reference whose definition is not readable here
 		|inclusive floor / array -> apply
@@ -214,6 +226,7 @@ func TestMatrixGolden(t *testing.T) {
 		|inclusive floor / string -> apply
 		|inclusive floor / string-coerced boolean -> reject: a bound is not supported on a json:",string" coerced numeric field (minimum constrains JSON numbers, and no keyword constrains the magnitude of a string)
 		|inclusive floor / string-coerced number -> reject: a bound is not supported on a json:",string" coerced numeric field (minimum constrains JSON numbers, and no keyword constrains the magnitude of a string)
+		|inclusive floor / string-coerced string -> apply
 		|inclusive floor / text-marshaled string -> apply
 		|inclusive floor / unresolved reference -> reject: inclusive floor cannot be checked against a reference whose definition is not readable here
 		|non-zero assertion / array -> apply
@@ -227,6 +240,7 @@ func TestMatrixGolden(t *testing.T) {
 		|non-zero assertion / string -> apply
 		|non-zero assertion / string-coerced boolean -> apply
 		|non-zero assertion / string-coerced number -> apply
+		|non-zero assertion / string-coerced string -> apply
 		|non-zero assertion / text-marshaled string -> ignore: a text-marshaled value has no schema-expressible zero
 		|non-zero assertion / unresolved reference -> reject: non-zero assertion cannot be checked against a reference whose definition is not readable here
 		|pattern / array -> reject: pattern is not supported on a array
@@ -240,6 +254,7 @@ func TestMatrixGolden(t *testing.T) {
 		|pattern / string -> apply
 		|pattern / string-coerced boolean -> apply
 		|pattern / string-coerced number -> apply
+		|pattern / string-coerced string -> apply
 		|pattern / text-marshaled string -> apply
 		|pattern / unresolved reference -> reject: pattern cannot be checked against a reference whose definition is not readable here
 		|pinned value / array -> reject: pinned value is not supported on a array
@@ -253,6 +268,7 @@ func TestMatrixGolden(t *testing.T) {
 		|pinned value / string -> apply
 		|pinned value / string-coerced boolean -> apply
 		|pinned value / string-coerced number -> apply
+		|pinned value / string-coerced string -> apply
 		|pinned value / text-marshaled string -> reject: a text-marshaled value cannot be compared against a tag literal (the tag has no way to spell the marshaled form)
 		|pinned value / unresolved reference -> reject: pinned value cannot be checked against a reference whose definition is not readable here
 	`)

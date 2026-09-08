@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/google/jsonschema-go/jsonschema"
@@ -23,6 +24,17 @@ type level int
 // MarshalJSON writes the level as "L<n>".
 func (l level) MarshalJSON() ([]byte, error) {
 	return fmt.Appendf(nil, "%q", fmt.Sprintf("L%d", int(l))), nil
+}
+
+// word is a string type that marshals itself as text, the string-kind
+// counterpart of level: the instance carries the tagged text rather than the
+// Go string, so a scalar taken verbatim would pin a value no instance holds.
+type word string
+
+// MarshalText writes the word upper-cased behind a W: tag, so the empty
+// string's text is observable too.
+func (w word) MarshalText() ([]byte, error) {
+	return []byte("W:" + strings.ToUpper(string(w))), nil
 }
 
 // stringSchema is the type-derived base a coerced or text-marshaled field
@@ -122,6 +134,13 @@ func TestShapeParseScalarCoerced(t *testing.T) {
 			// writes rather than what the number looks like.
 			typ: reflect.TypeFor[level](), lit: "3",
 			form: tagmodel.FormCoercedNumber, want: "L3",
+		},
+		"a text-marshaling string type emits its own form": {
+			// A string kind takes the same round-trip: the literal is the Go
+			// value, and the constraint carries the text MarshalText writes
+			// for it rather than the literal verbatim.
+			typ: reflect.TypeFor[word](), lit: "abc",
+			form: tagmodel.FormCoercedString, want: "W:ABC",
 		},
 	}
 
@@ -223,6 +242,10 @@ func TestShapeZeroLiteralsRouteThroughParseScalar(t *testing.T) {
 		"text marshaler": {
 			typ:  reflect.TypeFor[level](),
 			want: []any{"L0"},
+		},
+		"text-marshaling string": {
+			typ:  reflect.TypeFor[word](),
+			want: []any{"W:"},
 		},
 		"coerced float": {
 			typ:  reflect.TypeFor[float64](),

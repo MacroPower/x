@@ -18,6 +18,7 @@ import (
 
 	"go.jacobcolvin.com/x/jsonschema"
 	"go.jacobcolvin.com/x/jsonschema/internal/fuzzshape"
+	"go.jacobcolvin.com/x/jsonschema/internal/tagmodel"
 )
 
 // The reason constants name the field classes the probe cannot observe, on the
@@ -210,6 +211,7 @@ var (
 		jsonschema.FormDeclaredObject: tokenObject,
 		jsonschema.FormCoercedNumber:  tokenString,
 		jsonschema.FormCoercedBool:    tokenString,
+		tagmodel.FormCoercedString:    tokenString,
 		jsonschema.FormByteString:     tokenString,
 	}
 )
@@ -496,6 +498,9 @@ type (
 	// The oracleText type marshals itself as text over a numeric kind, so its
 	// schema is a string while its Go value is a number.
 	oracleText int
+	// The oracleWord type marshals itself as text over a string kind, so its
+	// instance is MarshalText's output rather than the Go string.
+	oracleWord string
 	// The oracleByte type is a uint8 carrying MarshalText. A slice of it marshals
 	// as a real JSON array rather than one base64 string, the exemption 649a6f2
 	// added.
@@ -521,6 +526,9 @@ func (o oracleText) MarshalText() ([]byte, error) { return fmt.Appendf(nil, "L%d
 
 // MarshalText writes the byte as B<n>.
 func (o oracleByte) MarshalText() ([]byte, error) { return fmt.Appendf(nil, "B%d", int(o)), nil }
+
+// MarshalText writes the word upper-cased.
+func (o oracleWord) MarshalText() ([]byte, error) { return []byte(strings.ToUpper(string(o))), nil }
 
 // MarshalJSON writes a JSON boolean, matching the declared schema.
 func (o oracleBoolWord) MarshalJSON() ([]byte, error) { return []byte("true"), nil }
@@ -664,6 +672,16 @@ func oracleRoster() map[string]oracleRow {
 		},
 		"pointer to text-marshaling numeric": {
 			typ: reflect.TypeFor[*oracleText](), wantDefs: jsonschema.FormCoercedNumber,
+		},
+
+		// A text-marshaling string kind writes MarshalText's output rather
+		// than the Go string, so it takes the coerced column too: a scalar
+		// read verbatim would pin text the field never emits.
+		"text-marshaling string": {
+			typ: reflect.TypeFor[oracleWord](), wantDefs: tagmodel.FormCoercedString,
+		},
+		"pointer to text-marshaling string": {
+			typ: reflect.TypeFor[*oracleWord](), wantDefs: tagmodel.FormCoercedString,
 		},
 
 		// A jsonv1.Number is the one Go string kind encoding/json writes as a

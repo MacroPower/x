@@ -66,7 +66,7 @@ func (sh Shape) ParseScalar(lit string, pol Policy) (any, error) {
 	case FormNumber:
 		return sh.parseNumber(lit)
 
-	case FormCoercedNumber, FormCoercedBool:
+	case FormCoercedNumber, FormCoercedBool, FormCoercedString:
 		return sh.coercedText(lit)
 
 	default:
@@ -169,11 +169,14 @@ func (sh Shape) coercedText(lit string) (any, error) {
 	case sh.Form == FormCoercedBool:
 		parsed, err = ParseBoolLiteral(lit)
 
-	case reflectkind.IsJSONNumber(sh.Elem):
-		// A json.Number holds its literal as text and has no width to parse at,
-		// so the literal converts straight through and the marshal below is
-		// what validates it. Parsing a number first would be both pointless and
-		// unconvertible, since reflect refuses a float64 to a string-kinded type.
+	case sh.Form == FormCoercedString, reflectkind.IsJSONNumber(sh.Elem):
+		// A string kind has no number to parse: the literal is the Go value,
+		// and the marshal below is what turns it into the text the field
+		// emits. A json.Number is the same case, since it holds its literal
+		// as text and has no width to parse at, and the marshal is what
+		// validates it. Parsing a number first would be both pointless and
+		// unconvertible, since reflect refuses a float64 to a string-kinded
+		// type.
 		parsed = lit
 
 	default:
@@ -217,10 +220,15 @@ func (sh Shape) coercedText(lit string) (any, error) {
 // [encoding/json.Number] classifies as a coerced number with a string kind and
 // holds the text "-0" as an ordinary value, so the float gate reads the Go kind
 // rather than asking whether the shape is an integer.
+//
+// A coerced string's zero is the empty Go string, and what it forbids is
+// whatever text that empty string marshals to.
 func (sh Shape) zeroLiterals() []string {
 	switch {
 	case sh.Form == FormCoercedBool:
 		return []string{boolFalse}
+	case sh.Form == FormCoercedString:
+		return []string{""}
 	case sh.Form == FormCoercedNumber && numkind.IsFloat(sh.Kind):
 		return []string{"0", "-0"}
 	default:

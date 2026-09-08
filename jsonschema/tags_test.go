@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"maps"
 	"math"
+	"strings"
 	"testing"
 	"time"
 
@@ -3975,6 +3976,103 @@ func TestTagTypeOverrideDropsPinnedValues(t *testing.T) {
 		require.NoError(t, err)
 		assert.JSONEq(t, `{"type":"string","enum":["a","b"],"default":"a"}`, string(got))
 	})
+}
+
+// upperWord is a string type that marshals itself as upper-cased text, so
+// the instance never carries the Go string a tag literal spells.
+type upperWord string
+
+// MarshalText writes the word upper-cased.
+func (w upperWord) MarshalText() ([]byte, error) {
+	return []byte(strings.ToUpper(string(w))), nil
+}
+
+// TestTagTextMarshalingStringUsesTheSerializedForm pins that a string kind
+// carrying MarshalText re-serializes its scalars to the text the field emits,
+// as a numeric one does. The string kind used to classify as a plain string,
+// so const=abc pinned "abc" against instances that only ever carry "ABC".
+func TestTagTextMarshalingStringUsesTheSerializedForm(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		generate func() (*jsonschema.Schema, error)
+		want     string // marshaled property schema
+	}{
+		"const": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V upperWord `json:"v" jsonschema:"const=abc"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+			want: `{"type":"string","const":"ABC"}`,
+		},
+		"enum": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V upperWord `json:"v" jsonschema:"enum=a|b"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+			want: `{"type":"string","enum":["A","B"]}`,
+		},
+		"default and examples": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V upperWord `json:"v" jsonschema:"default=c,examples=a|b"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+			want: `{"type":"string","default":"C","examples":["A","B"]}`,
+		},
+		"pointer keeps the coercion on the value branch": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V *upperWord `json:"v" jsonschema:"const=abc"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+			want: `{"anyOf":[{"type":"string","const":"ABC"},{"type":"null"}]}`,
+		},
+		"sequence enum reaches the elements": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V []upperWord `json:"v" jsonschema:"enum=a|b"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+			want: `{"type":"array","items":{"type":"string","enum":["A","B"]}}`,
+		},
+		"validate required forbids the empty string's text": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V upperWord `json:"v" validate:"required"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context(),
+					jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()))
+			},
+			want: `{"type":"string","not":{"const":""}}`,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			s, err := tc.generate()
+			require.NoError(t, err)
+
+			got, err := json.Marshal(s.Properties["v"])
+			require.NoError(t, err)
+			assert.JSONEq(t, tc.want, string(got))
+		})
+	}
 }
 
 // TestValidateRequiredOnPointerToByteArray pins that a [N]byte classifies as

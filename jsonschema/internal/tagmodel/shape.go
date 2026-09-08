@@ -42,6 +42,11 @@ const (
 	// (A json:",string" bool is a generation error under encoding/json/v2, so
 	// the flag produces no boolean coercion.)
 	FormCoercedBool
+	// FormCoercedString is a string Go kind that marshals itself as text, so
+	// the instance is the text MarshalText writes rather than the Go string.
+	// Its scalars compare against that text, as the numeric coercion's do,
+	// which is what keeps a const from pinning a value the field never emits.
+	FormCoercedString
 	// FormTextString is a string-typed schema over a Go kind that is not a
 	// scalar at all: [time.Time], big.Rat, a struct or map marshaling itself as
 	// text. A string-only keyword such as format applies; a scalar comparison
@@ -90,6 +95,7 @@ var formNames = [formCount]string{
 	FormObject:         "object",
 	FormCoercedNumber:  "string-coerced number",
 	FormCoercedBool:    "string-coerced boolean",
+	FormCoercedString:  "string-coerced string",
 	FormTextString:     "text-marshaled string",
 	FormByteString:     "base64 byte string",
 	FormRawBytes:       "raw byte slice",
@@ -349,6 +355,15 @@ func classifyForm(t reflect.Type, base *jsonschema.Schema, quoted bool, def func
 		// instance) from a plain string field; see [reflectkind.IsJSONNumber].
 		if quoted && str && reflectkind.IsJSONNumber(t) {
 			return FormCoercedNumber
+		}
+
+		// A string kind that marshals itself as text writes MarshalText's
+		// output, not the Go string, so its scalars take the coerced
+		// round-trip. The predicate is reflection's own for the text step: a
+		// JSON marshaler outranks the text methods under encoding/json/v2,
+		// so a type carrying one writes whatever that marshaler emits.
+		if str && reflectkind.ImplementsAnyTextMarshaler(t) && !reflectkind.ImplementsAnyJSONMarshaler(t) {
+			return FormCoercedString
 		}
 
 		return FormString

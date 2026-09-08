@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -85,6 +86,7 @@ func fixtureTypes() map[string]reflect.Type {
 		"time.Time":      reflect.TypeFor[time.Time](),
 		"crossLevel":     reflect.TypeFor[crossLevel](),
 		"[]crossLevel":   reflect.TypeFor[[]crossLevel](),
+		"crossWord":      reflect.TypeFor[crossWord](),
 		"fixtureObject":  reflect.TypeFor[fixtureObject](),
 		"*fixtureObject": reflect.TypeFor[*fixtureObject](),
 	}
@@ -367,6 +369,17 @@ func (l crossLevel) MarshalText() ([]byte, error) {
 	return fmt.Appendf(nil, "L%d", int(l)), nil
 }
 
+// crossWord is a string type that marshals itself as text, the string-kind
+// counterpart of crossLevel: the Go kind and the instance are both strings,
+// so only the text differs, and a dialect reading the literal verbatim would
+// pin a value no instance carries.
+type crossWord string
+
+// MarshalText writes the word upper-cased.
+func (w crossWord) MarshalText() ([]byte, error) {
+	return []byte(strings.ToUpper(string(w))), nil
+}
+
 // crossShape is one field shape to test both dialects against, with the literal
 // spellings each dialect uses for a value list on it. A shape whose values are
 // meaningless for it (a word on a numeric field) is still worth testing: the two
@@ -432,6 +445,7 @@ func crossShapes() []crossShape {
 		with(num, "string-coerced int", reflect.TypeFor[int](), "v,string"),
 		with(num, "text-marshaling numeric", reflect.TypeFor[crossLevel](), "v"),
 		sized(num, "slice of text-marshaling numeric", reflect.TypeFor[[]crossLevel]()),
+		with(str, "text-marshaling string", reflect.TypeFor[crossWord](), "v"),
 		with(str, "time", reflect.TypeFor[time.Time](), "v"),
 	}
 }

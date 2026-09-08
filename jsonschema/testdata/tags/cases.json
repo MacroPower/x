@@ -740,6 +740,28 @@
     ]
   },
   {
+    "name": "a text-marshaling string pins the text it emits",
+    "note": "a string kind with MarshalText writes its output, not the Go string, so the literal round-trips through it",
+    "type": "crossWord",
+    "json": "v",
+    "jsonschema": "const=abc",
+    "validate": "eq=abc",
+    "schema": {
+      "type": "string",
+      "const": "ABC"
+    },
+    "instances": [
+      {
+        "json": "ABC",
+        "want": "accept"
+      },
+      {
+        "json": "abc",
+        "want": "reject"
+      }
+    ]
+  },
+  {
     "name": "a text-marshaling numeric pins the text it emits",
     "note": "1f74e42: the loudest shape, where the Go kind and the instance differ",
     "type": "crossLevel",
