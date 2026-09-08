@@ -1244,8 +1244,8 @@
 // References below).
 //
 // An uncompilable pattern or patternProperties regex is deliberately not a
-// compile error. It fails every string instance it would judge, at validation
-// time.
+// compile error. It fails every string instance, and for patternProperties
+// every object with a member, it would judge, at validation time.
 //
 // Instance numbers compare exactly. A validation run decodes them as
 // [encoding/json.Number] and compares them as [math/big.Rat], with one bound

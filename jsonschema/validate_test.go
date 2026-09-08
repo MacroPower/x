@@ -7151,6 +7151,46 @@ func TestCompileInvalidPatternFailsClosed(t *testing.T) {
 		"an uncompilable pattern must fail closed, not yield an accept-all validator")
 }
 
+// TestCompileInvalidPatternPropertiesScope pins the scope of the
+// patternProperties fail-closed rule: the uncompilable pattern rejects every
+// object with a member, since it cannot decide which names it governs, while
+// an object with no members has no name for it to judge and passes, as a
+// non-object does. The empty object once failed too, contradicting the
+// documented scope and the sibling pattern and propertyNames rules.
+func TestCompileInvalidPatternPropertiesScope(t *testing.T) {
+	t.Parallel()
+
+	v, err := jsonschema.Compile(t.Context(), &jsonschema.Schema{
+		PatternProperties: map[string]*jsonschema.Schema{"(?=x)": {}},
+	})
+	require.NoError(t, err, "an uncompilable pattern defers to validation time")
+
+	tests := map[string]struct {
+		instance any
+		valid    bool
+	}{
+		"empty object":     {instance: map[string]any{}, valid: true},
+		"non-object":       {instance: "x", valid: true},
+		"object with name": {instance: map[string]any{"a": 1.0}},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := v.Validate(t.Context(), tt.instance)
+			if tt.valid {
+				require.NoError(t, err)
+
+				return
+			}
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "cannot be compiled")
+		})
+	}
+}
+
 // TestCompileRemoteBoundsAndPatternFallback exercises the cache-miss fallback in
 // boundsFor and patternFor: a remote schema is reached only at validation time,
 // so it is absent from the Compile-time caches and its numeric bound and pattern

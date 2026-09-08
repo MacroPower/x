@@ -2829,12 +2829,17 @@ func evalObjectApplicators(ctx evalContext) []*ValidationError {
 		cp := v.patternPropertyFor(ctx.nodeID, pattern)
 		if cp.err != nil {
 			// A pattern Go's RE2 cannot compile fails closed: the keyword
-			// cannot decide which properties it governs, so the object is
-			// rejected rather than silently dropping the subschema. The
-			// location names the pattern member, so the keyword token and
-			// path differ: build through newError with the full location.
-			errs = append(errs, newError(instancePath, patternSchemaPath, KeywordPatternProperties,
-				fmt.Sprintf("pattern %q cannot be compiled", pattern), nil))
+			// cannot decide which properties it governs, so an object with
+			// a member is rejected rather than silently dropping the
+			// subschema. An object with no members has no name for the
+			// pattern to judge, so it passes, as a non-string passes an
+			// uncompilable pattern. The location names the pattern member,
+			// so the keyword token and path differ: build through newError
+			// with the full location.
+			if len(sortedObjKeys) > 0 {
+				errs = append(errs, newError(instancePath, patternSchemaPath, KeywordPatternProperties,
+					fmt.Sprintf("pattern %q cannot be compiled", pattern), nil))
+			}
 
 			continue
 		}
