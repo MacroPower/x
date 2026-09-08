@@ -1793,7 +1793,9 @@
 // Inline expands refs only in typed sub-schema positions (those
 // [SubschemaEntries] covers). It leaves a $ref carried as raw JSON inside an
 // unknown keyword as-is, although a ref pointing into such a position still
-// resolves.
+// resolves. A raw ref is not rewritten for the output, so one that addressed
+// a keyword the expansion dropped (a definitions member beside a Draft 7
+// $ref, or a stripped $anchor) no longer resolves in the result.
 //
 // Inline applies the checks Remote References (above) describes to every
 // document a reference reaches, the moment it is reached: the root before any
