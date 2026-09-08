@@ -925,6 +925,12 @@
 //     {"type":"string","default":"15m"}, where the Go int64 kind would have
 //     rejected "15m". The same keys before the pair still parse against the
 //     Go type.
+//   - A const or enum before the pair pins a value of the Go type, so an
+//     override to a JSON type that value cannot take is
+//     [ErrConstraintConflict] rather than an unsatisfiable schema:
+//     const=5,type=string is an error, while const=5,type=number keeps the
+//     pin. A default or examples value is an annotation and keeps its
+//     Go-typed value.
 //   - After an override to array, object, or null there is no scalar type to
 //     parse against, so those keys are an error.
 //   - A null literal before the pair is an error for every override but

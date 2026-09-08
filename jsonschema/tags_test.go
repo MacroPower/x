@@ -4183,6 +4183,94 @@ func TestTagByteSliceScalarsAreBase64Text(t *testing.T) {
 	}
 }
 
+// TestTagPinnedValueBeforeTypeOverride pins that a const or enum authored
+// before a type= pair, which parsed against the Go type, conflicts with an
+// override to a JSON type the value cannot take. The pair used to install
+// the type and leave the value, so const=5,type=string generated
+// {"type":"string","const":5}, a schema no instance satisfies. A default
+// before the pair keeps its Go-typed value, as TestTagScalarAfterTypeOverride
+// pins.
+func TestTagPinnedValueBeforeTypeOverride(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		generate func() (*jsonschema.Schema, error)
+		want     string // marshaled property schema
+		err      string // substring required beside ErrConstraintConflict
+	}{
+		"const before a string override": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V int `json:"v" jsonschema:"const=5,type=string"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+			err: "const before type=string pins a value of another type",
+		},
+		"enum before a string override": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V int `json:"v" jsonschema:"enum=1|2,type=string"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+			err: "enum before type=string pins a value of another type",
+		},
+		"fractional const before an integer override": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V float64 `json:"v" jsonschema:"const=1.5,type=integer"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+			err: "const before type=integer pins a value of another type",
+		},
+		"const before a number override keeps the pin": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V int `json:"v" jsonschema:"const=5,type=number"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+			want: `{"type":"number","const":5}`,
+		},
+		"string const before a string override keeps the pin": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V upperWord `json:"v" jsonschema:"const=abc,type=string"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+			want: `{"type":"string","const":"ABC"}`,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			s, err := tc.generate()
+			if tc.err != "" {
+				require.ErrorIs(t, err, jsonschema.ErrConstraintConflict)
+				require.ErrorContains(t, err, tc.err)
+
+				return
+			}
+
+			require.NoError(t, err)
+
+			got, err := json.Marshal(s.Properties["v"])
+			require.NoError(t, err)
+			assert.JSONEq(t, tc.want, string(got))
+		})
+	}
+}
+
 // TestValidateRequiredOnPointerToByteArray pins that a [N]byte classifies as
 // the base64 byte string a []byte does, so a validate required on a pointer
 // to one forbids the null a nil pointer marshals as. The array used to fall

@@ -10,6 +10,7 @@ import (
 	"github.com/google/jsonschema-go/jsonschema"
 
 	"go.jacobcolvin.com/x/jsonschema/internal/constraint"
+	"go.jacobcolvin.com/x/jsonschema/internal/jsonvalue"
 	"go.jacobcolvin.com/x/jsonschema/internal/keyword"
 	"go.jacobcolvin.com/x/jsonschema/internal/tagmodel"
 	"go.jacobcolvin.com/x/jsonschema/internal/typename"
@@ -224,6 +225,15 @@ func (s *applyState) apply(d Directive) error {
 		if g := conflictingGroup(s.groupsSet, value); g != "" {
 			return fmt.Errorf("jsonschema tag: %s constraint conflicts with type=%s", g, value)
 		}
+
+		// A const or enum before the pair parsed against the Go type, and
+		// the override cannot re-parse it. A value the new type cannot take
+		// would ship as a schema no instance satisfies, so it is reported as
+		// the conflict it is, on the same footing as a second const.
+		if k := s.pinnedValueConflict(value); k != "" {
+			return fmt.Errorf("jsonschema tag: %s before type=%s pins a value of another type: %w",
+				k, value, tagmodel.ErrConflict)
+		}
 	}
 
 	// Once an override is in force, a keyword from a family it dropped is a
@@ -267,6 +277,62 @@ func (s *applyState) apply(d Directive) error {
 // scalar kind, and that is the gate rejecting a scalar key that follows one.
 func (s *applyState) scalarOK() bool {
 	return s.overriddenType == "" || s.overridden.Kind != reflect.Invalid
+}
+
+// pinnedValueConflict names the value key, const or enum, holding a value on
+// the canvas that no instance of the named JSON type can take, or "" when
+// every pinned value has that type. Only the assertion keys are checked: a
+// default or examples value is an annotation, which keeps its Go-typed value
+// under an override, as documented. A null value is left to the null rule,
+// which reports it under its own sentinel on either side of the pair.
+func (s *applyState) pinnedValueConflict(typeName string) string {
+	if c := s.canvas.Const; c != nil && !valueHasType(*c, typeName) {
+		return keyword.Const
+	}
+
+	for _, v := range s.canvas.Enum {
+		if !valueHasType(v, typeName) {
+			return keyword.Enum
+		}
+	}
+
+	return ""
+}
+
+// valueHasType reports whether a pinned value is an instance of the named JSON
+// type. A value with no document form, or the null the null rule owns, passes.
+func valueHasType(v any, typeName string) bool {
+	jv, ok := jsonvalue.FromDocument(v)
+	if !ok || jv.Kind() == jsonvalue.Null {
+		return true
+	}
+
+	switch typeName {
+	case typename.String:
+		return jv.Kind() == jsonvalue.String
+	case typename.Number:
+		return jv.Kind() == jsonvalue.Number
+	case typename.Integer:
+		if jv.Kind() != jsonvalue.Number {
+			return false
+		}
+
+		// A number beyond the expansion cap has no rational to test, and the
+		// override is left to it.
+		dn, ok := jv.Dec()
+
+		return !ok || dn.IsIntegral()
+
+	case typename.Boolean:
+		return jv.Kind() == jsonvalue.Bool
+	case typename.Array:
+		return jv.Kind() == jsonvalue.Array
+	case typename.Object:
+		return jv.Kind() == jsonvalue.Object
+	default:
+		// The null type admits only the null the rule above passed.
+		return false
+	}
 }
 
 // applyKey routes one key: the annotations this dialect owns outright, the type=
