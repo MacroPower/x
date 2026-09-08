@@ -1187,6 +1187,32 @@ func TestTagTypeOverride(t *testing.T) {
 	})
 }
 
+// overriddenInner is the struct a type= pair replaces in
+// TestTagTypeOverrideReplacedSubtreeStillHooked; its field carries a tag the
+// grammar refuses.
+type overriddenInner struct {
+	X int `json:"x" jsonschema:"minimum=abc"`
+}
+
+// TestTagTypeOverrideReplacedSubtreeStillHooked pins that a type= pair
+// replaces the occurrence but not the reflection beneath it: the replaced
+// struct's fields still run every field-level hook, so a malformed tag inside
+// the subtree aborts generation although the subtree never renders. The
+// Struct Tag section states this; the test keeps the conservative choice
+// deliberate.
+func TestTagTypeOverrideReplacedSubtreeStillHooked(t *testing.T) {
+	t.Parallel()
+
+	type outer struct {
+		In overriddenInner `json:"in" jsonschema:"type=string"`
+	}
+
+	_, err := jsonschema.GenerateFor[outer](t.Context())
+	require.Error(t, err)
+	require.ErrorContains(t, err, `overriddenInner field "x"`)
+	require.ErrorContains(t, err, `key "minimum"`)
+}
+
 // TestTagEnumOnSequenceFields pins that an enum tag on a slice or array field
 // constrains each element ("array of enum values"): the values parse against
 // the element type and land on the item schemas rather than erroring or

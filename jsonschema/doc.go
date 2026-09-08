@@ -904,6 +904,10 @@
 //     fields. A [time.Duration] field fails in type resolution, ahead of the
 //     tag, so declaring a shape for a duration takes [WithTypeSchema] or a
 //     provider.
+//   - The replaced type was still reflected, and its fields still run every
+//     field-level hook: a malformed tag or a failing interpreter inside a
+//     type= replaced subtree aborts generation even though the subtree never
+//     renders.
 //   - Pairs apply in order, and keys after type= still take effect.
 //
 // Because pairs apply in order, a default, const, enum, or examples value
