@@ -138,6 +138,8 @@ type exactTypeProvider struct {
 	ts TypeSchema
 }
 
+// SchemaForType answers ts for exactly the registered type and reports
+// [ErrTypeNotHandled] for every other type, so the provider chain moves on.
 func (p exactTypeProvider) SchemaForType(_ context.Context, tc TypeContext) (TypeSchema, error) {
 	if tc.Type != p.t {
 		return TypeSchema{}, fmt.Errorf("%w: %s", ErrTypeNotHandled, tc.Type)
