@@ -496,3 +496,60 @@ func TestReconcileHookAuthoredTypeSlot(t *testing.T) {
 		require.NoError(t, err)
 	})
 }
+
+// splitExample is the string type whose inline override carries examples of
+// its own in TestReconcileExamplesAuthoredByContent.
+type splitExample string
+
+// TestReconcileExamplesAuthoredByContent pins that an authored examples list
+// is judged by its content, not its length: on a nullable field whose type
+// carries examples of its own, a list of the same length but different
+// members moves to the wrapper with the type's list restored beneath it, and
+// a re-set to the type's own list leaves no wrapper sibling. The row used to
+// compare lengths alone, so an equal-length list stayed on the value branch
+// and replaced the type's examples while a longer one moved to the wrapper.
+func TestReconcileExamplesAuthoredByContent(t *testing.T) {
+	t.Parallel()
+
+	type doc struct {
+		X *splitExample `ex:"x" json:"x"`
+	}
+
+	tests := map[string]struct {
+		authored []any
+		want     string
+	}{
+		"different members of the same length": {
+			authored: []any{"b"},
+			want:     `{"examples":["b"],"anyOf":[{"type":"string","examples":["a"]},{"type":"null"}]}`,
+		},
+		"the type's own list": {
+			authored: []any{"a"},
+			want:     `{"anyOf":[{"type":"string","examples":["a"]},{"type":"null"}]}`,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			s, err := jsonschema.GenerateFor[doc](t.Context(),
+				jsonschema.WithTypeSchemaFor[splitExample](jsonschema.TypeSchema{
+					Value: &jsonschema.Schema{Type: "string", Examples: []any{"a"}},
+				}),
+				jsonschema.WithTagInterpreter("ex", jsonschema.TagInterpreterFunc(
+					func(_ context.Context, field jsonschema.FieldContext, _ jsonschema.Tag) error {
+						field.Canvas.Examples = tc.authored
+
+						return nil
+					},
+				)),
+			)
+			require.NoError(t, err)
+
+			got, err := json.Marshal(s.Properties["x"])
+			require.NoError(t, err)
+			assert.JSONEq(t, tc.want, string(got))
+		})
+	}
+}

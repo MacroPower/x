@@ -26,6 +26,7 @@ import (
 
 	"github.com/google/jsonschema-go/jsonschema"
 
+	"go.jacobcolvin.com/x/jsonschema/internal/jsonvalue"
 	"go.jacobcolvin.com/x/jsonschema/internal/keyword"
 )
 
@@ -403,17 +404,23 @@ var (
 			func(s *Schema) bool { return s.WriteOnly },
 			func(s *Schema, v bool) { s.WriteOnly = v }),
 		{
-			// A field rarely re-authors a type's examples; a length change is a
-			// sufficient authored signal (an equal-length re-set is inert either
-			// way). This makes the row's presence notion length-based, unlike
-			// schemafield's nil-based IsZero for the same field, so the two are
-			// not interchangeable.
-			Differs: func(a, b *Schema) bool { return len(a.Examples) != len(b.Examples) },
-			Assign:  func(src, dst *Schema) { dst.Examples = src.Examples },
-			Fields:  []string{"Examples"},
-			Name:    keyword.Examples,
-			Drafts:  DraftsAll,
-			Scope:   ScopeWrapper,
+			// Examples compares by content, member for member under JSON
+			// equality, with nil and empty distinct the way the Enum row keeps
+			// them: a re-set to the type's own list is inert, and any other list
+			// is authored whatever its length, so a nullable field's examples land
+			// on the wrapper by the same rule at every length.
+			Differs: func(a, b *Schema) bool {
+				if (a.Examples == nil) != (b.Examples == nil) {
+					return true
+				}
+
+				return !slices.EqualFunc(a.Examples, b.Examples, valuesEqual)
+			},
+			Assign: func(src, dst *Schema) { dst.Examples = src.Examples },
+			Fields: []string{"Examples"},
+			Name:   keyword.Examples,
+			Drafts: DraftsAll,
+			Scope:  ScopeWrapper,
 		},
 		annotationKeyword(keyword.Comment, "Comment",
 			func(s *Schema) string { return s.Comment },
@@ -687,6 +694,24 @@ func derive(keep func(*Keyword) bool) []*Keyword {
 	}
 
 	return out
+}
+
+// valuesEqual reports JSON-semantic equality between two authored values, the
+// equality [jsonvalue.FromDocument] gives them: numbers compare through their
+// canonical decimal forms, so the same value in different Go types is equal. A
+// value with no document form equals nothing.
+func valuesEqual(a, b any) bool {
+	av, ok := jsonvalue.FromDocument(a)
+	if !ok {
+		return false
+	}
+
+	bv, ok := jsonvalue.FromDocument(b)
+	if !ok {
+		return false
+	}
+
+	return av.Equal(bv)
 }
 
 // ptrEqual reports whether two pointers hold equal values, treating two nil
