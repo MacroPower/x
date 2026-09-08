@@ -1157,15 +1157,40 @@ func validateJSONPointer(s string) error {
 	return nil
 }
 
+// regexState is what the regex scan has just read, which decides whether a
+// quantifier may follow.
+type regexState int
+
+const (
+	// Nothing to repeat: the pattern start, the byte after '(' or '|', and
+	// the byte after a lazy suffix.
+	regexNothing regexState = iota
+	// An atom a quantifier may follow.
+	regexAtom
+	// A quantifier, which a single lazy '?' may follow.
+	regexQuantifier
+)
+
 // validateRegex checks that s is a valid ECMA 262 regular expression. The
 // "regex" format is defined in terms of ECMA 262, which is a superset of Go's
 // RE2 (it permits backreferences and lookaround). A structural check is used
 // rather than [regexp.Compile] so valid ECMA 262 patterns that RE2 rejects are
 // still accepted, while genuinely malformed patterns are rejected.
+//
+// Beyond balanced groups, terminated classes, and well-formed escapes, the
+// scan holds every quantifier to something to repeat: ECMA 262 22.2.1 derives
+// Term from Atom Quantifier, so "*a", "a**", and "{1}" are syntax errors in
+// every engine, and Annex B keeps the early error that the first bound of
+// "{m,n}" must not exceed the second. A '{' that opens no braced quantifier
+// form is an Annex B ExtendedPatternCharacter, so "a{,5}" and "a{2,1" stay
+// literal. The assertions '^' and '$' are left quantifiable, as RE2 reads
+// them.
 func validateRegex(s string) error {
 	depth := 0
 
 	inClass := false
+
+	state := regexNothing
 
 	for i := 0; i < len(s); {
 		c := s[i]
@@ -1183,6 +1208,7 @@ func validateRegex(s string) error {
 			}
 
 			i += 1 + size
+			state = regexAtom
 
 			continue
 
@@ -1197,6 +1223,7 @@ func validateRegex(s string) error {
 			// be empty.
 			if c == ']' {
 				inClass = false
+				state = regexAtom
 			}
 
 		case c == '[':
@@ -1204,12 +1231,66 @@ func validateRegex(s string) error {
 
 		case c == '(':
 			depth++
+			state = regexNothing
+
+			// A "(?" opens a non-capturing, lookaround, named, or (in RE2)
+			// flagged group; its modifier is consumed here so no byte of it
+			// counts as an atom for a quantifier to repeat.
+			if i+1 < len(s) && s[i+1] == '?' {
+				i += 1 + regexGroupModifierLen(s[i+2:])
+			}
+
 		case c == ')':
 			if depth == 0 {
 				return errors.New("invalid regex: unbalanced parenthesis")
 			}
 
 			depth--
+			state = regexAtom
+
+		case c == '|':
+			state = regexNothing
+
+		case c == '*', c == '+':
+			if state != regexAtom {
+				return errors.New("invalid regex: nothing to repeat")
+			}
+
+			state = regexQuantifier
+
+		case c == '?':
+			switch state {
+			case regexAtom:
+				state = regexQuantifier
+			case regexQuantifier:
+				state = regexNothing // the lazy suffix
+			case regexNothing:
+				return errors.New("invalid regex: nothing to repeat")
+			}
+
+		case c == '{':
+			n, ordered := regexBracedQuantifier(s[i:])
+			if n == 0 {
+				state = regexAtom // an Annex B ExtendedPatternCharacter
+
+				break
+			}
+
+			if state != regexAtom {
+				return errors.New("invalid regex: nothing to repeat")
+			}
+
+			if !ordered {
+				return errors.New("invalid regex: quantifier bounds out of order")
+			}
+
+			state = regexQuantifier
+			i += n
+
+			continue
+
+		default:
+			state = regexAtom
 		}
 
 		i++
@@ -1224,6 +1305,121 @@ func validateRegex(s string) error {
 	}
 
 	return nil
+}
+
+// regexGroupModifierLen returns the length of the group modifier that follows
+// "(?" at the start of s: the lookaround and non-capturing introducers ":",
+// "=", "!", "<=", and "<!", a named-capture name "<name>" (RE2 spells it
+// "P<name>"), or an RE2 flag run such as "i" or "ims-U:". It returns 0 when s
+// opens none of them, and the scan then reads the bytes as ordinary atoms.
+func regexGroupModifierLen(s string) int {
+	if s == "" {
+		return 0
+	}
+
+	switch {
+	case s[0] == ':' || s[0] == '=' || s[0] == '!':
+		return 1
+	case s[0] == '<' && len(s) > 1 && (s[1] == '=' || s[1] == '!'):
+		return 2
+	case s[0] == '<':
+		return regexGroupNameLen(s, 1)
+	case s[0] == 'P' && len(s) > 1 && s[1] == '<':
+		return regexGroupNameLen(s, 2)
+	}
+
+	n := 0
+	for n < len(s) && (isASCIILetter(s[n]) || s[n] == '-') {
+		n++
+	}
+
+	if n < len(s) && s[n] == ':' {
+		n++
+	}
+
+	return n
+}
+
+// regexGroupNameLen returns the length of s through the '>' closing a group
+// name whose first character sits at s[from], or 0 when the name is not a run
+// of ASCII word characters ending in '>'. Only such a run is consumed, so a
+// malformed name never swallows a parenthesis the group accounting needs.
+func regexGroupNameLen(s string, from int) int {
+	for i := from; i < len(s); i++ {
+		c := s[i]
+		if c == '>' {
+			if i == from {
+				return 0
+			}
+
+			return i + 1
+		}
+
+		if !isASCIILetter(c) && (c < '0' || c > '9') && c != '_' && c != '$' {
+			return 0
+		}
+	}
+
+	return 0
+}
+
+// regexBracedQuantifier reads a braced quantifier at the start of s, which
+// begins with '{': the ECMA 262 QuantifierPrefix forms "{m}", "{m,}", and
+// "{m,n}" with m and n runs of decimal digits. It returns the length of the
+// form and whether its bounds are in order (m <= n, or a single bound), or 0
+// when s opens none of the forms, in which case the '{' is a literal.
+func regexBracedQuantifier(s string) (int, bool) {
+	i := 1
+
+	lowStart := i
+	for i < len(s) && s[i] >= '0' && s[i] <= '9' {
+		i++
+	}
+
+	if i == lowStart {
+		return 0, false
+	}
+
+	low := s[lowStart:i]
+
+	if i < len(s) && s[i] == '}' {
+		return i + 1, true
+	}
+
+	if i >= len(s) || s[i] != ',' {
+		return 0, false
+	}
+
+	i++
+
+	highStart := i
+	for i < len(s) && s[i] >= '0' && s[i] <= '9' {
+		i++
+	}
+
+	if i >= len(s) || s[i] != '}' {
+		return 0, false
+	}
+
+	if i == highStart {
+		return i + 1, true
+	}
+
+	return i + 1, decimalLessOrEqual(low, s[highStart:i])
+}
+
+// decimalLessOrEqual reports whether the decimal digit string a is at most b,
+// compared as unbounded integers so a bound too large for a machine word is
+// still ordered correctly.
+func decimalLessOrEqual(a, b string) bool {
+	a = strings.TrimLeft(a, "0")
+	b = strings.TrimLeft(b, "0")
+
+	if len(a) != len(b) {
+		return len(a) < len(b)
+	}
+
+	return a <= b
 }
 
 // validateRegexEscape reports whether c, the rune following a backslash, forms

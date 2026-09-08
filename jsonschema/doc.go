@@ -1430,8 +1430,9 @@
 // replaces any of them.
 //
 //   - regex is a structural ECMA-262 check, not a compile. It checks balanced
-//     groups, terminated classes, and well-formed escapes. It accepts
-//     backreferences and lookaround, since ECMA-262 has them and Go's RE2
+//     groups, terminated classes, well-formed escapes, and that every
+//     quantifier follows something to repeat with its bounds in order. It
+//     accepts backreferences and lookaround, since ECMA-262 has them and Go's RE2
 //     does not, and every ASCII character is a valid ECMA-262 Annex B
 //     identity escape, so it accepts "\a" and "\_" (and a bare "\c", an Annex
 //     B ExtendedAtom in its own right). The format therefore accepts patterns

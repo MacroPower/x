@@ -1,8 +1,8 @@
 # regex acceptance vectors, from ECMA-262 22.2.
 #
 # The validator is a structural check (balanced parens, terminated classes,
-# defined escapes), so it accepts ECMA-262 patterns RE2 rejects and rejects only
-# structurally malformed patterns. The official suite holds three string cases
+# defined escapes, and a quantifier after every atom), so it accepts ECMA-262
+# patterns RE2 rejects and rejects only structurally malformed patterns. The official suite holds three string cases
 # against this format: a valid pattern and an unbalanced parenthesis in
 # optional/format/regex.json, and "\a" in optional/format/ecmascript-regex.json,
 # which suite_test.go skips under reasonAnnexBIdentity as a documented
@@ -30,3 +30,30 @@
 "[]]"	true	an empty class followed by a literal ']' (6c3c47a, then fdbad66)
 "[a"	false	a class with a member and no terminator is genuinely unterminated
 "[^"	false	a negated class with no terminator is genuinely unterminated
+#
+# ECMA-262 22.2.1 derives Term from Atom Quantifier, so a quantifier with no
+# atom before it is a SyntaxError in every engine, and Annex B keeps the early
+# error on "{m,n}" with m greater than n while reading a '{' that opens no
+# braced quantifier form as an ExtendedPatternCharacter literal.
+#
+"*a"	false	nothing to repeat at the pattern start
+"a**"	false	a doubled quantifier
+"+"	false	a lone quantifier
+"a|?"	false	nothing to repeat after an alternative
+"(*a)"	false	nothing to repeat after a group opens
+"(?:*)"	false	nothing to repeat after a non-capturing group opens
+"{1}"	false	a braced quantifier with nothing to repeat
+"a{2,1}"	false	Annex B keeps the out-of-order bounds early error
+"a{2,1"	true	an unterminated brace is a literal under Annex B
+"a{,5}"	true	not a quantifier form, so a literal
+"a{}"	true	empty braces are literal
+"a+?"	true	the lazy form
+"a??"	true	the lazy form of '?'
+"a???"	false	a third '?' has nothing to repeat
+"a{2}?"	true	the lazy form of a braced quantifier
+"a{1,2}"	true	bounds in order
+"a{2,}"	true	an open upper bound
+"(?<name>a)*"	true	a named group is quantifiable
+"(?=a)*"	true	Annex B QuantifiableAssertion lets a lookahead be repeated
+"[ab]{2}"	true	a class is quantifiable
+"\\d+"	true	an escape is quantifiable

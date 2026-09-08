@@ -256,7 +256,8 @@ func FuzzFormatRegexVsRE2(f *testing.F) {
 
 	for _, seed := range []string{
 		"^[a-z]+$", `(foo)\1`, "foo(?=bar)", "[abc]", "a{2,3}", `\a`, `\_`, `\c`,
-		`\Q[\E`, "[]", "[]Z(]", "(", "[", `\`, "a|b", `\p{L}`, "",
+		`\Q[\E`, "[]", "[]Z(]", "(", "[", `\`, "a|b", `\p{L}`, "", "*a", "a**",
+		"{1}", "a{2,1}", "a{,5}", "a+?", "(?i)a*", "(?P<n>a)+", "{00}", "a{}",
 	} {
 		f.Add(seed)
 	}
@@ -289,7 +290,14 @@ func regexCarveOut(s string) bool {
 
 	// A leading ']' is a class member to RE2 and closes an empty class to
 	// ECMA 262, so the two disagree on where the class ends.
-	return strings.Contains(s, "[]")
+	if strings.Contains(s, "[]") {
+		return true
+	}
+
+	// A braced bound with a leading zero. RE2's parseInt refuses one, so it
+	// reads "{00}" as four literal characters, while ECMA 262 DecimalDigits
+	// admits it and "{00}" is a quantifier with nothing to repeat.
+	return leadingZeroBound.MatchString(s)
 }
 
 // FuzzFormatURIVsNetURL differentials the uri validator against net/url. The
@@ -714,6 +722,11 @@ const (
 )
 
 var (
+	// A braced quantifier bound that opens on a zero followed by another
+	// digit, in either the lower or the upper position; regexCarveOut skips
+	// a pattern carrying one.
+	leadingZeroBound = regexp.MustCompile(`\{0\d|\{\d+,0\d`)
+
 	// The RFC 9562 §4 canonical textual representation: four hyphens at fixed
 	// places and hex digits of either case elsewhere.
 	uuidGrammar = regexp.MustCompile(
