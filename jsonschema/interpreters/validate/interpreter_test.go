@@ -2952,6 +2952,24 @@ func TestValidateInterpreterGoPlaygroundParity(t *testing.T) {
 
 		_, err = jsonschema.GenerateFor[SD](t.Context(), opt)
 		require.ErrorContains(t, err, `"1.0" is not the canonical spelling "1"`)
+
+		// A float token is canonical at the field's width, the text eq=0.1
+		// already pins on a float32, rather than at 64 bits where no
+		// float32 fraction spells itself back.
+		type F32 struct {
+			F float32 `json:"f" validate:"oneof=0.1 2"`
+		}
+
+		s, err = jsonschema.GenerateFor[F32](t.Context(), opt)
+		require.NoError(t, err)
+		assert.Equal(t, []any{0.1, 2.0}, s.Properties["f"].Enum)
+
+		type F32Long struct {
+			F float32 `json:"f" validate:"oneof=0.10000000149011612 2"`
+		}
+
+		_, err = jsonschema.GenerateFor[F32Long](t.Context(), opt)
+		require.ErrorContains(t, err, `is not the canonical spelling "0.1"`)
 	})
 
 	t.Run("empty eq pins the empty string", func(t *testing.T) {

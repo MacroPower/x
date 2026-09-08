@@ -285,7 +285,10 @@ func checkCanonicalOneOfKind(kind reflect.Kind, tokens []string) error {
 				continue
 			}
 
-			canonical = strconv.FormatFloat(f, 'f', -1, 64)
+			// The shortest decimal at the kind's width, as the package doc
+			// promises for every float literal; formatting a float32 at 64
+			// bits would refuse every token the width cannot hold exactly.
+			canonical = strconv.FormatFloat(f, 'f', -1, bits)
 
 		default:
 			return nil
