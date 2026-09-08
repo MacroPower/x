@@ -57,12 +57,13 @@ type Cycle struct {
 	Target string
 }
 
-// Clone returns a deep copy of s. Two kinds of value stay shared with the
-// source, both named below; nothing else does.
+// Clone returns a deep copy of s. One kind of value stays shared with the
+// source, named below; nothing else does.
 //
 // Upstream [jsonschema.Schema.CloneSchemas] is shallow for the non-sub-schema
-// fields (Extra, Enum, Const, Default, Examples), sharing their backing maps,
-// slices, and pointers with the original. Clone copies those too, which is what
+// fields (Extra, Enum, Const, Default, Examples) and the numeric bound fields
+// (Minimum, MaxItems, and their siblings), sharing their backing maps, slices,
+// and pointers with the original. Clone copies those too, which is what
 // remote-ref isolation demands. The validator's document caches hold copies
 // independent of the resolver-owned schemas, so no later walk of a cached
 // document can reach the caller's or the resolver's values.
@@ -73,10 +74,8 @@ type Cycle struct {
 // result under the same pointer dedup the input needs. A nil s clones to nil, at
 // the root and at every sub-schema position alike.
 //
-// Both shared kinds are immutable in practice. The numeric bound fields
-// (Minimum, MaxItems, and their siblings) keep the source's *float64 and *int
-// pointers, since nothing writes through them. An unexported struct field
-// inside one of the any-typed value fields (Const, Enum, Examples, Extra) keeps
+// The shared kind is immutable in practice. An unexported struct field inside
+// one of the any-typed value fields (Const, Enum, Examples, Extra) keeps
 // whatever the shallow struct copy gave it, because reflection cannot write
 // such a field and [encoding/json] never serializes it.
 func Clone(s *jsonschema.Schema) *jsonschema.Schema {
@@ -134,7 +133,7 @@ type Tree struct {
 // holds itself without crossing a schema copies as a cyclic container, as it
 // does under [Clone], since [encoding/json] refuses that shape on its own.
 //
-// The copy shares the two immutable value kinds [Clone] names and nothing
+// The copy shares the one immutable value kind [Clone] names and nothing
 // else.
 func CloneTree(s *jsonschema.Schema) (Tree, *Cycle) {
 	c := cloner{

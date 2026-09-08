@@ -230,7 +230,17 @@ func canvasAuthorsBounds(canvas *Schema) bool {
 // then re-derives them from the pristine payload and the canvas through the
 // shared algebra, so an authored bound can only tighten the type's own, never
 // weaken it.
+//
+// The overlay reads a private copy of the canvas. The canvas is the one object
+// every field hook wrote through, and a hook may keep what it wrote there (the
+// sub-schema it forbade, the map it pinned as a const, the list it set as
+// examples) and write through it after generation returns. Each Assign copies a
+// pointer or a slice header, so without the copy those later writes would land
+// on the rendered schema. Base is already a private copy of the payload, so
+// nothing else the overlay reads is shared with a hook.
 func overlayAuthored(merged, canvas, base *Schema) {
+	canvas = schemaclone.Clone(canvas)
+
 	for _, kw := range keywordmeta.Authored {
 		if kw.Set(canvas) {
 			kw.Assign(canvas, merged)

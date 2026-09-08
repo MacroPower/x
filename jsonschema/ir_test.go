@@ -3,6 +3,7 @@ package jsonschema_test
 import (
 	"context"
 	"encoding/json/v2"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -32,35 +33,141 @@ func (viewMutator) Interpret(_ context.Context, field jsonschema.FieldContext, _
 	return nil
 }
 
+// heldPointers is what a tag interpreter keeps after it returns: the values
+// it handed the canvas or the facade, each still reachable through a pointer
+// or a container the hook owns.
+type heldPointers struct {
+	forbiddenMin  *int
+	forbiddenBody *jsonschema.Schema
+	content       *jsonschema.Schema
+	constMap      map[string]any
+	enumInner     []any
+	example       map[string]any
+	rawDefault    []byte
+}
+
+// keepingInterpreter declares through the canvas and the facade, keeping every
+// value it declared so the test can write through it after generation. The
+// tag value names the group of keywords the field takes, since a const and an
+// enum on one field would conflict.
+func (h *heldPointers) keepingInterpreter(_ context.Context, field jsonschema.FieldContext, tag jsonschema.Tag) error {
+	c := field.Constraints()
+
+	switch tag.Value {
+	case "forbid":
+		c.ForbidSchema(&jsonschema.Schema{MinLength: h.forbiddenMin})
+		c.ForbidSchema(h.forbiddenBody)
+
+		field.Canvas.ContentSchema = h.content
+
+	case "const":
+		err := c.SetConst(h.constMap)
+		if err != nil {
+			return fmt.Errorf("pin const: %w", err)
+		}
+
+		field.Canvas.Examples = []any{h.example}
+		field.Canvas.Default = h.rawDefault
+
+	case "enum":
+		err := c.SetEnum([]any{h.enumInner})
+		if err != nil {
+			return fmt.Errorf("set enum: %w", err)
+		}
+	}
+
+	return nil
+}
+
 // TestHookPointersArePrivateCopies pins that a hook declares through its
-// canvas and its return values alone. A write through Parent or Base lands on
-// a copy the generator never reads back, apart from Parent.Required.
+// canvas and its return values alone, and that the output shares nothing with
+// the hook. A write through Parent or Base lands on a copy the generator never
+// reads back, apart from Parent.Required. A write after generation through a
+// pointer or container the hook kept (a forbidden sub-schema and a bound
+// inside it, a content schema, a const map, an enum member list, an examples
+// element, a raw default) never reaches the rendered schema. The overlay used
+// to copy the canvas's pointers and slice headers straight onto the output,
+// so every one of those writes changed the re-marshaled schema.
 func TestHookPointersArePrivateCopies(t *testing.T) {
 	t.Parallel()
 
-	type doc struct {
-		A string `json:"a" mut:"x"`
-		B string `json:"b"`
-	}
+	t.Run("a write through a view", func(t *testing.T) {
+		t.Parallel()
 
-	s, err := jsonschema.GenerateFor[doc](t.Context(),
-		jsonschema.WithTagInterpreter("mut", viewMutator{}))
-	require.NoError(t, err)
-
-	got, err := json.Marshal(s)
-	require.NoError(t, err)
-	assert.JSONEq(t, stringtest.Input(`
-		{
-			"$schema":"https://json-schema.org/draft/2020-12/schema",
-			"type":"object",
-			"properties":{
-				"a":{"type":"string","title":"through the canvas"},
-				"b":{"type":"string"}
-			},
-			"required":["a","b"],
-			"additionalProperties":false
+		type doc struct {
+			A string `json:"a" mut:"x"`
+			B string `json:"b"`
 		}
-	`), string(got))
+
+		s, err := jsonschema.GenerateFor[doc](t.Context(),
+			jsonschema.WithTagInterpreter("mut", viewMutator{}))
+		require.NoError(t, err)
+
+		got, err := json.Marshal(s)
+		require.NoError(t, err)
+		assert.JSONEq(t, stringtest.Input(`
+			{
+				"$schema":"https://json-schema.org/draft/2020-12/schema",
+				"type":"object",
+				"properties":{
+					"a":{"type":"string","title":"through the canvas"},
+					"b":{"type":"string"}
+				},
+				"required":["a","b"],
+				"additionalProperties":false
+			}
+		`), string(got))
+	})
+
+	t.Run("a write through a kept pointer", func(t *testing.T) {
+		t.Parallel()
+
+		type doc struct {
+			Forbid *string `json:"forbid" keep:"forbid"`
+			Const  string  `json:"const"  keep:"const"`
+			Enum   string  `json:"enum"   keep:"enum"`
+		}
+
+		three := 3
+		held := &heldPointers{
+			forbiddenMin:  &three,
+			forbiddenBody: &jsonschema.Schema{MaxLength: new(7), Pattern: "^x"},
+			content:       &jsonschema.Schema{Type: "object"},
+			constMap:      map[string]any{"k": "v"},
+			enumInner:     []any{"p"},
+			example:       map[string]any{"e": 1},
+			rawDefault:    []byte(`"d"`),
+		}
+
+		s, err := jsonschema.GenerateFor[doc](t.Context(),
+			jsonschema.WithTagInterpreter("keep", jsonschema.TagInterpreterFunc(held.keepingInterpreter)))
+		require.NoError(t, err)
+
+		before, err := json.Marshal(s)
+		require.NoError(t, err)
+
+		for _, want := range []string{
+			`"minLength":3`, `"maxLength":7`, `"pattern":"^x"`,
+			`"contentSchema":{"type":"object"}`, `"const":{"k":"v"}`,
+			`"enum":[["p"]]`, `"examples":[{"e":1}]`, `"default":"d"`,
+		} {
+			assert.Contains(t, string(before), want, "the declaration must render before the writes")
+		}
+
+		three = 99
+		held.forbiddenBody.MaxLength = new(1)
+		held.forbiddenBody.Pattern = "^mutated"
+		held.content.Type = "string"
+		held.constMap["k"] = "MUTATED"
+		held.enumInner[0] = "MUTATED"
+		held.example["e"] = "MUTATED"
+		held.rawDefault[1] = 'X'
+
+		after, err := json.Marshal(s)
+		require.NoError(t, err)
+		assert.JSONEq(t, string(before), string(after),
+			"a write through a pointer the hook kept must not reach the output")
+	})
 }
 
 // TestHookParentRequiredIsReadBack pins the one write the generator reads

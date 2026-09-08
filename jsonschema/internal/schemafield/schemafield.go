@@ -117,9 +117,10 @@ type Field struct {
 
 	// CloneContainer reallocates the field's top-level container on s so writes
 	// to it cannot reach the source, for the mutable header fields upstream
-	// CloneSchemas leaves aliased. It is nil for every other field, including
-	// the numeric pointer fields (reference-typed but pointing at immutable
-	// scalars) and the sub-schema fields (cloned by upstream CloneSchemas).
+	// CloneSchemas leaves aliased. The numeric bound fields (*float64 and *int)
+	// carry one too, reallocating the pointer so a write through the source's
+	// pointer never reaches the copy. It is nil for every other field, the
+	// sub-schema fields included (cloned by upstream CloneSchemas).
 	CloneContainer func(s *Schema)
 
 	// CloneDeep replaces the field's container on s with an independent copy.
@@ -187,25 +188,37 @@ func boolField(name string, class Class, get func(*Schema) bool) Field {
 }
 
 // floatField builds a *float64 field; IsZero is a nil pointer. Every numeric
-// bound is a Constraint, and the pointee is an immutable scalar, so the field
-// carries no CloneContainer.
-func floatField(name string, get func(*Schema) *float64) Field {
+// bound is a Constraint. Its CloneContainer reallocates the pointer, so a
+// writer holding the source's pointer cannot change the copy's bound.
+func floatField(name string, get func(*Schema) *float64, set func(*Schema, *float64)) Field {
 	return Field{
-		Name:   name,
-		Class:  Constraint,
-		IsZero: func(s *Schema) bool { return get(s) == nil },
+		Name:           name,
+		Class:          Constraint,
+		IsZero:         func(s *Schema) bool { return get(s) == nil },
+		CloneContainer: func(s *Schema) { set(s, clonePointer(get(s))) },
 	}
 }
 
 // intField builds a *int field; IsZero is a nil pointer. Like floatField, every
-// such field is a Constraint and the pointee is immutable, so it carries no
-// CloneContainer.
-func intField(name string, get func(*Schema) *int) Field {
+// such field is a Constraint and its CloneContainer reallocates the pointer.
+func intField(name string, get func(*Schema) *int, set func(*Schema, *int)) Field {
 	return Field{
-		Name:   name,
-		Class:  Constraint,
-		IsZero: func(s *Schema) bool { return get(s) == nil },
+		Name:           name,
+		Class:          Constraint,
+		IsZero:         func(s *Schema) bool { return get(s) == nil },
+		CloneContainer: func(s *Schema) { set(s, clonePointer(get(s))) },
 	}
+}
+
+// clonePointer returns a fresh pointer to a copy of p's value, or nil for nil.
+func clonePointer[T any](p *T) *T {
+	if p == nil {
+		return nil
+	}
+
+	v := *p
+
+	return &v
 }
 
 // singleField builds a *Schema sub-schema field from its accessor pair.
@@ -386,13 +399,27 @@ var (
 				}
 			},
 		},
-		floatField("MultipleOf", func(s *Schema) *float64 { return s.MultipleOf }),
-		floatField("Minimum", func(s *Schema) *float64 { return s.Minimum }),
-		floatField("Maximum", func(s *Schema) *float64 { return s.Maximum }),
-		floatField("ExclusiveMinimum", func(s *Schema) *float64 { return s.ExclusiveMinimum }),
-		floatField("ExclusiveMaximum", func(s *Schema) *float64 { return s.ExclusiveMaximum }),
-		intField("MinLength", func(s *Schema) *int { return s.MinLength }),
-		intField("MaxLength", func(s *Schema) *int { return s.MaxLength }),
+		floatField("MultipleOf",
+			func(s *Schema) *float64 { return s.MultipleOf },
+			func(s *Schema, v *float64) { s.MultipleOf = v }),
+		floatField("Minimum",
+			func(s *Schema) *float64 { return s.Minimum },
+			func(s *Schema, v *float64) { s.Minimum = v }),
+		floatField("Maximum",
+			func(s *Schema) *float64 { return s.Maximum },
+			func(s *Schema, v *float64) { s.Maximum = v }),
+		floatField("ExclusiveMinimum",
+			func(s *Schema) *float64 { return s.ExclusiveMinimum },
+			func(s *Schema, v *float64) { s.ExclusiveMinimum = v }),
+		floatField("ExclusiveMaximum",
+			func(s *Schema) *float64 { return s.ExclusiveMaximum },
+			func(s *Schema, v *float64) { s.ExclusiveMaximum = v }),
+		intField("MinLength",
+			func(s *Schema) *int { return s.MinLength },
+			func(s *Schema, v *int) { s.MinLength = v }),
+		intField("MaxLength",
+			func(s *Schema) *int { return s.MaxLength },
+			func(s *Schema, v *int) { s.MaxLength = v }),
 		strField("Pattern", Constraint, func(s *Schema) string { return s.Pattern }),
 
 		// Arrays.
@@ -414,8 +441,12 @@ var (
 			func(s *Schema) []*Schema { return s.ItemsArray },
 			func(s *Schema, v []*Schema) { s.ItemsArray = v },
 		),
-		intField("MinItems", func(s *Schema) *int { return s.MinItems }),
-		intField("MaxItems", func(s *Schema) *int { return s.MaxItems }),
+		intField("MinItems",
+			func(s *Schema) *int { return s.MinItems },
+			func(s *Schema, v *int) { s.MinItems = v }),
+		intField("MaxItems",
+			func(s *Schema) *int { return s.MaxItems },
+			func(s *Schema, v *int) { s.MaxItems = v }),
 		singleField(
 			"AdditionalItems",
 			keyword.AdditionalItems,
@@ -429,8 +460,12 @@ var (
 			func(s *Schema) *Schema { return s.Contains },
 			func(s, v *Schema) { s.Contains = v },
 		),
-		intField("MinContains", func(s *Schema) *int { return s.MinContains }),
-		intField("MaxContains", func(s *Schema) *int { return s.MaxContains }),
+		intField("MinContains",
+			func(s *Schema) *int { return s.MinContains },
+			func(s *Schema, v *int) { s.MinContains = v }),
+		intField("MaxContains",
+			func(s *Schema) *int { return s.MaxContains },
+			func(s *Schema, v *int) { s.MaxContains = v }),
 		singleField(
 			"UnevaluatedItems",
 			keyword.UnevaluatedItems,
@@ -438,8 +473,12 @@ var (
 		),
 
 		// Objects.
-		intField("MinProperties", func(s *Schema) *int { return s.MinProperties }),
-		intField("MaxProperties", func(s *Schema) *int { return s.MaxProperties }),
+		intField("MinProperties",
+			func(s *Schema) *int { return s.MinProperties },
+			func(s *Schema, v *int) { s.MinProperties = v }),
+		intField("MaxProperties",
+			func(s *Schema) *int { return s.MaxProperties },
+			func(s *Schema, v *int) { s.MaxProperties = v }),
 		{
 			Name:           "Required",
 			Class:          Constraint,

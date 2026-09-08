@@ -28,21 +28,20 @@ func shapeForType(t reflect.Type) Shape {
 	}
 }
 
-// needsCloneContainer reports whether a field's Go type is one of the mutable
-// header containers CloneSchemas leaves aliased ({slice, map, *any,
-// json.RawMessage}) and is not itself a sub-schema field (those are cloned by
-// upstream CloneSchemas). The numeric pointer fields (*float64, *int) are
-// reference-typed but point at immutable scalars, so they are excluded.
+// needsCloneContainer reports whether a field's Go type is one of the
+// reference-typed headers CloneSchemas leaves aliased ({slice, map, *any,
+// *float64, *int, json.RawMessage}) and is not itself a sub-schema field (those
+// are cloned by upstream CloneSchemas). The numeric pointer fields point at
+// scalars, but a writer holding the source's pointer can still change the
+// bound, so the copy reallocates them too.
 func needsCloneContainer(t reflect.Type) bool {
 	if shapeForType(t) != None {
 		return false
 	}
 
 	switch t.Kind() {
-	case reflect.Slice, reflect.Map:
+	case reflect.Slice, reflect.Map, reflect.Pointer:
 		return true
-	case reflect.Pointer:
-		return t.Elem().Kind() == reflect.Interface
 	default:
 		return false
 	}
