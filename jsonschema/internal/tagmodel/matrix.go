@@ -88,7 +88,9 @@ var (
 	// all, so a dialect that pins the family gets an error instead of an inert
 	// keyword. A byte slice is the interesting row: its base64 string has a
 	// length, so minLength constrains it, but it has no array, so a count does
-	// not.
+	// not. A coerced number or boolean is the same shape of row: its quoted
+	// text has a length, so minLength constrains it, but no keyword constrains
+	// the magnitude of a string, so a numeric bound has nothing to land on.
 	formCarriesAxis = [formCount][axisCount]bool{
 		FormString:        {AxisLength: true},
 		FormNumber:        {AxisNumeric: true},
@@ -96,6 +98,8 @@ var (
 		FormObject:        {AxisProperties: true},
 		FormTextString:    {AxisLength: true},
 		FormByteString:    {AxisLength: true},
+		FormCoercedNumber: {AxisLength: true},
+		FormCoercedBool:   {AxisLength: true},
 		FormCoercedString: {AxisLength: true},
 		// Only the property count: the payload declares an object outright, so
 		// a named count keyword lands on it exactly as it does on the
@@ -111,15 +115,29 @@ var (
 	formAxisNote = [formCount]string{
 		FormByteString: "a bound on a []byte field has no array length to constrain " +
 			"(it encodes as a base64 string)",
+		FormCoercedNumber: coercedBoundNote,
+		FormCoercedBool:   coercedBoundNote,
 		FormCoercedString: "a length rule on a string that marshals itself as text measures " +
 			"the Go string, which the schema never sees (name minLength or maxLength " +
 			"to constrain the text the field emits)",
 	}
+
+	// The formNoteAxis table is the family, beyond the form's natural axis, that
+	// the form's note answers for: the one the form looks like it should carry
+	// from its Go kind, so an author naming that family outright gets the
+	// note rather than the generic wording. A byte slice looks like an array
+	// and a coerced number like a number. A form with no entry has its note
+	// answer for the natural axis alone.
+	formNoteAxis = [formCount]Axis{
+		FormByteString:    AxisItems,
+		FormCoercedNumber: AxisNumeric,
+		FormCoercedBool:   AxisNumeric,
+	}
 )
 
-// coercedBoundNote explains why no bound reaches a string-coerced field. It is
-// a static cell reason rather than a formAxisNote row: no cell routes a coerced
-// form to applyBound, so the axis check never sees one.
+// coercedBoundNote explains why a numeric bound cannot reach a string-coerced
+// field, whether a dialect named the numeric family outright or named a rule
+// the form has no natural axis for.
 const coercedBoundNote = "a bound is not supported on a json:\",string\" coerced numeric field " +
 	"(minimum constrains JSON numbers, and no keyword constrains the magnitude of a string)"
 
@@ -141,10 +159,10 @@ func FormCarriesAxis(f Form, a Axis) bool {
 // the front-end wraps.
 func axisRejection(form Form, axis Axis) string {
 	// A form's note explains its natural axis (the one AxisAuto resolves to)
-	// and the item count it looks like it should carry; a bound naming
-	// another family outright takes the generic wording, since the note
-	// would answer a question the author never asked.
-	if note := formAxisNote[form]; note != "" && (axis == AxisAuto || axis == AxisItems) {
+	// and the family it looks like it should carry (formNoteAxis); a bound
+	// naming another family outright takes the generic wording, since the
+	// note would answer a question the author never asked.
+	if note := formAxisNote[form]; note != "" && (axis == AxisAuto || axis == formNoteAxis[form]) {
 		return note
 	}
 
@@ -203,12 +221,16 @@ func fillBounds() {
 	apply(OpForbidSize, FormArray, forbidSizeOn(AxisItems))
 	apply(OpForbidSize, FormObject, forbidSizeOn(AxisProperties))
 
-	// A coerced numeric bound has no faithful mapping: minimum constrains JSON
-	// numbers, so it is inert against the quoted string the field emits, and
-	// JSON Schema has no keyword for "the numeric value of this text is >= N".
+	// A coerced number or boolean takes the four endpoint bounds through the
+	// axis check like any string, where a named length lands on the quoted
+	// text and a numeric bound reports: minimum constrains JSON numbers, so
+	// it is inert against the quoted string the field emits, and JSON Schema
+	// has no keyword for "the numeric value of this text is >= N". An exact
+	// size stays what the rows above made it, a pin on the number and a
+	// rejection on the boolean.
 	for _, op := range []Op{OpFloorIncl, OpFloorExcl, OpCeilIncl, OpCeilExcl} {
 		for _, f := range []Form{FormCoercedNumber, FormCoercedBool} {
-			reject(op, f, coercedBoundNote)
+			apply(op, f, applyBound)
 		}
 	}
 }

@@ -971,7 +971,9 @@
 // provider declares an integer rides beside its $ref too. A definition
 // declaring no type is opaque, so a shape-dependent keyword on it is an
 // error. An element of a sequence resolves the same way, so an enum on a
-// slice of a provider-declared integer type lands on each element.
+// slice of a provider-declared integer type lands on each element. A
+// json:",string" field's quoted text has a length, so minLength and
+// maxLength constrain it as they do any string's.
 //
 // A key named twice in one tag resolves by what the keyword means:
 //

@@ -4320,6 +4320,85 @@ func TestTagPinnedValueBeforeTypeOverride(t *testing.T) {
 	}
 }
 
+// TestTagLengthBoundOnCoercedField pins that minLength and maxLength on a
+// json:",string" field constrain the quoted text's length as they do any
+// string's, while a numeric bound on it stays an error with the coercion
+// note, whether the jsonschema tag names minimum or the validate tag names a
+// rule the form has no natural axis for. The coerced forms used to reject
+// every endpoint bound with the numeric note, so maxLength=5 was refused
+// with a message about the magnitude of a string.
+func TestTagLengthBoundOnCoercedField(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		generate func() (*jsonschema.Schema, error)
+		want     string // marshaled property schema
+		err      string // substring required in the generation error
+	}{
+		"maxLength on a quoted int": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V int `json:"v,string" jsonschema:"maxLength=5"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+			want: `{"type":"string","maxLength":5}`,
+		},
+		"minLength on a text-marshaling numeric": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V crossLevel `json:"v" jsonschema:"minLength=2"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+			want: `{"type":"string","minLength":2}`,
+		},
+		"minimum on a quoted int is still refused": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V int `json:"v,string" jsonschema:"minimum=5"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+			err: "no keyword constrains the magnitude of a string",
+		},
+		"a validate rule on a quoted int is still refused": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V int `json:"v,string" validate:"max=5"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context(),
+					jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()))
+			},
+			err: "no keyword constrains the magnitude of a string",
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			s, err := tc.generate()
+			if tc.err != "" {
+				require.ErrorIs(t, err, jsonschema.ErrConstraintUnsupported)
+				require.ErrorContains(t, err, tc.err)
+
+				return
+			}
+
+			require.NoError(t, err)
+
+			got, err := json.Marshal(s.Properties["v"])
+			require.NoError(t, err)
+			assert.JSONEq(t, tc.want, string(got))
+		})
+	}
+}
+
 // TestValidateRequiredOnPointerToByteArray pins that a [N]byte classifies as
 // the base64 byte string a []byte does, so a validate required on a pointer
 // to one forbids the null a nil pointer marshals as. The array used to fall

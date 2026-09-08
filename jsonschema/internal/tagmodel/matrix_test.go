@@ -140,8 +140,8 @@ func TestMatrixGolden(t *testing.T) {
 		|exclusive ceiling / opaque value -> reject: exclusive ceiling is not supported on a opaque value
 		|exclusive ceiling / raw byte slice -> reject: exclusive ceiling is not supported on a raw byte slice
 		|exclusive ceiling / string -> apply
-		|exclusive ceiling / string-coerced boolean -> reject: a bound is not supported on a json:",string" coerced numeric field (minimum constrains JSON numbers, and no keyword constrains the magnitude of a string)
-		|exclusive ceiling / string-coerced number -> reject: a bound is not supported on a json:",string" coerced numeric field (minimum constrains JSON numbers, and no keyword constrains the magnitude of a string)
+		|exclusive ceiling / string-coerced boolean -> apply
+		|exclusive ceiling / string-coerced number -> apply
 		|exclusive ceiling / string-coerced string -> apply
 		|exclusive ceiling / text-marshaled string -> apply
 		|exclusive ceiling / unresolved reference -> reject: exclusive ceiling cannot be checked against a reference whose definition is not readable here
@@ -154,8 +154,8 @@ func TestMatrixGolden(t *testing.T) {
 		|exclusive floor / opaque value -> reject: exclusive floor is not supported on a opaque value
 		|exclusive floor / raw byte slice -> reject: exclusive floor is not supported on a raw byte slice
 		|exclusive floor / string -> apply
-		|exclusive floor / string-coerced boolean -> reject: a bound is not supported on a json:",string" coerced numeric field (minimum constrains JSON numbers, and no keyword constrains the magnitude of a string)
-		|exclusive floor / string-coerced number -> reject: a bound is not supported on a json:",string" coerced numeric field (minimum constrains JSON numbers, and no keyword constrains the magnitude of a string)
+		|exclusive floor / string-coerced boolean -> apply
+		|exclusive floor / string-coerced number -> apply
 		|exclusive floor / string-coerced string -> apply
 		|exclusive floor / text-marshaled string -> apply
 		|exclusive floor / unresolved reference -> reject: exclusive floor cannot be checked against a reference whose definition is not readable here
@@ -210,8 +210,8 @@ func TestMatrixGolden(t *testing.T) {
 		|inclusive ceiling / opaque value -> reject: inclusive ceiling is not supported on a opaque value
 		|inclusive ceiling / raw byte slice -> reject: inclusive ceiling is not supported on a raw byte slice
 		|inclusive ceiling / string -> apply
-		|inclusive ceiling / string-coerced boolean -> reject: a bound is not supported on a json:",string" coerced numeric field (minimum constrains JSON numbers, and no keyword constrains the magnitude of a string)
-		|inclusive ceiling / string-coerced number -> reject: a bound is not supported on a json:",string" coerced numeric field (minimum constrains JSON numbers, and no keyword constrains the magnitude of a string)
+		|inclusive ceiling / string-coerced boolean -> apply
+		|inclusive ceiling / string-coerced number -> apply
 		|inclusive ceiling / string-coerced string -> apply
 		|inclusive ceiling / text-marshaled string -> apply
 		|inclusive ceiling / unresolved reference -> reject: inclusive ceiling cannot be checked against a reference whose definition is not readable here
@@ -224,8 +224,8 @@ func TestMatrixGolden(t *testing.T) {
 		|inclusive floor / opaque value -> reject: inclusive floor is not supported on a opaque value
 		|inclusive floor / raw byte slice -> reject: inclusive floor is not supported on a raw byte slice
 		|inclusive floor / string -> apply
-		|inclusive floor / string-coerced boolean -> reject: a bound is not supported on a json:",string" coerced numeric field (minimum constrains JSON numbers, and no keyword constrains the magnitude of a string)
-		|inclusive floor / string-coerced number -> reject: a bound is not supported on a json:",string" coerced numeric field (minimum constrains JSON numbers, and no keyword constrains the magnitude of a string)
+		|inclusive floor / string-coerced boolean -> apply
+		|inclusive floor / string-coerced number -> apply
 		|inclusive floor / string-coerced string -> apply
 		|inclusive floor / text-marshaled string -> apply
 		|inclusive floor / unresolved reference -> reject: inclusive floor cannot be checked against a reference whose definition is not readable here
