@@ -5434,7 +5434,7 @@ func TestBooleanSchemaRepresentation(t *testing.T) {
 	t.Parallel()
 
 	// The unmarshalTestSchema helper converts JSON false to Schema{Not: &Schema{}}.
-	// This works but means isFalseSchema detection is tightly coupled to
+	// This works but means IsFalseSchema detection is tightly coupled to
 	// this specific representation. If a user constructs a false schema
 	// differently, detection could fail.
 	falseSchema := &jsonschema.Schema{Not: &jsonschema.Schema{}}

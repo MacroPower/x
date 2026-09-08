@@ -26,7 +26,6 @@ import (
 	"go.jacobcolvin.com/x/jsonschema/internal/numrat"
 	"go.jacobcolvin.com/x/jsonschema/internal/refresolve"
 	"go.jacobcolvin.com/x/jsonschema/internal/regexcache"
-	"go.jacobcolvin.com/x/jsonschema/internal/schemaclone"
 	"go.jacobcolvin.com/x/jsonschema/internal/schemashape"
 	"go.jacobcolvin.com/x/jsonschema/internal/schemavet"
 	"go.jacobcolvin.com/x/jsonschema/internal/uriref"
@@ -1151,15 +1150,6 @@ func newFallbackVet(profile schemavet.Profile, wrap bool) refresolve.FallbackVet
 	}
 }
 
-// cloneSchema deep-copies a [Schema] structurally, field by field, through
-// [schemaclone.Clone]. The copy reproduces the source's pointer graph, so an
-// aliased node stays one node and a cyclic document copies as a cycle, and no
-// graph shape makes the copy fail. The inliner clones its working copies and
-// its memoized expansions through it, all of which are trees already.
-func cloneSchema(s *Schema) *Schema {
-	return schemaclone.Clone(s)
-}
-
 // resolveDraft returns the draft a validation or inlining run operates under: a
 // [WithDraft] override when one was given, otherwise the draft detected from the
 // root schema's $schema field. It is the single detect-then-override site the
@@ -1832,8 +1822,14 @@ func (v *validator) validate(
 	// keyword once parsed, the short-circuit is unconditional: gating it on the
 	// applicator vocabulary would make a boolean `false` schema accept-all when
 	// that vocabulary is disabled, which is worse than ignoring the much rarer
-	// explicit `{"not":{}}` under the same configuration.
-	if isFalseSchema(schema) {
+	// explicit `{"not":{}}` under the same configuration. A schema with any
+	// sibling beside the not (an unknown keyword, a title, an $id) is not the
+	// form and validates through its not keyword, whose error names that
+	// keyword instead of the bare false-schema message. The predicate
+	// schemashape.IsEmpty, which ignores annotations, answers a different
+	// question for the always-true unevaluated* subschema checks and is not
+	// used here.
+	if IsFalseSchema(schema) {
 		// The leaf carries the applicator the location descended through,
 		// which is the keyword that handed this walk the false schema. A root
 		// or standalone false schema sits at the root location, whose keyword
@@ -2025,21 +2021,6 @@ func evalUnevaluatedItems(ctx evalContext) []*ValidationError {
 	}
 
 	return errs
-}
-
-// isFalseSchema reports whether a schema is equivalent to boolean false (rejects
-// all). It delegates to the exported [IsFalseSchema] so the single field
-// enumeration in [IsTrueSchema] governs both halves of the package: the boolean
-// false form is {"not": {}} with no other keyword, and any sibling at all — an
-// unknown keyword (Extra) or an annotation such as a title or $id — defeats the
-// form, since the schema then marshals to an object rather than to bare false.
-// Such a schema is validated through its `not` keyword (which still rejects every
-// instance), and the error names that keyword instead of the bare false-schema
-// message. A nil schema is not the false form. ([schemashape.IsEmpty], which
-// ignores annotations, intentionally answers a different question for the
-// always-true unevaluated* subschema checks and is not used here.)
-func isFalseSchema(s *Schema) bool {
-	return IsFalseSchema(s)
 }
 
 // evalType checks the type keyword.

@@ -524,7 +524,7 @@ func (g *run) handleOverrideType(t reflect.Type, ts TypeSchema, pointer bool) (*
 //     edge so its definition stays reachable.
 //
 // The Value/Verbatim source is copied with the upstream shallow CloneSchemas,
-// not the deep cloneSchema used for remote refs, because the generation half
+// not the deep schemaclone.Clone used for remote refs, because the generation half
 // needs only sub-schema copies plus the header unaliasing below. CloneSchemas
 // only deep-copies sub-schema fields, leaving the Enum, Const, Default, and
 // Extra headers aliased to the caller's schema; CloneOverrideExtras copies

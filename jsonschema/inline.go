@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"go.jacobcolvin.com/x/jsonschema/internal/refresolve"
+	"go.jacobcolvin.com/x/jsonschema/internal/schemaclone"
 	"go.jacobcolvin.com/x/jsonschema/internal/schemavet"
 	"go.jacobcolvin.com/x/jsonschema/internal/uriref"
 )
@@ -455,8 +456,11 @@ func (in *inliner) run(s *Schema) (*Schema, error) {
 		return nil, err
 	}
 
+	// The clone reproduces the source's pointer graph, so an aliased node
+	// stays one node and a cyclic document copies as a cycle, and no graph
+	// shape makes the copy fail; the frozen root is a tree already.
 	pristine := rootDoc.Root()
-	working := cloneSchema(pristine)
+	working := schemaclone.Clone(pristine)
 
 	// The same registry construction Compile performs: the frozen tables
 	// hold every $id, $anchor, and $dynamicAnchor and each node's base URI,
@@ -1104,10 +1108,10 @@ func (in *inliner) inlineCopy(target *Schema, path string, memoize bool) (*Schem
 	}
 
 	if memoized := in.memo[id]; memoized != nil {
-		return cloneSchema(memoized), nil
+		return schemaclone.Clone(memoized), nil
 	}
 
-	cp := cloneSchema(target)
+	cp := schemaclone.Clone(target)
 
 	cyclesBefore := in.cycleFallbacks
 
@@ -1140,7 +1144,7 @@ func (in *inliner) inlineCopy(target *Schema, path string, memoize bool) (*Schem
 		// position in the output tree. Every caller, first or later, then gets an
 		// independent copy, and no downstream mutation of one placement can leak
 		// into another through a shared memo node.
-		return cloneSchema(cp), nil
+		return schemaclone.Clone(cp), nil
 	}
 
 	// A non-memoized copy (a substitute, a $dynamicRef expansion, or a
