@@ -2,8 +2,6 @@ package refresolve
 
 import (
 	"errors"
-	"net/url"
-	"strings"
 
 	"github.com/google/jsonschema-go/jsonschema"
 
@@ -210,12 +208,13 @@ func (s *Session) resolveRefUncached(schema *jsonschema.Schema, ref string, fetc
 // match. The inliner calls it only from its reference-closure walk, to reach
 // the documents a $dynamicRef names.
 func (s *Session) ResolveDynamicRef(schema *jsonschema.Schema, ref string, fetch Fetch) Result {
-	parsed, err := url.Parse(ref)
+	// The same reading the static resolution makes of the reference, so the
+	// fragment the bookending check names is the one the static target was
+	// found by.
+	_, fragment, err := uriref.Resolve(s.SchemaBase(schema), ref)
 	if err != nil {
 		return Result{}
 	}
-
-	fragment := parsed.Fragment
 
 	// Phase 1: static resolution (same as $ref).
 	static := s.ResolveRef(schema, ref, fetch)
@@ -224,23 +223,25 @@ func (s *Session) ResolveDynamicRef(schema *jsonschema.Schema, ref string, fetch
 	}
 
 	// JSON Pointer fragments (and whole-document refs) bypass dynamic resolution.
-	if strings.HasPrefix(fragment, "/") || fragment == "" {
+	if fragment.IsPointer() || fragment.IsEmpty() {
 		return static
 	}
+
+	name := fragment.Name()
 
 	// Phase 2: bookending check. Dynamic resolution engages only when static
 	// resolution actually landed on the schema that bears a $dynamicAnchor of
 	// the fragment name, not merely when the static target's resource defines
 	// one somewhere.
 	staticBase := s.SchemaBase(static.Target)
-	if anchored, ok := s.LookupDynamicAnchor(staticBase.Anchor(fragment)); !ok || anchored != static.Target {
+	if anchored, ok := s.LookupDynamicAnchor(staticBase.Anchor(name)); !ok || anchored != static.Target {
 		return static // no bookend -> behave like $ref
 	}
 
 	// Phase 3: walk dynamic scope outermost->innermost for the first matching
 	// $dynamicAnchor.
 	for _, scopeBase := range s.dynamicScope {
-		if target, ok := s.LookupDynamicAnchor(scopeBase.Anchor(fragment)); ok {
+		if target, ok := s.LookupDynamicAnchor(scopeBase.Anchor(name)); ok {
 			return Result{Target: target}
 		}
 	}
