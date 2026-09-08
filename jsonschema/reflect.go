@@ -1819,21 +1819,24 @@ func (g *run) hookDeclares(t reflect.Type) bool {
 // implementsProvider checks if a type (or pointer to type) implements
 // JSONSchemaProvider directly (not just via an embedded field).
 func implementsProvider(t reflect.Type) bool {
-	if !t.Implements(typeProvider) && !reflect.PointerTo(t).Implements(typeProvider) {
-		return false
-	}
-
-	return reflectkind.HasDirectMethod(t, "JSONSchema")
+	return implementsDirect(t, typeProvider, "JSONSchema")
 }
 
 // implementsExtender checks if a type (or pointer to type) implements
 // JSONSchemaExtender directly (not just via an embedded field).
 func implementsExtender(t reflect.Type) bool {
-	if !t.Implements(typeExtender) && !reflect.PointerTo(t).Implements(typeExtender) {
+	return implementsDirect(t, typeExtender, "JSONSchemaExtend")
+}
+
+// implementsDirect reports whether t or its pointer type implements iface
+// through a method named method that t declares itself rather than promotes
+// from an embedded field.
+func implementsDirect(t, iface reflect.Type, method string) bool {
+	if !t.Implements(iface) && !reflect.PointerTo(t).Implements(iface) {
 		return false
 	}
 
-	return reflectkind.HasDirectMethod(t, "JSONSchemaExtend")
+	return reflectkind.HasDirectMethod(t, method)
 }
 
 // callProvider calls JSONSchema on a zero value of the type. For interface
