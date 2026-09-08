@@ -7,6 +7,7 @@ import (
 
 	"go.jacobcolvin.com/x/jsonschema/internal/refresolve"
 	"go.jacobcolvin.com/x/jsonschema/internal/schemavet"
+	"go.jacobcolvin.com/x/jsonschema/internal/typename"
 )
 
 var (
@@ -66,10 +67,11 @@ var (
 	// A typo'd type would otherwise compile cleanly and then reject every
 	// instance at runtime.
 	//
-	// It is re-exported from internal/schemavet, the shared structural-vetting
-	// core, so [errors.Is] matches the sentinel identically whether a failure
-	// originates in that package or here.
-	ErrInvalidType = schemavet.ErrInvalidType
+	// It is re-exported from internal/typename, where the jsonschema struct
+	// tag's type= check and the schema vetting core both mint it, so
+	// [errors.Is] matches the sentinel identically whichever origin a
+	// failure has.
+	ErrInvalidType = typename.ErrInvalidType
 
 	// ErrItemsArrayUnderDraft2020 is returned by [Compile] and [Inline] when a
 	// document processed under [Draft2020] sets the array form of the items

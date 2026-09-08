@@ -6,6 +6,14 @@
 // of truth.
 package typename
 
+import "errors"
+
+// ErrInvalidType reports a type name outside the seven JSON Schema type
+// names. It is the one sentinel every type-name check mints, whether the
+// name came from a struct tag or a schema document, so the parent package
+// re-exports it once and [errors.Is] matches it from either origin.
+var ErrInvalidType = errors.New("invalid type name")
+
 // The seven JSON Schema type names.
 const (
 	Null    = "null"

@@ -1,6 +1,10 @@
 package schemavet
 
-import "errors"
+import (
+	"errors"
+
+	"go.jacobcolvin.com/x/jsonschema/internal/typename"
+)
 
 // The vetting sentinels live here, beside the checks that mint them, and are
 // re-exported from the parent package's errors.go (the same convention
@@ -10,8 +14,9 @@ import "errors"
 // public doc comments; the values here are the single source of truth.
 var (
 	// ErrInvalidType reports a type keyword naming something other than the
-	// seven JSON Schema type names.
-	ErrInvalidType = errors.New("invalid type name")
+	// seven JSON Schema type names. It is the sentinel
+	// [typename.ErrInvalidType] the struct tag's type= check mints too.
+	ErrInvalidType = typename.ErrInvalidType
 
 	// ErrItemsArrayUnderDraft2020 reports the array form of the items keyword
 	// under Draft 2020-12, where it has no meaning.

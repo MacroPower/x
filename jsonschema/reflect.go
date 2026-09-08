@@ -1577,18 +1577,10 @@ func (g *run) applyFieldTag(p nodeProp) error {
 		// admission is one answer whichever site classifies it.
 		Nullable: decided.null.admit,
 	})
-	if err != nil {
-		// Tagparse carries its own ErrInvalidType sentinel; map it onto the
-		// package's exported ErrInvalidType so errors.Is keeps working.
-		if errors.Is(err, tagparse.ErrInvalidType) {
-			err = fmt.Errorf("%w: %w", ErrInvalidType, err)
-		}
-
-		// Tagparse errors already carry the "jsonschema tag:" prefix.
-		return err
-	}
-
-	return nil
+	// Tagparse errors already carry the "jsonschema tag:" prefix, and their
+	// sentinels are the ones this package exports.
+	//nolint:wrapcheck // The tag grammar owns the message and the sentinel.
+	return err
 }
 
 // elemRefs mirrors a node's element children as the definition seams the

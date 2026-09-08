@@ -17,9 +17,9 @@ import (
 
 var (
 	// ErrInvalidType is returned when a type= tag value names something other
-	// than the seven JSON Schema type names. The jsonschema package maps it onto
-	// its own public ErrInvalidType so callers can match it with [errors.Is].
-	ErrInvalidType = errors.New("invalid type name")
+	// than the seven JSON Schema type names. It is the sentinel
+	// [typename.ErrInvalidType] the jsonschema package exports.
+	ErrInvalidType = typename.ErrInvalidType
 
 	// The tagPolicy value is this dialect's half of the two legitimate
 	// divergences the shared model carries as parameters.
