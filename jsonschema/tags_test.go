@@ -1923,6 +1923,26 @@ type nullStanced struct {
 // whose stance leaves it no null branch.
 type nullStancedString string
 
+// nullNamingProvider is a provider type whose value names null in its own
+// type list, so its $defs body admits null before any wrapper.
+type nullNamingProvider struct {
+	X string `json:"x"`
+}
+
+func (nullNamingProvider) JSONSchema(context.Context, jsonschema.TypeContext) (jsonschema.TypeSchema, error) {
+	return jsonschema.TypeSchema{Value: &jsonschema.Schema{Types: []string{"object", "null"}}}, nil
+}
+
+// nullUnrestrictedProvider is a provider type declaring the unrestricted
+// schema, whose $defs body is the {} that admits null.
+type nullUnrestrictedProvider struct {
+	X string `json:"x"`
+}
+
+func (nullUnrestrictedProvider) JSONSchema(context.Context, jsonschema.TypeContext) (jsonschema.TypeSchema, error) {
+	return jsonschema.TypeSchema{}, nil
+}
+
 // TestTagNullLiteralFollowsTheNullDecision pins where the tag's null literal is
 // a value the field can hold. A scalar key spells null wherever the occurrence
 // admits one, and which occurrences those are is the generator's decision
@@ -2077,6 +2097,34 @@ func TestTagNullLiteralFollowsTheNullDecision(t *testing.T) {
 			},
 			prop: "v",
 			want: `{"default":null,"anyOf":[{"$ref":"#/$defs/nullStanced"},{"type":"null"}]}`,
+		},
+		// A provider whose value names null itself is extracted to $defs, and
+		// a bare $ref to that body validates null already, so a value field
+		// of the type takes the literal with no wrapper of its own. An
+		// unrestricted provider body ({}) admits null the same way. The
+		// admission once stopped at the reference, so the rendered schema
+		// accepted the null the tag was refused.
+		"null default on a value field of a null-naming provider type": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V nullNamingProvider `json:"v" jsonschema:"default=null"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+			prop: "v",
+			want: `{"$ref":"#/$defs/nullNamingProvider","default":null}`,
+		},
+		"null default on a value field of an unrestricted provider type": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V nullUnrestrictedProvider `json:"v" jsonschema:"default=null"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+			prop: "v",
+			want: `{"$ref":"#/$defs/nullUnrestrictedProvider","default":null}`,
 		},
 		// Pairs apply in order, so a scalar key before a type= pair parses
 		// against the field's own occurrence. A bare slice never admits null

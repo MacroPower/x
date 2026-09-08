@@ -203,11 +203,11 @@ func (g *run) maybeInlineRoot(root *node) *node {
 		return root
 	}
 
-	// A nullable root renders as anyOf[{$ref}, null], not a bare $ref, so its
-	// def stays referenced through the wrapper and is never inlined; only a
-	// bare-$ref root (a non-pointer struct, or a pointer root whose type
-	// declares NullForbidden) is a candidate.
-	if root.null.admit {
+	// A root wrapped in anyOf[{$ref}, null] keeps its def referenced through
+	// the wrapper and is never inlined; only a bare-$ref root (a non-pointer
+	// struct, a pointer root whose type declares NullForbidden, or a
+	// reference whose body admits null on its own) is a candidate.
+	if root.null.wrap {
 		return root
 	}
 
@@ -215,9 +215,10 @@ func (g *run) maybeInlineRoot(root *node) *node {
 		return root
 	}
 
-	// The root is a bare-$ref (non-nullable) ref here, so the inlined body keeps
-	// its own encoding: a container body already folds its null into a type
-	// list, and a scalar/array/struct body is bare and non-nullable like the root.
+	// The root is a bare $ref here, so the inlined body keeps its own
+	// encoding: a container body already folds its null into a type list, a
+	// body naming null or an unrestricted leaf admits it as the bare $ref did,
+	// and any other body is bare and non-nullable like the root.
 	inlined := *root.def.body
 
 	return &inlined

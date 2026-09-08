@@ -288,6 +288,10 @@ func admitRules() []nullRule {
 			when: func(f nullFacts) bool { return f.declaresNull },
 		},
 		{
+			name: "a reference whose body admits null on its own admits it", verdict: true,
+			when: func(f nullFacts) bool { return f.ref && f.targetNull },
+		},
+		{
 			name: "a NullAllowed entry stance grants null to a reference", verdict: true,
 			when: func(f nullFacts) bool { return f.defStance == NullAllowed },
 		},

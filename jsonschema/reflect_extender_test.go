@@ -115,14 +115,14 @@ func TestGenerateFor_InterfaceWithExtenderSkipped(t *testing.T) {
 		generate func() (*jsonschema.Schema, error)
 		want     string
 	}{
+		// The unrestricted body admits null on its own, so the interface root
+		// is a bare $ref reached from nowhere else and inlines to its body.
 		"root": {
 			generate: func() (*jsonschema.Schema, error) {
 				return jsonschema.GenerateFor[extenderIface](t.Context())
 			},
 			want: `{
-				"$schema":"https://json-schema.org/draft/2020-12/schema",
-				"$ref":"#/$defs/extenderIface",
-				"$defs":{"extenderIface":true}
+				"$schema":"https://json-schema.org/draft/2020-12/schema"
 			}`,
 		},
 		"struct field": {

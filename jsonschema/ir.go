@@ -575,11 +575,13 @@ func (g *run) factsOf(n *node, bodyOf *defEntry) nullFacts {
 // the occurrence that built it and a stance's grant, since each reference
 // carries those, and keeps only the entry's veto over the container null a
 // format option adds; a body whose payload names null admits it outright. An
-// occurrence admits null when its payload names it, and otherwise when the
-// def entry's stance, then its own stance, then the position itself say so:
-// a stance of NullAllowed grants and NullForbidden vetoes, and
-// NullFromReflection defers to a pointer position or a container whose nil
-// the marshal writes as null.
+// occurrence admits null when its payload names it, or when it is a
+// reference to a body that admits null on its own (a payload naming null or
+// an unrestricted leaf), since the rendered $ref admits whatever its target
+// does; otherwise it admits null when the def entry's stance, then its own
+// stance, then the position itself say so: a stance of NullAllowed grants
+// and NullForbidden vetoes, and NullFromReflection defers to a pointer
+// position or a container whose nil the marshal writes as null.
 func admitNull(f nullFacts) bool {
 	switch {
 	case f.role == roleComposed || f.verbatim:
@@ -587,6 +589,8 @@ func admitNull(f nullFacts) bool {
 	case f.role == roleBody:
 		return (f.defStance != NullForbidden && f.containerNull()) || f.declaresNull
 	case f.declaresNull:
+		return true
+	case f.ref && f.targetNull:
 		return true
 	default:
 		return f.defStance.apply(f.stance.apply(f.pointer || f.containerNull()))

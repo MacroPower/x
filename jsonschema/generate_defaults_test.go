@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json/v2"
 	"reflect"
+	"strconv"
 	"testing"
 	"time"
 
@@ -206,6 +207,38 @@ func (defaultsNullExtracted) JSONSchemaExtend(
 type defaultsNullRef struct {
 	Tags *defaultsNullExtracted `json:"tags"`
 	Host string                 `json:"host"`
+}
+
+// defaultsNullNaming is a provider type whose value names null, so a bare
+// reference to its $defs body admits null with no wrapper of its own. Its
+// marshaler writes null for the zero value, the way the provider's schema
+// says it may.
+type defaultsNullNaming struct {
+	X string `json:"x"`
+}
+
+func (defaultsNullNaming) JSONSchema(context.Context, jsonschema.TypeContext) (jsonschema.TypeSchema, error) {
+	return jsonschema.TypeSchema{Value: &jsonschema.Schema{
+		Types:      []string{"object", "null"},
+		Properties: map[string]*jsonschema.Schema{"x": {Type: "string"}},
+	}}, nil
+}
+
+func (n defaultsNullNaming) MarshalJSON() ([]byte, error) {
+	if n.X == "" {
+		return []byte("null"), nil
+	}
+
+	return []byte(`{"x":` + strconv.Quote(n.X) + `}`), nil
+}
+
+// defaultsNullNamingRef reaches defaultsNullNaming through a value field. The
+// occurrence admits no null of its own, and the body it references does, so
+// the null the zero instance marshals seeds the property. The admission
+// once stopped at the reference and the null was skipped.
+type defaultsNullNamingRef struct {
+	Val  defaultsNullNaming `json:"val"`
+	Host string             `json:"host"`
 }
 
 // defaultsNullRefSibling is defaultsNullRef with a description on the
@@ -417,6 +450,17 @@ func TestWithDefaultsFromNullDefault(t *testing.T) {
 				)
 			},
 			want: map[string]string{"tags": "null", "host": `"localhost"`},
+		},
+		"bare ref to a null-naming provider body": {
+			generate: func(t *testing.T) (*jsonschema.Schema, error) {
+				t.Helper()
+
+				return jsonschema.GenerateFor[defaultsNullNamingRef](
+					t.Context(),
+					jsonschema.WithDefaultsFrom(defaultsNullNamingRef{Host: "localhost"}),
+				)
+			},
+			want: map[string]string{"val": "null", "host": `"localhost"`},
 		},
 		"bare ref under draft-07": {
 			generate: func(t *testing.T) (*jsonschema.Schema, error) {
