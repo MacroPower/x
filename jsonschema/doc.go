@@ -163,6 +163,10 @@
 //     true placeholder for it beside allOf, which takes the default, while
 //     [Draft7] emits none, so the name keeps whatever the embed's branch
 //     carries.
+//   - A root a [TypeSchema.Ref] aliases seeds the aliased type's schema, or
+//     its $defs entry when that stays referenced, shared by every occurrence.
+//     The instance's keys must therefore name the target's properties; a key
+//     naming none is ignored like any other.
 //   - Under [Draft7], a default landing on a $ref'd property moves the $ref
 //     into an allOf wrap, the same shape tag defaults produce, because
 //     Draft-07 readers ignore $ref siblings.
