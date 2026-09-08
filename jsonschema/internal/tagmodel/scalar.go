@@ -1,6 +1,7 @@
 package tagmodel
 
 import (
+	"encoding/base64"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
@@ -69,9 +70,31 @@ func (sh Shape) ParseScalar(lit string, pol Policy) (any, error) {
 	case FormCoercedNumber, FormCoercedBool, FormCoercedString:
 		return sh.coercedText(lit)
 
+	case FormByteString:
+		return sh.byteText(lit)
+
 	default:
 		return nil, fmt.Errorf("cannot assign scalar value %q to type %s", lit, sh.Kind)
 	}
+}
+
+// byteText reads a literal for a byte slice or array, whose instance is the
+// base64 text of its bytes. The literal is that text, checked to be one the
+// encoder produces (standard alphabet, padded) so a value no instance could
+// carry is an error rather than a pin nothing satisfies, and on a byte array
+// checked to decode to the array's length, as the instance always does.
+func (sh Shape) byteText(lit string) (any, error) {
+	decoded, err := base64.StdEncoding.Strict().DecodeString(lit)
+	if err != nil {
+		return nil, fmt.Errorf("invalid base64 %q: %w", lit, err)
+	}
+
+	if sh.Kind == reflect.Array && len(decoded) != sh.Elem.Len() {
+		return nil, fmt.Errorf("base64 %q decodes to %d bytes, not the %d of %s",
+			lit, len(decoded), sh.Elem.Len(), sh.Elem)
+	}
+
+	return lit, nil
 }
 
 // ParseScalars parses each literal of an enumeration, preserving tag order.

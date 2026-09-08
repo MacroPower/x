@@ -830,6 +830,11 @@
 //     under json:",string". [encoding/json/v2] writes it as the quoted number
 //     it holds, verbatim rather than canonicalized, so const=5.0 pins "5.0"
 //     and const=5 pins "5".
+//   - A []byte or [N]byte field has a base64 string schema, so a default,
+//     const, or examples value on one is the base64 text the instance
+//     carries: default=aGk= on a []byte yields {"default":"aGk="}. A value
+//     that is not standard padded base64, or that decodes to another length
+//     on a byte array, is an error, since no instance could carry it.
 //
 // Which occurrences admit null is generation's decision, not the Go type's
 // (see Null Encoding below), and the literal null is a value exactly where

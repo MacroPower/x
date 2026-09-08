@@ -174,7 +174,7 @@ func TestMatrixGolden(t *testing.T) {
 		|forbidden size / text-marshaled string -> reject: forbidden size is not supported on a text-marshaled string
 		|forbidden size / unresolved reference -> reject: forbidden size cannot be checked against a reference whose definition is not readable here
 		|forbidden value / array -> reject: forbidden value is not supported on a array
-		|forbidden value / base64 byte string -> reject: forbidden value is not supported on a base64 byte string
+		|forbidden value / base64 byte string -> apply
 		|forbidden value / boolean -> apply
 		|forbidden value / declared object -> reject: forbidden value is not supported on a declared object
 		|forbidden value / number -> apply
@@ -258,7 +258,7 @@ func TestMatrixGolden(t *testing.T) {
 		|pattern / text-marshaled string -> apply
 		|pattern / unresolved reference -> reject: pattern cannot be checked against a reference whose definition is not readable here
 		|pinned value / array -> reject: pinned value is not supported on a array
-		|pinned value / base64 byte string -> reject: pinned value is not supported on a base64 byte string
+		|pinned value / base64 byte string -> apply
 		|pinned value / boolean -> apply
 		|pinned value / declared object -> reject: pinned value is not supported on a declared object
 		|pinned value / number -> apply

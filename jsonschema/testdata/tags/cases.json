@@ -693,6 +693,34 @@
     ]
   },
   {
+    "name": "a byte slice const pins the base64 text",
+    "note": "the instance is the base64 string, so the jsonschema tag pins that text while go-playground's eq on a slice is a length the string cannot carry",
+    "type": "[]byte",
+    "json": "v",
+    "jsonschema": "const=aGk=",
+    "validate": "eq=4",
+    "validateError": "ErrUnsupported",
+    "schema": {
+      "type": "string",
+      "const": "aGk=",
+      "contentEncoding": "base64"
+    },
+    "instances": [
+      {
+        "json": "aGk=",
+        "want": "accept"
+      },
+      {
+        "json": "aGl=",
+        "want": "reject"
+      },
+      {
+        "json": 4,
+        "want": "reject"
+      }
+    ]
+  },
+  {
     "name": "a byte slice length measures the base64 string",
     "note": "a []byte encodes as one base64 string, so it has no array to size",
     "type": "[]byte",

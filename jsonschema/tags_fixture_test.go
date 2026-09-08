@@ -431,6 +431,12 @@ func crossShapes() []crossShape {
 	mapShape := sized(num, "map", reflect.TypeFor[map[string]int]())
 	mapShape.uniqueDiverges = true
 
+	// A byte slice is one base64 string to the jsonschema tag, whose const
+	// pins that text, and a slice to go-playground, whose eq means a length,
+	// so the pinned-value pair asserts an equivalence neither dialect claims.
+	byteShape := with(str, "byte slice", reflect.TypeFor[[]byte](), "v")
+	byteShape.sized = true
+
 	return []crossShape{
 		with(str, "string", reflect.TypeFor[string](), "v"),
 		with(num, "int8", reflect.TypeFor[int8](), "v"),
@@ -439,7 +445,7 @@ func crossShapes() []crossShape {
 		with(num, "pointer to int", reflect.TypeFor[*int](), "v"),
 		sized(num, "slice of int8", reflect.TypeFor[[]int8]()),
 		sized(str, "nested string slice", reflect.TypeFor[[][]string]()),
-		with(str, "byte slice", reflect.TypeFor[[]byte](), "v"),
+		byteShape,
 		with(str, "raw message", reflect.TypeFor[jsontext.Value](), "v"),
 		mapShape,
 		with(num, "string-coerced int", reflect.TypeFor[int](), "v,string"),

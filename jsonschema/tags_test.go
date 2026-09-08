@@ -4075,6 +4075,114 @@ func TestTagTextMarshalingStringUsesTheSerializedForm(t *testing.T) {
 	}
 }
 
+// TestTagByteSliceScalarsAreBase64Text pins that a default, const, or
+// examples value on a []byte or [N]byte is the base64 text the instance
+// carries. The scalar constructor used to have no byte-string case, so
+// default=aGk= on a []byte was refused as a scalar on a slice while
+// minLength on the same field applied, and const was refused by the matrix.
+// A validate eq or ne on a []byte still means a length, as go-playground
+// reads it, which the base64 string cannot carry.
+func TestTagByteSliceScalarsAreBase64Text(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		generate func() (*jsonschema.Schema, error)
+		want     string // marshaled property schema
+		err      string // substring required in the generation error
+	}{
+		"default on a slice": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V []byte `json:"v" jsonschema:"default=aGk="`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+			want: `{"type":"string","contentEncoding":"base64","default":"aGk="}`,
+		},
+		"examples on a slice": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V []byte `json:"v" jsonschema:"examples=aGk=|YQ=="`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+			want: `{"type":"string","contentEncoding":"base64","examples":["aGk=","YQ=="]}`,
+		},
+		"const on a slice": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V []byte `json:"v" jsonschema:"const=aGk="`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+			want: `{"type":"string","contentEncoding":"base64","const":"aGk="}`,
+		},
+		"default on an array": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V [2]byte `json:"v" jsonschema:"default=aGk="`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+			want: `{"type":"string","contentEncoding":"base64","minLength":4,"maxLength":4,"default":"aGk="}`,
+		},
+		"a value that is not base64 is refused": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V []byte `json:"v" jsonschema:"default=hi"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+			err: `invalid base64 "hi"`,
+		},
+		"a value of another length is refused on an array": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V [3]byte `json:"v" jsonschema:"const=aGk="`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+			err: `decodes to 2 bytes, not the 3 of [3]uint8`,
+		},
+		"a validate eq on a slice is a length it cannot carry": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V []byte `json:"v" validate:"eq=4"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context(),
+					jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()))
+			},
+			err: "has no array length to constrain",
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			s, err := tc.generate()
+			if tc.err != "" {
+				require.ErrorContains(t, err, tc.err)
+
+				return
+			}
+
+			require.NoError(t, err)
+
+			got, err := json.Marshal(s.Properties["v"])
+			require.NoError(t, err)
+			assert.JSONEq(t, tc.want, string(got))
+		})
+	}
+}
+
 // TestValidateRequiredOnPointerToByteArray pins that a [N]byte classifies as
 // the base64 byte string a []byte does, so a validate required on a pointer
 // to one forbids the null a nil pointer marshals as. The array used to fall

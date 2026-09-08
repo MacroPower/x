@@ -113,11 +113,14 @@ func (f Form) String() string {
 	return formNames[f]
 }
 
-// isSized reports whether the form's instance carries a size rather than a
+// isSized reports whether the form's Go value carries a size rather than a
 // single value, which is what a dialect spelling both with one key (eq on a
-// slice) resolves against.
+// slice) resolves against. A byte slice is sized here although its instance
+// is one string: go-playground's eq on a []byte compares the length, so the
+// rule-shaped dialect means a size there, and the size cells report that the
+// base64 string has no array to measure.
 func (f Form) isSized() bool {
-	return f == FormArray || f == FormObject
+	return f == FormArray || f == FormObject || f == FormByteString
 }
 
 // Shape is everything an operation needs to know about what it is constraining:

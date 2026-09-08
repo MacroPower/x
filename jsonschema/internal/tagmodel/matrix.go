@@ -254,6 +254,14 @@ func fillValues() {
 		reject(OpOneOf, f, NoElementsReason(f))
 	}
 
+	// The base64 string itself is a value the tag can spell, so a pin or a
+	// forbid lands on it as on any string. Only the rule-shaped dialect never
+	// reaches these cells: its eq and ne on a slice mean a length, and
+	// [Form.isSized] routes them to the size operations, which the byte string
+	// rejects for want of an array.
+	apply(OpEqual, FormByteString, applyEqual)
+	apply(OpNotEqual, FormByteString, applyNotEqual)
+
 	apply(OpUnique, FormArray, applyUnique)
 
 	// Only an array can carry uniqueItems. Naming that in the rejection matters
