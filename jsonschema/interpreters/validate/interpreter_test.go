@@ -3128,6 +3128,45 @@ func TestValidateInterpreterGoPlaygroundParity(t *testing.T) {
 		assert.Equal(t, new(3), s.Properties["f"].MaxLength)
 	})
 
+	t.Run("keys not right after dive is refused", func(t *testing.T) {
+		t.Parallel()
+
+		// Go-playground opens a key block only on the part right after a
+		// dive and panics on a keys anywhere else. The interpreter used to
+		// open the block wherever the keys stood and emit maxProperties 3
+		// for a tag go-playground cannot load.
+		type NoDive struct {
+			F map[string]string `json:"f" validate:"keys,min=1,endkeys,max=3"`
+		}
+
+		_, err := jsonschema.GenerateFor[NoDive](t.Context(), opt)
+		require.ErrorIs(t, err, validate.ErrKeysPlacement)
+
+		type Later struct {
+			F map[string]string `json:"f" validate:"dive,min=1,keys,min=1,endkeys"`
+		}
+
+		_, err = jsonschema.GenerateFor[Later](t.Context(), opt)
+		require.ErrorIs(t, err, validate.ErrKeysPlacement)
+
+		type Blank struct {
+			F map[string]string `json:"f" validate:"dive,,keys,min=1,endkeys"`
+		}
+
+		_, err = jsonschema.GenerateFor[Blank](t.Context(), opt)
+		require.ErrorIs(t, err, validate.ErrKeysPlacement)
+
+		// A keys inside a block is key-side grammar, skipped with the rest
+		// of the block.
+		type Nested struct {
+			F map[string]string `json:"f" validate:"dive,keys,dive,keys,min=1,endkeys,endkeys,max=3"`
+		}
+
+		s, err := jsonschema.GenerateFor[Nested](t.Context(), opt)
+		require.NoError(t, err)
+		assert.Equal(t, new(3), s.Properties["f"].AdditionalProperties.MaxLength)
+	})
+
 	t.Run("an integer literal outside the JSON grammar is refused", func(t *testing.T) {
 		t.Parallel()
 

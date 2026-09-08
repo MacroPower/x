@@ -33,6 +33,12 @@ var (
 	// vocabulary gap rather than a refusal of the tag.
 	ErrUnrecognizedValidator = errors.New("validate tag: unrecognized validator")
 
+	// ErrKeysPlacement reports a keys tag that does not immediately follow a
+	// dive. Go-playground opens a key block only there and refuses the tag
+	// anywhere else, so the interpreter refuses it too rather than emitting a
+	// schema for a tag the library cannot load.
+	ErrKeysPlacement = errors.New("validate tag: keys must immediately follow dive")
+
 	// The oneOfSplitRegexp pattern matches one oneof token, mirroring
 	// go-playground/validator's own splitter (`'[^']*'|\S+`): a single-quoted
 	// run (one value even with spaces) or an unquoted whitespace-delimited run.
@@ -72,11 +78,13 @@ func (i *Interpreter) Interpret(_ context.Context, field jsonschema.FieldContext
 	// constraint (e.g. "oneof=a|b,required" would drop required).
 	parts := strings.Split(tag.Value, ",")
 
-	return applyParts(parts, field)
+	return applyParts(parts, field, false)
 }
 
-// applyParts applies a sequence of validator tag parts to a field.
-func applyParts(parts []string, field jsonschema.FieldContext) error {
+// applyParts applies a sequence of validator tag parts to a field. The
+// afterDive flag says whether parts starts right after a dive, which is the
+// one place a keys block may open.
+func applyParts(parts []string, field jsonschema.FieldContext, afterDive bool) error {
 	var inKeys bool
 
 	for idx := range parts {
@@ -106,8 +114,15 @@ func applyParts(parts []string, field jsonschema.FieldContext) error {
 		// endkeys runs to the end of the tag, as it does in go-playground,
 		// which collects every later part into the key block; applying them
 		// to the value schema instead would emit a constraint the tag never
-		// places there.
+		// places there. Go-playground opens a block only on the part right
+		// after a dive and panics elsewhere, so a keys anywhere else is an
+		// error rather than a schema for a tag it cannot load; a keys inside
+		// a block belongs to the key-side grammar, which is skipped whole.
 		if part == keysTag {
+			if !inKeys && (!afterDive || idx != 0) {
+				return ErrKeysPlacement
+			}
+
 			inKeys = true
 
 			continue

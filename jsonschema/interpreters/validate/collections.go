@@ -35,7 +35,7 @@ func applyDive(remaining []string, field jsonschema.FieldContext) error {
 	}
 
 	for i := range elems {
-		err := applyParts(remaining, elems[i])
+		err := applyParts(remaining, elems[i], true)
 		if err != nil {
 			return err
 		}
