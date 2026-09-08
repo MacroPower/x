@@ -21,3 +21,4 @@
 "//a@b@c"	false	RFC 3986 §3.2.1 excludes a second raw '@' from the authority
 "//ex%41mple.com/"	true	RFC 3986 §3.2.2 admits a percent-encoded octet in a reg-name
 "//[::1%41]"	false	RFC 3986 §3.2.2 IP-literal admits no pct-encoded octet; the reg-name rewrite stops at the brackets
+"//[fe80::1%25en0]/"	false	RFC 6874 zone identifier, which net/url accepts and the RFC 3986 IPv6address production does not have

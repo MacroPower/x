@@ -271,7 +271,7 @@ func addURISeeds(f *testing.F) {
 		"https://example.com/a?b=c#d", "urn:isbn:0451450523", "mailto:a@b.example",
 		"http://[::1]/", "http://[v7.x]/", "http://::1/a", "//example.com", "/path/only",
 		"../sibling", "./a:b", "#frag", "?q=1", "", "http://exa mple.com", "a+b-c.d:x",
-		"1abc:x", "https://example.com/é", "http://[::1%41]/",
+		"1abc:x", "https://example.com/é", "http://[::1%41]/", "http://[fe80::1%25en0]/",
 	} {
 		f.Add(seed)
 	}

@@ -1453,10 +1453,12 @@
 //   - uri and uri-reference accept an IPvFuture authority ("http://[v7.x]/"),
 //     which RFC 3986 §3.2.2 defines and Go's net/url cannot parse, and a
 //     reg-name host carrying a percent-encoded ASCII octet ("ex%41mple.com"),
-//     which §3.2.2 admits and net/url refuses. Every component, the query
-//     included, must spell each '%' as a pct-encoded triplet, and an
-//     authority carries at most one raw '@' (§3.2.1). The iri forms follow
-//     the same rules.
+//     which §3.2.2 admits and net/url refuses. A bracketed host is the RFC
+//     3986 IPv6address or IPvFuture literal as written, so an RFC 6874 zone
+//     identifier ("[fe80::1%25en0]"), which net/url accepts, is refused.
+//     Every component, the query included, must spell each '%' as a
+//     pct-encoded triplet, and an authority carries at most one raw '@'
+//     (§3.2.1). The iri forms follow the same rules.
 //   - hostname accepts a reserved-LDH label (a hyphen in positions 3 and 4,
 //     as in "ab--cd.com") per RFC 1123 §2.1, while idn-hostname rejects it
 //     per RFC 5890 §2.3.2.2, so hostname accepts names idn-hostname does not.

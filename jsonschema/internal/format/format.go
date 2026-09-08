@@ -660,6 +660,10 @@ func validateURIAbs(s string, badChars func(string) bool, label string) error {
 		return fmt.Errorf("invalid %s: misplaced delimiter", label)
 	}
 
+	if !validIPLiteral(s) {
+		return fmt.Errorf("invalid %s: malformed IP-literal", label)
+	}
+
 	// Bare IPv6 addresses must be enclosed in brackets per RFC 3986 §3.2.2.
 	if strings.Count(u.Host, ":") > 1 && !strings.HasPrefix(u.Host, "[") {
 		return fmt.Errorf("invalid %s: bare IPv6 address", label)
@@ -689,6 +693,10 @@ func validateURIRef(s string, badChars func(string) bool, label string) error {
 
 	if !validURIDelims(s, u.Host) || !validAuthorityDelims(s) {
 		return fmt.Errorf("invalid %s reference: misplaced delimiter", label)
+	}
+
+	if !validIPLiteral(s) {
+		return fmt.Errorf("invalid %s reference: malformed IP-literal", label)
 	}
 
 	// Bare IPv6 addresses must be enclosed in brackets per RFC 3986 §3.2.2; a
@@ -723,6 +731,41 @@ func validURIDelims(s, host string) bool {
 	}
 
 	return strings.Count(s, "[") == want && strings.Count(s, "]") == want
+}
+
+// validIPLiteral reports whether the bracketed host in the authority of s,
+// when there is one, is an RFC 3986 section 3.2.2 IP-literal as written:
+// IP-literal = "[" ( IPv6address / IPvFuture ) "]". An IPvFuture literal is
+// accepted here because reparseIPvFutureHost has already matched its
+// production, and an IPv6address is what [url.Parse] has already run through
+// netip.ParseAddr, with one gap: net/url implements the RFC 6874 zone
+// identifier ("[fe80::1%25en0]"), which the RFC 3986 IPv6address production
+// does not have. A '%' inside the brackets is therefore the one thing left to
+// refuse.
+func validIPLiteral(s string) bool {
+	start, end, ok := rawAuthoritySpan(s)
+	if !ok {
+		return true
+	}
+
+	authority := s[start:end]
+
+	open := strings.IndexByte(authority, '[')
+	if open < 0 {
+		return true
+	}
+
+	stop := strings.IndexByte(authority[open:], ']')
+	if stop < 0 {
+		return true // validURIDelims refuses the unpaired bracket
+	}
+
+	lit := authority[open+1 : open+stop]
+	if lit != "" && (lit[0] == 'v' || lit[0] == 'V') {
+		return true
+	}
+
+	return !strings.Contains(lit, "%")
 }
 
 // validPctEncoding reports whether every '%' in s begins a well-formed
