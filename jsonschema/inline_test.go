@@ -147,6 +147,51 @@ func TestInline(t *testing.T) {
 				}
 			`),
 		},
+		"spliced copy drops a nested embedded resource's $schema": {
+			// A $schema below the copy's top node once survived the splice:
+			// inlineCopy cleared only the top node and stripIdentifiers only
+			// the identifiers, so the nested resource kept its dialect
+			// keyword after losing the $id that made it a resource root.
+			schema: stringtest.Input(`
+				{
+					"$defs": {
+						"t": {
+							"type": "object",
+							"properties": {
+								"inner": {
+									"$id": "https://example.com/inner",
+									"$schema": "http://json-schema.org/draft-07/schema#",
+									"type": "string"
+								}
+							}
+						}
+					},
+					"properties": {"a": {"$ref": "#/$defs/t"}}
+				}
+			`),
+			want: stringtest.Input(`
+				{
+					"$defs": {
+						"t": {
+							"type": "object",
+							"properties": {
+								"inner": {
+									"$id": "https://example.com/inner",
+									"$schema": "http://json-schema.org/draft-07/schema#",
+									"type": "string"
+								}
+							}
+						}
+					},
+					"properties": {
+						"a": {
+							"type": "object",
+							"properties": {"inner": {"type": "string"}}
+						}
+					}
+				}
+			`),
+		},
 		"ref with siblings under draft 7 drops siblings": {
 			schema: stringtest.Input(`
 				{

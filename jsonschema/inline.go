@@ -1105,10 +1105,6 @@ func (in *inliner) inlineCopy(target *Schema, path string, memoize bool) (*Schem
 
 	cp := cloneSchema(target)
 
-	// The $schema dialect declaration belongs to a document, not to a
-	// spliced sub-schema; the output keeps the root document's dialect.
-	cp.Schema = ""
-
 	cyclesBefore := in.cycleFallbacks
 
 	err = in.walkPair(cp, target, path)
@@ -1116,14 +1112,17 @@ func (in *inliner) inlineCopy(target *Schema, path string, memoize bool) (*Schem
 		return nil, err
 	}
 
-	// The identifier keywords likewise belong to the target's original
+	// The $schema dialect declaration belongs to a document, not to a
+	// spliced sub-schema; the output keeps the root document's dialect. The
+	// identifier keywords likewise belong to the target's original
 	// position. Splicing them along with the copy would re-declare the
 	// target's $id resource at every splice position and duplicate its
 	// $anchor/$dynamicAnchor names within one resource, a document stricter
 	// consumers reject. The copy is self-contained -- no reference survives an
 	// expansion -- so the names have nothing left to resolve. Stripping runs
-	// after the walk so it covers identifiers nested anywhere in the copy,
-	// not only the top-level node.
+	// after the walk so it covers a $schema or identifier nested anywhere in
+	// the copy (an embedded resource below the top node declares its own
+	// dialect), not only the top-level node.
 	stripIdentifiers(cp)
 
 	// A copy whose expansion consulted the cycle fallback was truncated at a ref
@@ -1147,12 +1146,14 @@ func (in *inliner) inlineCopy(target *Schema, path string, memoize bool) (*Schem
 	return cp, nil
 }
 
-// stripIdentifiers clears $id, $anchor, and $dynamicAnchor from every node of
-// a spliced copy's subtree. The names identify the target at its original
-// position; a copy spliced elsewhere must not re-declare them (see
+// stripIdentifiers clears $schema, $id, $anchor, and $dynamicAnchor from
+// every node of a spliced copy's subtree. The dialect declaration belongs to
+// the target's original document and the names identify the target at its
+// original position; a copy spliced elsewhere must not re-declare them (see
 // [inliner.inlineCopy]). A copy is cloned from a frozen tree and is a tree
 // itself, so the walk reaches each node once with no visited set.
 func stripIdentifiers(s *Schema) {
+	s.Schema = ""
 	s.ID = ""
 	s.Anchor = ""
 	s.DynamicAnchor = ""
