@@ -563,9 +563,9 @@
 //   - Whether the occurrence admits null.
 //   - The [Form], the JSON shape the instance actually takes. Form is not the
 //     Go kind, so a field that encodes itself as a string (through
-//     json:",string" or its own MarshalText) reads as [FormCoercedNumber] or
-//     [FormTextString] rather than as a number every branch has to
-//     special-case.
+//     json:",string" or its own MarshalText) reads as [FormCoercedNumber],
+//     [FormCoercedString], or [FormTextString] rather than as the Go kind
+//     every branch has to special-case.
 //
 // Passing that same Shape to [FieldContext.ConstraintsFor] builds the facade
 // without classifying the field a second time, which [FieldContext.Constraints]

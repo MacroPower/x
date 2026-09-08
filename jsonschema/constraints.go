@@ -139,6 +139,7 @@ const (
 	FormObject         = tagmodel.FormObject
 	FormCoercedNumber  = tagmodel.FormCoercedNumber
 	FormCoercedBool    = tagmodel.FormCoercedBool
+	FormCoercedString  = tagmodel.FormCoercedString
 	FormTextString     = tagmodel.FormTextString
 	FormByteString     = tagmodel.FormByteString
 	FormRawBytes       = tagmodel.FormRawBytes
