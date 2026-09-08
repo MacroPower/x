@@ -656,10 +656,12 @@
 //     pointer composes as anyOf[schema, {}], since a nil pointer contributes
 //     nothing to the marshaled object.
 //   - A provider schema used for such an embed, registered or on-type, must
-//     leave the object open (no additionalProperties: false). allOf evaluates
-//     each branch against the whole object, so a closed branch rejects the
-//     parent's sibling properties, and the generated schema then rejects the
-//     struct's own marshaled JSON.
+//     leave the object open: no additionalProperties, unevaluatedProperties,
+//     patternProperties, or propertyNames, whether false or a value schema.
+//     allOf evaluates each branch against the whole object, so an
+//     extra-member constraint on the branch judges the parent's sibling
+//     properties and whichever embedded fallback v2 kept for the parent, and
+//     the generated schema then rejects the struct's own marshaled JSON.
 //   - Generation refuses an embedded field whose tag combines a promoting
 //     form with any other option (json:",omitempty", json:",embed,omitzero")
 //     with [ErrInvalidJSONField], as v2 refuses the declaration.
