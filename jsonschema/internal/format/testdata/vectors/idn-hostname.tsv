@@ -79,6 +79,9 @@
 "אa.example"	false	rule 2: an RTL label may not carry a character of Bidi class L
 "א1.example"	true	rules 3 and 4: an RTL label may close on EN
 "א١.example"	true	rules 3 and 4: an RTL label may close on AN
+"1host.ابجد"	false	condition 1 on the LTR label of a Bidi domain name: it must open on L, R, or AL, and EN fails
+"ابجد.1host"	false	condition 1 on the LTR label again, with the RTL label first
+"host1.ابجد"	true	conditions 5 and 6: an LTR label in a Bidi domain name may close on EN
 #
 # RFC 5892 exception characters, DISALLOWED regardless of context.
 #

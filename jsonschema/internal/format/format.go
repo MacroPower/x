@@ -15,6 +15,8 @@ import (
 	"unicode/utf8"
 
 	"golang.org/x/net/idna"
+	"golang.org/x/text/secure/bidirule"
+	"golang.org/x/text/unicode/bidi"
 )
 
 // Validators returns the built-in format validators keyed by JSON Schema
@@ -1744,6 +1746,10 @@ func validateIDNHostnameLabels(s string, banNumericTLD, allowTrailingDot, asciiS
 		labels = labels[:n-1]
 	}
 
+	// The decoded (U-label) form of every label, kept for the RFC 5893 Bidi
+	// rule, which reads across labels.
+	decodedLabels := make([]string, 0, len(labels))
+
 	totalLen := 0
 	for i, label := range labels {
 		if label == "" {
@@ -1789,6 +1795,8 @@ func validateIDNHostnameLabels(s string, banNumericTLD, allowTrailingDot, asciiS
 			return fmt.Errorf("invalid IDN hostname: %w", err)
 		}
 
+		decodedLabels = append(decodedLabels, decoded)
+
 		totalLen += len(ascii)
 		if i > 0 {
 			totalLen++ // dot separator
@@ -1798,6 +1806,11 @@ func validateIDNHostnameLabels(s string, banNumericTLD, allowTrailingDot, asciiS
 	// RFC 5890: the full domain name in A-label form must not exceed 253 octets.
 	if totalLen > 253 {
 		return errors.New("invalid IDN hostname: name too long")
+	}
+
+	err := checkBidiRule(decodedLabels)
+	if err != nil {
+		return err
 	}
 
 	// When banNumericTLD is set, the top-level label must not be all-numeric,
@@ -1812,6 +1825,38 @@ func validateIDNHostnameLabels(s string, banNumericTLD, allowTrailingDot, asciiS
 		ascii, err := idna.Lookup.ToASCII(tld)
 		if err == nil && isAllDigits(ascii) {
 			return errors.New("invalid IDN hostname: numeric top-level label")
+		}
+	}
+
+	return nil
+}
+
+// checkBidiRule enforces the RFC 5893 Bidi rule across a whole domain name.
+// Section 1.4 makes any name with an RTL label a Bidi domain name, and
+// section 2 then holds every label in it, the LTR ones included, to the six
+// conditions; in particular condition 1 refuses an LTR label that opens on a
+// digit ("1host"). A label-by-label call to idna.Lookup applies the rule to
+// one label at a time and never sees the RTL label next door, so the
+// cross-label half is checked here on the decoded labels, the way idna does
+// when handed the whole name.
+func checkBidiRule(labels []string) error {
+	isBidi := false
+
+	for _, label := range labels {
+		if bidirule.DirectionString(label) == bidi.RightToLeft {
+			isBidi = true
+
+			break
+		}
+	}
+
+	if !isBidi {
+		return nil
+	}
+
+	for _, label := range labels {
+		if !bidirule.ValidString(label) {
+			return errors.New("invalid IDN hostname: label violates the Bidi rule")
 		}
 	}
 

@@ -494,6 +494,17 @@ func idnaAcceptsHostname(s string) bool {
 		return false
 	}
 
+	// The RFC 5893 cross-label Bidi rule. A name with one RTL label is a Bidi
+	// domain name, and every label in it must then satisfy the rule, which a
+	// label-by-label conversion never applies to the LTR ones ("1host" beside
+	// an Arabic label). The whole-name call to idna.Lookup applies it, so its
+	// verdict is the oracle's, and a name it refuses has nothing for the
+	// differential to assert.
+	_, err := idna.Lookup.ToASCII(s)
+	if err != nil {
+		return false
+	}
+
 	// The RFC 1123 numeric-TLD ban, which IDNA has no equivalent of. Checked on
 	// the mapped form, as the validator does, so a fullwidth-digit label is
 	// caught too. Every label converted above, so this one converts.

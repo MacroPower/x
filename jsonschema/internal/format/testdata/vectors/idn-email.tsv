@@ -13,6 +13,8 @@
 "user@例.jp"	true	a U-label domain
 "not-an-email"	false	RFC 6531 widens Mailbox without dropping the "@"
 "a@L·L.example"	true	RFC 5892 A.3 judged after the RFC 5891 §5.3 case mapping
+"a@1host.ابجد"	false	RFC 5893 condition 1: an LTR label in a Bidi domain name may not open on a digit
+"a@host1.ابجد"	true	RFC 5893 conditions 5 and 6: an LTR label in a Bidi domain name may close on EN
 #
 # RFC 6531 widens the RFC 5321 grammar rather than restating it, so the empty
 # quoted local part reads the same here (e9372c3, then 16d9020).
