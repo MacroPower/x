@@ -165,15 +165,20 @@ func (g *run) applyNull(n *node, base *Schema) *Schema {
 
 // nullTypeList applies the ["null", base] type-list encoding to a nilable
 // container's schema, honoring a hook-authored type slot: an authored Types
-// list gains "null" when absent, and an authored Type replaces the
-// kind-derived base as the list's value type. Exactly one of Type/Types is
-// set afterward, so the schema always marshals.
+// list gains "null" when absent, an authored Type replaces the kind-derived
+// base as the list's value type, and an authored Type that is null already
+// stays the single type, since a type list must not repeat a name. Exactly
+// one of Type/Types is set afterward, so the schema always marshals.
 func nullTypeList(s *Schema, base string) {
 	if s.Types != nil {
 		if !schemashape.DeclaresType(s, typename.Null) {
 			s.Types = append([]string{typename.Null}, s.Types...)
 		}
 
+		return
+	}
+
+	if s.Type == typename.Null {
 		return
 	}
 

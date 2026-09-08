@@ -199,3 +199,55 @@ func TestGenerateFor_ExtenderCopiedRefResolvesUnderCollision(t *testing.T) {
 	require.NoError(t, v.ValidateJSON(t.Context(), instance))
 	require.NoError(t, v.ValidateJSON(t.Context(), []byte(`{"a":{"label":"x","size":1},"b":null}`)))
 }
+
+// TestGenerateFor_ExtenderNullTypeUnderFormatNull pins the type list a
+// nilable container renders when an extender sets its type to null outright.
+// The ["null", base] encoding once took the authored type as the list's
+// value type without checking it was null already, and rendered
+// ["null", "null"], which the metaschema refuses as a repeated name.
+func TestGenerateFor_ExtenderNullTypeUnderFormatNull(t *testing.T) {
+	t.Parallel()
+
+	type doc struct {
+		Tags []string `json:"tags"`
+	}
+
+	tests := map[string]struct {
+		set  func(ts *jsonschema.TypeSchema)
+		want *jsonschema.Schema
+	}{
+		"authored Type null": {
+			set:  func(ts *jsonschema.TypeSchema) { ts.Value.Type = "null" },
+			want: &jsonschema.Schema{Type: "null"},
+		},
+		"authored Types with null": {
+			set:  func(ts *jsonschema.TypeSchema) { ts.Value.Types = []string{"array", "null"} },
+			want: &jsonschema.Schema{Types: []string{"array", "null"}},
+		},
+		"authored Type string": {
+			set:  func(ts *jsonschema.TypeSchema) { ts.Value.Type = "string" },
+			want: &jsonschema.Schema{Types: []string{"null", "string"}},
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			s, err := jsonschema.GenerateFor[doc](t.Context(),
+				jsonschema.WithJSONOptions(json.FormatNilSliceAsNull(true)),
+				jsonschema.WithTypeSchemaExtenderFor[[]string](
+					func(_ context.Context, _ jsonschema.TypeContext, ts *jsonschema.TypeSchema) error {
+						ts.Value.Items = nil
+						tc.set(ts)
+
+						return nil
+					},
+				),
+			)
+			require.NoError(t, err)
+
+			assert.Equal(t, tc.want, s.Properties["tags"])
+		})
+	}
+}
