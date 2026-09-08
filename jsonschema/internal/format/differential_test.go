@@ -469,6 +469,15 @@ func idnaAcceptsHostname(s string) bool {
 			return false
 		}
 
+		// The contextual-rule pass again, on the mapped label: the UTS 46
+		// mapping can introduce a CONTEXTO code point the raw label lacks
+		// (U+0140 maps to "l" U+00B7), and the validator judges the mapped
+		// form, which is the RFC 5891 section 5.3 order.
+		mapped, err := idna.Lookup.ToUnicode(label)
+		if err != nil || strings.ContainsAny(mapped, contextualRunes) {
+			return false
+		}
+
 		// The 63-octet A-label cap.
 		if len(ascii) > 63 {
 			return false

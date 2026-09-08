@@ -58,6 +58,9 @@
 "क्‍ष.example"	true	A.2 ZWJ after a Devanagari Virama
 "l·l.example"	true	A.3 MIDDLE DOT between two 'l'
 "a·b.example"	false	A.3 MIDDLE DOT elsewhere
+"L·L.example"	true	A.3 after the UTS 46 case mapping, since RFC 5891 §5.3 mapping precedes §5.4 validation
+"ｌ·ｌ.example"	true	A.3 after the UTS 46 compatibility mapping folds the fullwidth letters to 'l'
+"ŀ.example"	false	A.3 after the UTS 46 mapping of U+0140 to "l·", which leaves the MIDDLE DOT at the end
 "α͵β.example"	true	A.4 GREEK KERAIA before a Greek character
 "α͵b.example"	false	A.4 GREEK KERAIA before a non-Greek character
 "א׳.example"	true	A.5 HEBREW GERESH after a Hebrew character
