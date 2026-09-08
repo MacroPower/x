@@ -606,7 +606,10 @@ func SetConst(t Target, v any) error {
 // facade reports it as its invalid-rule sentinel before reaching here, the
 // way [Apply] refuses an enumeration rule with no values. A const already
 // pinned -- by another rule or by the type -- must be a member, for the same
-// reason [SetConst] checks the enumeration.
+// reason [SetConst] checks the enumeration. A member listed twice is kept
+// once, at its first position: JSON Schema asks that enum members be unique,
+// and the numeric-aware comparison folds 1 and 1.0 together as the validator
+// would.
 func SetEnum(t Target, vals []any) error {
 	if len(vals) == 0 {
 		return errors.New("tagmodel: an enumeration needs at least one value")
@@ -620,9 +623,10 @@ func SetEnum(t Target, vals []any) error {
 		return fmt.Errorf("%w: the enumeration excludes the value the type pins", ErrConflict)
 	}
 
-	// Copy rather than alias: this is public through the Constraints facade, so
-	// vals may be a caller's slice that it goes on to reuse or mutate.
-	enum := slices.Clone(vals)
+	// A fresh slice rather than an alias: this is public through the
+	// Constraints facade, so vals may be a caller's slice that it goes on to
+	// reuse or mutate.
+	enum := uniqueValues(vals)
 
 	if inForce := t.Canvas.Enum; inForce != nil {
 		enum = intersectValues(inForce, vals)
@@ -645,11 +649,28 @@ func SetEnum(t Target, vals []any) error {
 
 // intersectValues returns the members of inForce that vals also holds, in
 // inForce's order, so a narrowing enumeration keeps the listing it narrows.
+// A member inForce lists twice (a type's own enumeration is not deduplicated
+// here) is kept once.
 func intersectValues(inForce, vals []any) []any {
 	var out []any
 
 	for _, v := range inForce {
-		if constraint.ValuesContain(vals, v) {
+		if constraint.ValuesContain(vals, v) && !constraint.ValuesContain(out, v) {
+			out = append(out, v)
+		}
+	}
+
+	return out
+}
+
+// uniqueValues returns a fresh slice of vals with every repeated member
+// dropped after its first occurrence, under the same numeric-aware equality
+// the const and enum checks use.
+func uniqueValues(vals []any) []any {
+	out := make([]any, 0, len(vals))
+
+	for _, v := range vals {
+		if !constraint.ValuesContain(out, v) {
 			out = append(out, v)
 		}
 	}

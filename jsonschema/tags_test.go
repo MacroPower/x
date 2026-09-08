@@ -3980,6 +3980,65 @@ func TestTagUniqueItemsTwiceIsRejected(t *testing.T) {
 	require.ErrorContains(t, err, `key "uniqueItems" is set twice in one tag`)
 }
 
+// TestTagEnumRepeatedMemberKeptOnce pins that a member listed twice in one
+// enum reaches the schema once, at its first position, in both dialects and
+// under the numeric-aware equality the const and enum checks share. The
+// enumeration used to ship every member as listed, so enum=a|a|b emitted
+// ["a","a","b"], which JSON Schema asks authors not to write.
+func TestTagEnumRepeatedMemberKeptOnce(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		generate func() (*jsonschema.Schema, error)
+		want     string // marshaled enum
+	}{
+		"string members": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V string `json:"v" jsonschema:"enum=a|a|b"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+			want: `["a","b"]`,
+		},
+		"numeric members": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V float64 `json:"v" jsonschema:"enum=1|1.0|2"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+			want: `[1,2]`,
+		},
+		"validate oneof": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V string `json:"v" validate:"oneof=a a b"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context(),
+					jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()))
+			},
+			want: `["a","b"]`,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			s, err := tc.generate()
+			require.NoError(t, err)
+
+			got, err := json.Marshal(s.Properties["v"].Enum)
+			require.NoError(t, err)
+			assert.JSONEq(t, tc.want, string(got))
+		})
+	}
+}
+
 // TestTagTypeTwiceIsRejected pins that type= named twice in one tag is the
 // repeated-key error every other overwriting key gets. Each pair used to
 // apply in turn, so type=string,type=array on a []int generated

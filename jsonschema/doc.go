@@ -982,7 +982,8 @@
 //     source compose.
 //   - A repeated enum intersects with the one in force, whether an earlier
 //     key or the field's type listed it, and keeps that listing's order. An
-//     empty intersection is [ErrConstraintConflict].
+//     empty intersection is [ErrConstraintConflict]. A member listed twice
+//     in one enum is kept once.
 //   - A second const disagreeing with the one pinned, or a const outside an
 //     enum in force, is [ErrConstraintConflict]. A const fully describes the
 //     allowed value, so no other value can silently win.
