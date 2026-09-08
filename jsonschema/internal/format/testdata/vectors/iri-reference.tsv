@@ -20,3 +20,4 @@
 "http://exa mple.org/rosé"	false	a space is forbidden
 "?%zz"	false	a malformed percent-encoded triplet in the query
 "//\u018c@"	true	a ucschar in the iuserinfo of a network-path reference with an empty host
+"//[::1%41]"	false	RFC 3986 §3.2.2 IP-literal admits no pct-encoded octet; the reg-name rewrite stops at the brackets

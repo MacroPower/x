@@ -24,3 +24,4 @@
 "http://a@b@c/"	false	RFC 3986 §3.2.1 excludes a second raw '@' from the authority
 "http://ex%41mple.com/"	true	RFC 3986 §3.2.2 admits a percent-encoded octet in a reg-name
 "https://\u00e9@a/"	true	a ucschar in the iuserinfo, which RFC 3987 admits and net/url reads as ASCII
+"http://[::1%41]/"	false	RFC 3986 §3.2.2 IP-literal admits no pct-encoded octet; the reg-name rewrite stops at the brackets

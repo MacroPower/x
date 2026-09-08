@@ -824,8 +824,11 @@ func reparseUnparsedHost(s string) *url.URL {
 // replaced by a letter, so a reg-name such as "ex%41mple.com" (legal per RFC
 // 3986 section 3.2.2, merely non-normalized) and a userinfo such as
 // "é@host" (legal per RFC 3987 section 2.2) parse. A malformed triplet is
-// left in place, so it still fails. It returns nil when the authority holds
-// nothing to rewrite or the rewrite fails to parse.
+// left in place, so it still fails. A bracketed IP-literal is copied as
+// written, because RFC 3986 section 3.2.2 admits no pct-encoded octet inside
+// one (IP-literal = "[" ( IPv6address / IPvFuture ) "]"), so "[::1%41]" must
+// keep failing rather than parse as "[::1a]". It returns nil when the
+// authority holds nothing to rewrite or the rewrite fails to parse.
 func reparseAuthority(s string) *url.URL {
 	start, end, ok := rawAuthoritySpan(s)
 	if !ok {
@@ -845,6 +848,21 @@ func reparseAuthority(s string) *url.URL {
 	)
 
 	for i := start; i < end; i++ {
+		if s[i] == '[' {
+			// The IP-literal runs to its closing bracket, or to the end of
+			// the authority when it has none; either way it is left alone.
+			stop := end
+			if j := strings.IndexByte(s[i:end], ']'); j >= 0 {
+				stop = i + j + 1
+			}
+
+			b.WriteString(s[i:stop])
+
+			i = stop - 1
+
+			continue
+		}
+
 		if s[i] == '%' && i+2 < end && isHexDigit(s[i+1]) && isHexDigit(s[i+2]) {
 			v, err := strconv.ParseUint(s[i+1:i+3], 16, 8)
 			if err == nil && v < 0x80 {

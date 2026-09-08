@@ -20,3 +20,4 @@
 "?%zz"	false	a malformed percent-encoded triplet in the query
 "//a@b@c"	false	RFC 3986 §3.2.1 excludes a second raw '@' from the authority
 "//ex%41mple.com/"	true	RFC 3986 §3.2.2 admits a percent-encoded octet in a reg-name
+"//[::1%41]"	false	RFC 3986 §3.2.2 IP-literal admits no pct-encoded octet; the reg-name rewrite stops at the brackets
