@@ -67,17 +67,17 @@ func NewRegistry(deps Deps, inertIDs bool) *Registry {
 
 // Build seeds the registry with the root document: its $id, anchor, and
 // base-URI tables, frozen against the base the caller froze it with. A
-// non-empty base is registered for the root when its own $id did not already
-// claim one, so a ref that absolutizes back to the root document resolves to
-// this copy instead of being fetched.
+// non-empty base is registered for the root, outranking a nested $id that
+// spells the same URI as a fetched document's root outranks one (see
+// [claims]), so a ref that absolutizes back to the root document resolves to
+// this copy instead of being fetched, and the same document answers its own
+// URI with its root however it entered the run.
 func (r *Registry) Build(root schemavet.Doc) {
 	r.root = root.Root()
 	r.absorb(root)
 
 	if base := root.Frozen().Base(); !base.IsZero() {
-		if _, ok := r.URI[base]; !ok {
-			r.URI[base] = r.root
-		}
+		r.URI[base] = r.root
 	}
 }
 

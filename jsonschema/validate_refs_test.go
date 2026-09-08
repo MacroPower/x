@@ -610,6 +610,78 @@ func TestValidateURNRootedRef(t *testing.T) {
 	assert.Contains(t, verr.Error(), `expected "integer"`)
 }
 
+// TestRootURIOutranksNestedID pins that a document answers its own URI with
+// its root however it entered the run. The root registered under the
+// [jsonschema.WithBaseURI] base used to yield to a nested $id spelling the
+// same URI, while the same document served by a resolver registered its root
+// over that $id, so a ref to the URI reached the nested string node from one
+// entry and the object root from the other. The root is the first node the
+// walk reaches, so under the first-reached rule it holds the key both ways.
+// Compile then refuses a string through the ref from either entry, and
+// Inline reports the reference cycle the ref closes through the root from
+// either entry, a cycle the nested node never closed.
+func TestRootURIOutranksNestedID(t *testing.T) {
+	t.Parallel()
+
+	const uri = "http://example.test/root.json"
+
+	doc := stringtest.Input(`
+		{
+			"type": "object",
+			"$defs": {"a": {"$id": "http://example.test/root.json", "type": "string"}},
+			"properties": {"p": {"$ref": "http://example.test/root.json"}}
+		}
+	`)
+
+	// Each entry yields the root to run plus the option that brings doc in,
+	// and the property the ref sits under.
+	entries := map[string]func(t *testing.T) (*jsonschema.Schema, jsonschema.RefOption, string){
+		"as the root under WithBaseURI": func(t *testing.T) (*jsonschema.Schema, jsonschema.RefOption, string) {
+			t.Helper()
+
+			root, err := jsonschema.ParseSchema([]byte(doc))
+			require.NoError(t, err)
+
+			return root, jsonschema.WithBaseURI(uri), "p"
+		},
+		"served from its URI": func(t *testing.T) (*jsonschema.Schema, jsonschema.RefOption, string) {
+			t.Helper()
+
+			served, err := jsonschema.ParseSchema([]byte(doc))
+			require.NoError(t, err)
+
+			root, err := jsonschema.ParseSchema([]byte(`{"properties": {"q": {"$ref": "` + uri + `"}}}`))
+			require.NoError(t, err)
+
+			return root, jsonschema.WithRefResolver(mapResolver{uri: served}), "q"
+		},
+	}
+
+	for name, entry := range entries {
+		t.Run("compile "+name, func(t *testing.T) {
+			t.Parallel()
+
+			root, opt, prop := entry(t)
+
+			require.NoError(t, validateValue(t.Context(), root, map[string]any{prop: map[string]any{}}, opt),
+				"the ref reaches the object root, which accepts an object")
+
+			err := validateValue(t.Context(), root, map[string]any{prop: "s"}, opt)
+			require.Error(t, err, "the ref reaches the object root, which refuses a string")
+			assert.ErrorContains(t, err, `expected "object"`)
+		})
+
+		t.Run("inline "+name, func(t *testing.T) {
+			t.Parallel()
+
+			root, opt, _ := entry(t)
+
+			_, err := jsonschema.Inline(t.Context(), root, opt)
+			require.ErrorIs(t, err, jsonschema.ErrRefCycle, "the ref reaches the root, which refers back to itself")
+		})
+	}
+}
+
 // TestCompileRootRefErrorNamesTheRootDocument pins the location an
 // unresolvable reference in the root document reports: the bare fragment
 // locator "#" plus the node's pointer, matching the "uri#" plus pointer form a
