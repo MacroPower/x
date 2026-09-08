@@ -51,6 +51,27 @@ func TestCompileChecksIDDomain(t *testing.T) {
 				"allOf": [{"$ref": "#frag"}]
 			}`,
 		},
+		"draft-07 fragment on the root URI id resolves as an anchor": {
+			// The anchor spelling on a URI: the fragment names an anchor
+			// within the document the URI part names, here the root, so the
+			// fragment-only reference reaches it. The freeze used to drop the
+			// fragment and register only the URI part, which the root already
+			// held, so the $id named nothing.
+			schema: `{
+				"$schema": "http://json-schema.org/draft-07/schema#",
+				"$id": "http://example.com/root.json",
+				"definitions": {"a": {"$id": "http://example.com/root.json#foo", "type": "integer"}},
+				"allOf": [{"$ref": "#foo"}]
+			}`,
+		},
+		"draft-07 fragment on a relative URI id resolves as an anchor": {
+			schema: `{
+				"$schema": "http://json-schema.org/draft-07/schema#",
+				"$id": "http://example.com/root.json",
+				"definitions": {"a": {"$id": "other.json#foo", "type": "integer"}},
+				"allOf": [{"$ref": "other.json#foo"}]
+			}`,
+		},
 		"draft-07 id beside ref is ignored": {
 			schema: `{
 				"$schema": "http://json-schema.org/draft-07/schema#",

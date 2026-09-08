@@ -345,9 +345,10 @@ func checkVocabularyPlacement(schema *Schema, schemaPath string, profile Profile
 // judged against the base in effect at the node. Under Draft-07 two forms go
 // unchecked: an $id beside a $ref (the draft ignores it, so [applyID]
 // registers nothing for it and rebases nothing, and this check reads no
-// further into it, not even to parse it) and a fragment-carrying $id (the
-// anchor spelling); Draft 2020-12 rejects any fragment in $id (core section
-// 8.2.1). A checked $id must parse, and its resolved form must be an
+// further into it, not even to parse it) and a $id carrying a plain-name
+// fragment (the anchor spelling, fragment-only or on a URI); Draft 2020-12
+// rejects any fragment in $id (core section 8.2.1). A checked $id must
+// parse, and its resolved form must be an
 // absolute URI; a relative $id with no absolute base registers no resolvable
 // URI, so every ref targeting it would silently miss.
 func checkSchemaID(schema *Schema, schemaPath string, base uriref.DocKey, profile Profile) error {

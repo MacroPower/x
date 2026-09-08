@@ -37,23 +37,49 @@ func dk(t *testing.T, s string) uriref.DocKey {
 	return k
 }
 
-// TestFragmentOnlyIDRegistersByDraft pins the frozen walk's draft gate on the
-// fragment-only $id: Draft-07 reads it as the anchor spelling and registers an
-// anchor, while Draft 2020-12 forbids a fragment in $id (core section 8.2.1)
-// and registers nothing, so a plain-name fragment naming it stays
-// unresolvable. Under 2020-12 both engines refuse such a document at the
-// identifier check before resolution runs, so the gate sits behind that
-// refusal with no observable path through the public API; under Draft-07 a
-// fragment reference resolves through the registration it makes.
+// TestFragmentOnlyIDRegistersByDraft pins the frozen walk's draft gate on a
+// plain-name fragment in $id: Draft-07 reads it as the anchor spelling and
+// registers an anchor within the document the $id names (the enclosing one
+// for a fragment-only $id, the URI part's otherwise), while Draft 2020-12
+// forbids a fragment in $id (core section 8.2.1) and registers nothing, so a
+// plain-name fragment naming it stays unresolvable. Under 2020-12 both
+// engines refuse the fragment-only form at the identifier check before
+// resolution runs, so the gate sits behind that refusal with no observable
+// path through the public API; under Draft-07 a fragment reference resolves
+// through the registration it makes. The fragment on a URI used to register
+// only the URI part, so a $id the docs call the anchor spelling named no
+// anchor, and a spelling equal to the root's URI plus a fragment registered
+// nothing at all.
 func TestFragmentOnlyIDRegistersByDraft(t *testing.T) {
 	t.Parallel()
 
+	const (
+		rootURI  = "https://example.test/root.json"
+		otherURI = "https://example.test/other.json"
+	)
+
 	tests := map[string]struct {
+		id      string
 		profile schemavet.Profile
-		want    bool
+		// The doc is the document the anchor is declared within.
+		doc  string
+		want bool
 	}{
-		"draft-07 reads a fragment-only $id as an anchor": {profile: schemavet.Profile{Draft7: true}, want: true},
-		"draft 2020-12 registers nothing for it":          {profile: schemavet.Profile{}, want: false},
+		"draft-07 reads a fragment-only $id as an anchor": {
+			id: "#a", profile: schemavet.Profile{Draft7: true}, doc: rootURI, want: true,
+		},
+		"draft 2020-12 registers nothing for it": {
+			id: "#a", profile: schemavet.Profile{}, doc: rootURI, want: false,
+		},
+		"draft-07 reads a fragment on the root URI as an anchor": {
+			id: rootURI + "#a", profile: schemavet.Profile{Draft7: true}, doc: rootURI, want: true,
+		},
+		"draft-07 reads a fragment on a relative URI as an anchor within it": {
+			id: "other.json#a", profile: schemavet.Profile{Draft7: true}, doc: otherURI, want: true,
+		},
+		"draft 2020-12 registers no anchor for a fragment on a URI": {
+			id: "other.json#a", profile: schemavet.Profile{}, doc: otherURI, want: false,
+		},
 	}
 
 	for name, tc := range tests {
@@ -61,16 +87,15 @@ func TestFragmentOnlyIDRegistersByDraft(t *testing.T) {
 			t.Parallel()
 
 			root := &jsonschema.Schema{Definitions: map[string]*jsonschema.Schema{
-				"t": {ID: "#a", Type: "integer"},
+				"t": {ID: tc.id, Type: "integer"},
 			}}
 
-			doc := freeze(t, root, "https://example.test/root.json", tc.profile)
+			doc := freeze(t, root, rootURI, tc.profile)
 
 			reg := refresolve.NewRegistry(refresolve.Deps{}, false)
 			reg.Build(doc)
 
-			got, ok := reg.NewSession(nil).
-				LookupAnchor(dk(t, "https://example.test/root.json").Anchor("a"))
+			got, ok := reg.NewSession(nil).LookupAnchor(dk(t, tc.doc).Anchor("a"))
 
 			require.Equal(t, tc.want, ok, "the anchor registration follows the draft")
 

@@ -47,8 +47,10 @@ type Frozen struct {
 // root's configured base, a fetched document's retrieval URI, or the base in
 // effect at the position a fragment or substitute stands in. Each node's $id
 // resolves against the base of its parent, and the profile decides what
-// registers. Under [Profile.Draft7] a fragment-only $id registers an anchor,
-// $anchor and $dynamicAnchor register nothing, and a $id beside a $ref
+// registers. Under [Profile.Draft7] a $id carrying a plain-name fragment
+// registers an anchor, whether fragment-only or on a URI (a URI part
+// registers and rebases as it does without the fragment), $anchor and
+// $dynamicAnchor register nothing, and a $id beside a $ref
 // registers nothing and rebases nothing, since the draft ignores every
 // sibling of $ref; under [Profile.InertIDs] no $id registers or rebases at
 // all. A key two nodes claim within the document resolves to the first the
@@ -215,9 +217,9 @@ type declared struct {
 // identifiers reads the identifier keywords of s against the base in effect at
 // it and reports what registers and the base its children inherit. Under
 // [Profile.Draft7] a $id beside a $ref registers nothing and rebases nothing
-// (the draft ignores every sibling of $ref), a fragment-only $id is the anchor
-// spelling, and $anchor and $dynamicAnchor are unknown keywords that register
-// nothing; under [Profile.InertIDs] no $id registers or rebases; and a $id that
+// (the draft ignores every sibling of $ref), a plain-name fragment on a $id is
+// the anchor spelling, and $anchor and $dynamicAnchor are unknown keywords that
+// register nothing; under [Profile.InertIDs] no $id registers or rebases; and a $id that
 // does not parse against the base registers no URI and leaves the scope
 // unchanged, so a reference targeting it misses and the identifier check
 // reports the parse fault separately.
@@ -244,8 +246,11 @@ func identifiers(s *Schema, parent uriref.DocKey, profile Profile) declared {
 // applyID folds the $id registration and the child scope into d. A $id the run
 // reads as inert (under [Profile.InertIDs], or beside a $ref under
 // [Profile.Draft7]) registers nothing; a fragment-only $id is a Draft-07 anchor
-// and nothing under 2020-12; and an $id that does not resolve to a key registers
-// no URI and leaves the scope on the parent base.
+// and nothing under 2020-12; a plain-name fragment on a URI is the same
+// Draft-07 anchor, declared within the document the URI part names, which
+// registers and rebases as it would without the fragment; and an $id that
+// does not resolve to a key registers no URI and leaves the scope on the
+// parent base.
 func applyID(d *declared, s *Schema, parent uriref.DocKey, profile Profile) {
 	ignoreID := profile.Draft7 && s.Ref != ""
 	if s.ID == "" || profile.InertIDs || ignoreID {
@@ -260,9 +265,13 @@ func applyID(d *declared, s *Schema, parent uriref.DocKey, profile Profile) {
 		return
 	}
 
-	key, _, err := uriref.Resolve(parent, s.ID)
+	key, fragment, err := uriref.Resolve(parent, s.ID)
 	if err != nil {
 		return
+	}
+
+	if profile.Draft7 && !fragment.IsEmpty() && !fragment.IsPointer() {
+		d.anchors = append(d.anchors, key.Anchor(fragment.Name()))
 	}
 
 	d.uri, d.hasURI = key, true
