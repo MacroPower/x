@@ -2929,6 +2929,29 @@ func TestValidateInterpreterGoPlaygroundParity(t *testing.T) {
 		s, err := jsonschema.GenerateFor[U](t.Context(), opt)
 		require.NoError(t, err)
 		assert.Len(t, s.Properties["f"].Enum, 2, "a repeated token enumerates once")
+
+		// A oneof on a sequence reaches the numeric elements, so it refuses
+		// the token the dive spelling refuses, however deep the elements sit.
+		type S struct {
+			F []float64 `json:"f" validate:"oneof=1.0 2"`
+		}
+
+		_, err = jsonschema.GenerateFor[S](t.Context(), opt)
+		require.ErrorContains(t, err, `"1.0" is not the canonical spelling "1"`)
+
+		type SS struct {
+			F [][]float64 `json:"f" validate:"oneof=1.0 2"`
+		}
+
+		_, err = jsonschema.GenerateFor[SS](t.Context(), opt)
+		require.ErrorContains(t, err, `"1.0" is not the canonical spelling "1"`)
+
+		type SD struct {
+			F []float64 `json:"f" validate:"dive,oneof=1.0 2"`
+		}
+
+		_, err = jsonschema.GenerateFor[SD](t.Context(), opt)
+		require.ErrorContains(t, err, `"1.0" is not the canonical spelling "1"`)
 	})
 
 	t.Run("empty eq pins the empty string", func(t *testing.T) {

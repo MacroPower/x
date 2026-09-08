@@ -208,10 +208,8 @@ func applyValidator(key, value string, hasValue bool, field jsonschema.FieldCont
 		return fmt.Errorf("validate tag: %s: %w", reason, err)
 	}
 
-	// A coerced number is exempt: its scalars are canonicalized against the
-	// serialized text by design (see the package doc).
-	if bound.Op == tagmodel.OpOneOf && shape.Form == tagmodel.FormNumber {
-		err = checkCanonicalOneOf(shape.Kind, bound.Params.Values())
+	if bound.Op == tagmodel.OpOneOf {
+		err = checkCanonicalOneOf(field, shape, bound.Params.Values())
 		if err != nil {
 			return fmt.Errorf("validate tag: %s: %w", key, err)
 		}
@@ -225,13 +223,40 @@ func applyValidator(key, value string, hasValue bool, field jsonschema.FieldCont
 	return nil
 }
 
-// checkCanonicalOneOf rejects a oneof token on a numeric kind whose spelling
-// go-playground could never match. Its isOneOf compares the field's value
-// formatted with strconv against the raw tokens, so a token such as +1, 01,
-// or 1.0 matches no value at all, while the enum this dialect emits would
+// checkCanonicalOneOf rejects a oneof token that go-playground could never
+// match on the number the rule reaches. On a sequence the rule retargets onto
+// the elements, so the check descends through the element contexts the same
+// way and runs on every numeric leaf; a oneof written on a []float64 and one
+// written under a dive then refuse the same tokens. A coerced number is
+// exempt: its scalars are canonicalized against the serialized text by design
+// (see the package doc).
+func checkCanonicalOneOf(field jsonschema.FieldContext, shape tagmodel.Shape, tokens []string) error {
+	if shape.Form == tagmodel.FormNumber {
+		return checkCanonicalOneOfKind(shape.Kind, tokens)
+	}
+
+	if shape.Form != tagmodel.FormArray {
+		return nil
+	}
+
+	elems := field.ElementContexts()
+	for i := range elems {
+		err := checkCanonicalOneOf(elems[i], shapeOf(elems[i]), tokens)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// checkCanonicalOneOfKind rejects a oneof token on a numeric kind whose
+// spelling go-playground could never match. Its isOneOf compares the field's
+// value formatted with strconv against the raw tokens, so a token such as +1,
+// 01, or 1.0 matches no value at all, while the enum this dialect emits would
 // admit the number it parses to. A token that does not parse at the kind's
 // width is left to the model, which reports the parse or range fault.
-func checkCanonicalOneOf(kind reflect.Kind, tokens []string) error {
+func checkCanonicalOneOfKind(kind reflect.Kind, tokens []string) error {
 	bits := kindBits(kind)
 
 	for _, tok := range tokens {

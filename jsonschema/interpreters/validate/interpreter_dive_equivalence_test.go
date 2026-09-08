@@ -40,6 +40,16 @@ func generateDiveShape(t *testing.T, typ reflect.Type, tag string) (*jsonschema.
 		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()))
 }
 
+// leafType strips every slice, array, and pointer layer off typ, so the test
+// picks its oneof values by the kind the innermost element schema carries.
+func leafType(typ reflect.Type) reflect.Type {
+	for typ.Kind() == reflect.Slice || typ.Kind() == reflect.Array || typ.Kind() == reflect.Pointer {
+		typ = typ.Elem()
+	}
+
+	return typ
+}
+
 // TestDiveEquivalenceOnSequences pins the property the shared element path
 // buys: on a slice or array, a rule written on the sequence and the same rule
 // written under a dive produce identical schemas.
@@ -58,14 +68,21 @@ func TestDiveEquivalenceOnSequences(t *testing.T) {
 		"fixed array of int8":              reflect.TypeFor[[2]int8](),
 		"slice of pointer to string":       reflect.TypeFor[[]*string](),
 		"slice of text-marshaling numeric": reflect.TypeFor[[]diveLevel](),
+		"slice of float64":                 reflect.TypeFor[[]float64](),
+		"slice of slice of float64":        reflect.TypeFor[[][]float64](),
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
+			// The float values carry a fraction so the canonical-spelling
+			// check, which both paths must run, has a token to accept.
 			values := "1 2"
-			if typ.Elem().Kind() == reflect.String ||
-				(typ.Elem().Kind() == reflect.Pointer && typ.Elem().Elem().Kind() == reflect.String) {
+
+			switch leaf := leafType(typ); {
+			case leaf.Kind() == reflect.String:
 				values = "a b"
+			case leaf.Kind() == reflect.Float32 || leaf.Kind() == reflect.Float64:
+				values = "1.5 2"
 			}
 
 			direct, directErr := generateDiveShape(t, typ, "oneof="+values)
