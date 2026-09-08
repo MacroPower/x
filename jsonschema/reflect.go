@@ -648,8 +648,10 @@ func checkTypeSchemaExclusive(t reflect.Type, ts TypeSchema) error {
 // rather than a payload $ref-string scan. The referenced type must be
 // extractable (a struct or a type extracted to $defs); a non-extractable target
 // would inline a copy and lose the reachability guarantee, so it is rejected.
-// The alias's own stance rides on the reference node, where the null pass
-// applies it after the target's recorded stance and before the occurrence's
+// With definitions disabled the alias takes the inline node every other
+// reference takes, and a circular target still resolves to a $ref. The
+// alias's own stance rides on the node, where the null pass applies it
+// after the target's recorded stance and before the occurrence's
 // pointer-ness.
 func (g *run) refTypeOverride(t reflect.Type, ts TypeSchema, pointer bool) (*node, error) {
 	// The alias resolves through schemaForType, which consults the override
@@ -669,20 +671,29 @@ func (g *run) refTypeOverride(t reflect.Type, ts TypeSchema, pointer bool) (*nod
 		return nil, err
 	}
 
-	if ref.kind != kindRef {
+	// With definitions enabled an extractable target always resolves to a
+	// reference; without them only a circular one does, and an extractable
+	// target's inline node is the alias's schema as it is any other
+	// occurrence's.
+	if ref.kind != kindRef && (g.definitions || !extractable(numkind.DerefType(ts.Ref))) {
 		return nil, fmt.Errorf(
-			"%w: type %s Ref %s does not name an extractable type", ErrConflictingTypeSchema, t, ts.Ref,
+			"%w: type %s Ref %s does not name an extractable type "+
+				"(a named struct, or a named type implementing JSONSchemaProvider or JSONSchemaExtender)",
+			ErrConflictingTypeSchema, t, ts.Ref,
 		)
 	}
 
 	// The precedence is target stance, then alias stance, then pointer-ness:
 	// a Ref alias inherits the target type's stance, and its own Nullability
 	// applies only when the target is NullFromReflection (the common case,
-	// where the folded value passes through unchanged). Along a chain of
-	// aliases the reference node is shared, and each alias writes its stance
-	// on the way out only when it declares one, so the outermost declared
-	// stance wins and an alias declaring nothing keeps the inner alias's.
-	if ts.Nullability != NullFromReflection {
+	// where the folded value passes through unchanged). A reference carries
+	// the target's stance on its def entry and the alias's on the node; an
+	// inline node holds one stance, so the alias writes it only where the
+	// target declared none. Along a chain of aliases the node is shared, and
+	// each alias writes its stance on the way out only when it declares one,
+	// so the outermost declared stance wins and an alias declaring nothing
+	// keeps the inner alias's.
+	if ts.Nullability != NullFromReflection && (ref.kind == kindRef || ref.stance == NullFromReflection) {
 		ref.stance = ts.Nullability
 	}
 

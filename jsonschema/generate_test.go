@@ -2661,6 +2661,72 @@ func TestGenerateFor_ConflictingTypeSchemaRejected(t *testing.T) {
 	}
 }
 
+// TestGenerateFor_TypeSchemaRefWithDefinitionsFalse pins that a Ref alias
+// inlines its target under WithDefinitions(false) as every other reference
+// does. The alias once demanded a $ref node from the target's resolution,
+// which definitions off never produces, so a registration that rendered
+// with definitions on failed as "not extractable" without them.
+func TestGenerateFor_TypeSchemaRefWithDefinitionsFalse(t *testing.T) {
+	t.Parallel()
+
+	type target struct {
+		Name string `json:"name"`
+	}
+
+	inline := `{
+		"type":"object",
+		"properties":{"name":{"type":"string"}},
+		"required":["name"],
+		"additionalProperties":false
+	}`
+
+	tests := map[string]struct {
+		ts   jsonschema.TypeSchema
+		want string
+		err  error
+	}{
+		"struct target inlines": {
+			ts:   jsonschema.TypeSchema{Ref: reflect.TypeFor[target]()},
+			want: inline,
+		},
+		"alias stance applies to the inline target": {
+			ts:   jsonschema.TypeSchema{Ref: reflect.TypeFor[target](), Nullability: jsonschema.NullAllowed},
+			want: `{"anyOf":[` + inline + `,{"type":"null"}]}`,
+		},
+		"non-extractable target is still refused": {
+			ts:  jsonschema.TypeSchema{Ref: reflect.TypeFor[int]()},
+			err: jsonschema.ErrConflictingTypeSchema,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			type doc struct {
+				T time.Time `json:"t"`
+			}
+
+			s, err := jsonschema.GenerateFor[doc](t.Context(),
+				jsonschema.WithDefinitions(false),
+				jsonschema.WithTypeSchemaFor[time.Time](tc.ts),
+			)
+			if tc.err != nil {
+				require.ErrorIs(t, err, tc.err)
+
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Empty(t, s.Defs)
+
+			got, err := json.Marshal(s.Properties["t"])
+			require.NoError(t, err)
+			assert.JSONEq(t, tc.want, string(got))
+		})
+	}
+}
+
 func TestGenerateFor_TypeSchemaRefSelfCycleRejected(t *testing.T) {
 	t.Parallel()
 

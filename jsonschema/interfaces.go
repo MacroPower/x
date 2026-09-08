@@ -110,7 +110,9 @@ type TypeSchema struct {
 	// provider or extender) so the reference stays a real $ref edge; a
 	// non-extractable Ref is [ErrConflictingTypeSchema], as is an alias chain
 	// that cycles back to its own type (a self-Ref, or a mutual A -> B -> A
-	// chain). A Ref alias may itself name an aliased type; along such a chain
+	// chain). With [WithDefinitions] disabled the alias inlines its target
+	// as every other reference does. A Ref alias may itself name an aliased
+	// type; along such a chain
 	// the target type's stance applies first, then the stance of the
 	// outermost alias that declares one.
 	Ref reflect.Type

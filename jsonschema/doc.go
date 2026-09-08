@@ -585,6 +585,8 @@
 // and composite types without these interfaces (e.g., type Tags []string)
 // stay inline, and so does every anonymous struct type. Generation always
 // refers to a circular type through $ref, even with definitions disabled.
+// A [TypeSchema.Ref] alias inlines its target under definitions disabled,
+// as every other reference does; a circular target still renders as $ref.
 //
 // Generation disambiguates name collisions with the package's base directory
 // name, then with the full import path if needed. For generic type

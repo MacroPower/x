@@ -42,12 +42,17 @@ func (g *run) schemaName(t reflect.Type) string {
 }
 
 // shouldExtract reports whether a type should be extracted to the definitions
-// map and referenced via $ref (as opposed to being inlined).
+// map and referenced via $ref (as opposed to being inlined): an extractable
+// type, under a run with definitions enabled.
 func (g *run) shouldExtract(t reflect.Type) bool {
-	if !g.definitions {
-		return false
-	}
+	return g.definitions && extractable(t)
+}
 
+// extractable reports whether a type is one the definitions map holds: a
+// named struct, or a named type implementing JSONSchemaProvider or
+// JSONSchemaExtender. It is a fact of the type alone; [run.shouldExtract]
+// adds the run's WithDefinitions setting.
+func extractable(t reflect.Type) bool {
 	// Only named types can be extracted.
 	if t.Name() == "" {
 		return false
