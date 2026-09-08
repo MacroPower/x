@@ -252,7 +252,8 @@ for the tags it maps.
 
 `WithDescriptionProvider` supplies type and field descriptions. The built-in
 provider reads Go doc comments from source files and skips a type whose
-sources it cannot locate:
+sources it cannot locate. A description a struct tag or a type-level hook sets
+wins over the comment:
 
 ```go
 schema, err := jsonschema.GenerateFor[MyType](ctx,

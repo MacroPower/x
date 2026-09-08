@@ -1975,10 +1975,13 @@ func checkFiniteBounds(t reflect.Type, s *Schema) error {
 
 // jsonTagInfo holds parsed json tag information.
 // ApplyTypeDescription sets the description from the comment provider on a
-// type's schema. An empty comment leaves the description unset; a provider
-// error aborts generation.
+// type's schema. The comment fills an empty slot only: a description the
+// schema already carries (a type-level hook's own [TypeSchema.Value], or a
+// built-in override) wins over it, the way a tag description wins over a field
+// comment, so every hook family keeps the annotation it declared. An empty
+// comment leaves the description unset; a provider error aborts generation.
 func (g *run) applyTypeDescription(t reflect.Type, s *Schema) error {
-	if g.descriptionProvider == nil {
+	if g.descriptionProvider == nil || s.Description != "" {
 		return nil
 	}
 

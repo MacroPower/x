@@ -271,6 +271,66 @@ func TestChainDescriptionProviders(t *testing.T) {
 	})
 }
 
+// TestTypeHookDescriptionWinsOverComment pins that a description a type-level
+// hook declares in its TypeSchema.Value survives the comment provider, for
+// every hook family, and that the comment fills the slot a hook left empty.
+// Before the guard, applyTypeDescription assigned whenever the comment was
+// non-empty, so a WithTypeSchema override and a JSONSchemaProvider lost the
+// description they declared while an extender kept its own.
+func TestTypeHookDescriptionWinsOverComment(t *testing.T) {
+	t.Parallel()
+
+	commenter := jsonschema.DescriptionProviderFuncs{
+		TypeFunc: func(context.Context, jsonschema.TypeContext) (string, error) {
+			return "from comment", nil
+		},
+	}
+
+	t.Run("override keeps its description", func(t *testing.T) {
+		t.Parallel()
+
+		s, err := jsonschema.GenerateFor[commentedWidget](t.Context(),
+			jsonschema.WithDescriptionProvider(commenter),
+			jsonschema.WithTypeSchemaFor[commentedWidget](jsonschema.TypeSchema{
+				Value: &jsonschema.Schema{Type: "object", Description: "from override"},
+			}),
+		)
+		require.NoError(t, err)
+		assert.Equal(t, "from override", s.Description)
+	})
+
+	t.Run("provider keeps its description", func(t *testing.T) {
+		t.Parallel()
+
+		s, err := jsonschema.GenerateFor[describedProviderType](t.Context(),
+			jsonschema.WithDescriptionProvider(commenter),
+		)
+		require.NoError(t, err)
+		assert.Equal(t, "from provider", s.Description)
+	})
+
+	t.Run("comment fills an empty slot", func(t *testing.T) {
+		t.Parallel()
+
+		s, err := jsonschema.GenerateFor[commentedWidget](t.Context(),
+			jsonschema.WithDescriptionProvider(commenter),
+			jsonschema.WithTypeSchemaFor[commentedWidget](jsonschema.TypeSchema{
+				Value: &jsonschema.Schema{Type: "object"},
+			}),
+		)
+		require.NoError(t, err)
+		assert.Equal(t, "from comment", s.Description)
+	})
+}
+
+// describedProviderType is a JSONSchemaProvider whose schema declares its own
+// description.
+type describedProviderType struct{}
+
+func (describedProviderType) JSONSchema(context.Context, jsonschema.TypeContext) (jsonschema.TypeSchema, error) {
+	return jsonschema.TypeSchema{Value: &jsonschema.Schema{Type: "string", Description: "from provider"}}, nil
+}
+
 // TestWithDescriptionProvider_LastRegistrationWins covers the registration
 // semantics: the last registration wins, and a nil provider clears an
 // earlier one.

@@ -1001,7 +1001,10 @@
 //     a proxy that cannot be reached) is retried on the next Generate rather
 //     than remembered as a package with no sources.
 //   - A description in the jsonschema struct tag wins over the comment it
-//     supplies.
+//     supplies. So does a description a type-level hook declares in its
+//     [TypeSchema.Value], whether from [WithTypeSchema], a
+//     [TypeSchemaProvider], or a [JSONSchemaProvider]; the comment fills the
+//     slot only when the hook left it empty.
 //
 // Any other implementation substitutes another source, such as comments
 // pre-extracted at build time for a binary that deploys without source files,
