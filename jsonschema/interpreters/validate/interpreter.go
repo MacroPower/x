@@ -80,34 +80,18 @@ func applyParts(parts []string, field jsonschema.FieldContext) error {
 	var inKeys bool
 
 	for idx := range parts {
-		part := parts[idx]
-		// The | OR operator is not modeled. The go-playground/validator parser
-		// splits a comma group on the pipe and treats the alternatives as OR;
-		// here only the first alternative (the group before the first pipe) is
-		// interpreted, matching the documented behavior. Stripping per part
-		// rather than across the whole tag keeps later comma-separated
-		// constraints intact. A literal pipe in a param is written 0x7C and
-		// survives, since unescapeParam runs after this split.
-		if i := strings.IndexByte(part, '|'); i >= 0 {
-			// An empty first alternative is a tag go-playground refuses
-			// outright; dropping the whole group would silently weaken the
-			// schema instead.
-			if strings.TrimSpace(part[:i]) == "" {
-				return fmt.Errorf("validate tag: empty OR alternative in %q", part)
-			}
-
-			part = part[:i]
-		}
-
-		part = strings.TrimSpace(part)
+		part := strings.TrimSpace(parts[idx])
 		if part == "" || part == "-" {
 			continue
 		}
 
-		// A dive inside a keys...endkeys block is a key-side dive (e.g.
-		// dive,keys,dive,endkeys for collection-typed map keys), which is not
-		// modeled; it must be skipped by the inKeys guard below rather than
-		// treated as a value-element dive. Only handle dive outside the block.
+		// The parts go-playground matches whole come first, before the OR
+		// split, since its parser switches on the whole comma group and only
+		// the default branch splits on the pipe. A dive inside a
+		// keys...endkeys block is a key-side dive (e.g. dive,keys,dive,endkeys
+		// for collection-typed map keys), which is not modeled; it must be
+		// skipped by the inKeys guard below rather than treated as a
+		// value-element dive. Only handle dive outside the block.
 		if part == diveTag && !inKeys {
 			// Descend into the element type. A trailing dive applies nothing
 			// to the elements, a no-op as in go-playground, but the descent
@@ -115,26 +99,6 @@ func applyParts(parts []string, field jsonschema.FieldContext) error {
 			// dive over anything but a slice, array, or map, so a dive on a
 			// field with no elements is an error here whatever follows it.
 			return applyDive(parts[idx+1:], field)
-		}
-
-		key, value, hasValue := strings.Cut(part, "=")
-		if hasValue {
-			// Tags split blindly on commas, pipes, and equals, then the
-			// documented escapes in the param value only are unescaped:
-			// "0x2C" -> "," and "0x7C" -> "|". This lets a param carry a literal
-			// comma or pipe (e.g. oneof=a0x2Cb yields the enum value "a,b"). The
-			// key is never unescaped, matching go-playground/validator cache.go.
-			value = unescapeParam(value)
-		}
-
-		// Skip cross-field validators, and the control tags that govern when
-		// validation runs rather than expressing a value constraint (e.g.
-		// omitempty, structonly). Neither has a schema representation, and
-		// neither may be treated as an unknown validator. A control tag is
-		// matched as the whole part, as go-playground matches it, so a
-		// parameter on one (omitempty=) is refused below rather than skipped.
-		if isCrossFieldValidator(key) || isControlTag(part) {
-			continue
 		}
 
 		// Map key validators: constraints between keys and endkeys apply to
@@ -154,13 +118,64 @@ func applyParts(parts []string, field jsonschema.FieldContext) error {
 			continue
 		}
 
+		// A control tag governs when validation runs rather than expressing
+		// a value constraint (e.g. omitempty, structonly). It has no schema
+		// representation and may not be treated as an unknown validator. It
+		// is matched as the whole part, as go-playground matches it, so a
+		// parameter on one (omitempty=) or an OR alternative beside it
+		// (omitempty|min=1) is refused below rather than skipped.
+		if isControlTag(part) {
+			continue
+		}
+
+		// The | OR operator is not modeled. The go-playground/validator parser
+		// splits a comma group on the pipe and treats the alternatives as OR;
+		// here only the first alternative (the group before the first pipe) is
+		// interpreted, matching the documented behavior. Stripping per part
+		// rather than across the whole tag keeps later comma-separated
+		// constraints intact. A literal pipe in a param is written 0x7C and
+		// survives, since unescapeParam runs after this split.
+		orGroup := false
+
+		if i := strings.IndexByte(part, '|'); i >= 0 {
+			// An empty first alternative is a tag go-playground refuses
+			// outright; dropping the whole group would silently weaken the
+			// schema instead.
+			if strings.TrimSpace(part[:i]) == "" {
+				return fmt.Errorf("validate tag: empty OR alternative in %q", part)
+			}
+
+			orGroup = true
+			part = strings.TrimSpace(part[:i])
+		}
+
+		key, value, hasValue := strings.Cut(part, "=")
+		if hasValue {
+			// Tags split blindly on commas, pipes, and equals, then the
+			// documented escapes in the param value only are unescaped:
+			// "0x2C" -> "," and "0x7C" -> "|". This lets a param carry a literal
+			// comma or pipe (e.g. oneof=a0x2Cb yields the enum value "a,b"). The
+			// key is never unescaped, matching go-playground/validator cache.go.
+			value = unescapeParam(value)
+		}
+
+		// Skip cross-field validators, which have no schema representation
+		// and may not be treated as an unknown validator. Go-playground
+		// registers them, so one inside an OR group is as valid there as a
+		// bare one.
+		if isCrossFieldValidator(key) {
+			continue
+		}
+
 		if inKeys {
 			continue
 		}
 
-		// A structural key carrying a parameter names no validator on either
-		// side. The error carries the whole part, as go-playground's does.
-		if hasValue && isStructuralKey(key) {
+		// A structural key carrying a parameter or standing as an OR
+		// alternative names no validator on either side: go-playground looks
+		// it up as a validator there and refuses the tag. The error carries
+		// the whole part, as go-playground's does.
+		if isStructuralKey(key) && (hasValue || orGroup) {
 			return fmt.Errorf("%w %q", ErrUnrecognizedValidator, part)
 		}
 

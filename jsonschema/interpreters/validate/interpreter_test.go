@@ -3092,6 +3092,42 @@ func TestValidateInterpreterGoPlaygroundParity(t *testing.T) {
 		require.ErrorContains(t, err, `"dive=1"`)
 	})
 
+	t.Run("a control tag as an OR alternative is an unrecognized validator", func(t *testing.T) {
+		t.Parallel()
+
+		// Go-playground switches on the whole comma group before it splits
+		// on the pipe, so omitempty|min=1 reaches its validator lookup as
+		// two alternatives and the first is undefined there. Reading the
+		// first alternative as the whole part would skip it here and emit
+		// maxLength 3 for a tag go-playground cannot load.
+		type T struct {
+			F string `json:"f" validate:"omitempty|min=1,max=3"`
+		}
+
+		_, err := jsonschema.GenerateFor[T](t.Context(), opt)
+		require.ErrorIs(t, err, validate.ErrUnrecognizedValidator)
+		require.ErrorContains(t, err, `"omitempty"`)
+
+		type D struct {
+			F []string `json:"f" validate:"dive|x,min=1"`
+		}
+
+		_, err = jsonschema.GenerateFor[D](t.Context(), opt)
+		require.ErrorIs(t, err, validate.ErrUnrecognizedValidator)
+		require.ErrorContains(t, err, `"dive"`)
+
+		// A cross-field validator is registered there, so one heading an OR
+		// group stays a skipped alternative rather than a refusal.
+		type X struct {
+			Other string `json:"other"`
+			F     string `json:"f"     validate:"eqfield=Other|min=1,max=3"`
+		}
+
+		s, err := jsonschema.GenerateFor[X](t.Context(), opt)
+		require.NoError(t, err)
+		assert.Equal(t, new(3), s.Properties["f"].MaxLength)
+	})
+
 	t.Run("an integer literal outside the JSON grammar is refused", func(t *testing.T) {
 		t.Parallel()
 
