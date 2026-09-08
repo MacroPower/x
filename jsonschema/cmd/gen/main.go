@@ -152,15 +152,16 @@ func run(cfg config, stdout io.Writer) error {
 // corrupts a file already at path (unlike os.WriteFile, which opens with
 // O_TRUNC first). The rename is atomic within a filesystem; the temp file
 // shares path's directory to keep it on the same one. A symlink at path is
-// written through, so the link survives, and an existing file keeps its
-// mode; a file the write creates is 0644. Ownership is whatever the invoking
-// user's is, as with any rename.
+// written through, so the link survives, including a link whose target does
+// not exist yet, and an existing file keeps its mode; a file the write
+// creates is 0644. Ownership is whatever the invoking user's is, as with any
+// rename.
 func writeFileAtomic(path string, data []byte) error {
 	perm := os.FileMode(0o644)
 
-	resolved, err := filepath.EvalSymlinks(path)
-	if err == nil {
-		path = resolved
+	path, err := followSymlinks(path)
+	if err != nil {
+		return err
 	}
 
 	fi, err := os.Stat(path)
@@ -198,6 +199,45 @@ func writeFileAtomic(path string, data []byte) error {
 	}
 
 	return nil
+}
+
+// maxSymlinkHops bounds the chain followSymlinks walks, as the kernel bounds
+// its own resolution, so a link cycle is an error rather than a hang.
+const maxSymlinkHops = 40
+
+// followSymlinks resolves the final component of path through every symlink
+// it is, stopping at the first path that is not a link, whether or not it
+// exists. The standard filepath.EvalSymlinks fails on a dangling link, which
+// would leave the write landing on the link itself and replacing it with a
+// regular file; walking the chain by hand keeps the write on the target the
+// user pointed at. The directories along the way are left to the operating
+// system, which resolves them on every open.
+func followSymlinks(path string) (string, error) {
+	for range maxSymlinkHops {
+		// A path that cannot be stat'ed is not a link; it is where the
+		// write lands, and CreateTemp reports whatever is wrong with it.
+		fi, err := os.Lstat(path)
+		if err != nil {
+			return path, nil //nolint:nilerr // A missing path ends the chain.
+		}
+
+		if fi.Mode()&os.ModeSymlink == 0 {
+			return path, nil
+		}
+
+		target, err := os.Readlink(path)
+		if err != nil {
+			return "", fmt.Errorf("read symlink %q: %w", path, err)
+		}
+
+		if !filepath.IsAbs(target) {
+			target = filepath.Join(filepath.Dir(path), target)
+		}
+
+		path = target
+	}
+
+	return "", fmt.Errorf("resolve %q: too many levels of symbolic links", path)
 }
 
 // resolveImportPath returns the import path of the current package. It rejects a

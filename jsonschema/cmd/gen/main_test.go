@@ -742,6 +742,83 @@ func TestWriteFileAtomicPreservesTarget(t *testing.T) {
 		assert.Equal(t, "new", string(data), "the target holds the new content")
 	})
 
+	t.Run("dangling symlink is written through", func(t *testing.T) {
+		t.Parallel()
+
+		// The standard filepath.EvalSymlinks fails on a link with no target,
+		// and the write used to fall back to the link path itself, replacing
+		// the link with a regular file and never creating the target.
+		dir := t.TempDir()
+		target := filepath.Join(dir, "real.json")
+		link := filepath.Join(dir, "link.json")
+
+		require.NoError(t, os.Symlink("real.json", link), "a relative target resolves against the link's directory")
+
+		require.NoError(t, writeFileAtomic(link, []byte("new")))
+
+		fi, err := os.Lstat(link)
+		require.NoError(t, err)
+		assert.NotZero(t, fi.Mode()&os.ModeSymlink, "the link survives")
+
+		data, err := os.ReadFile(target)
+		require.NoError(t, err)
+		assert.Equal(t, "new", string(data), "the target is created with the content")
+	})
+
+	t.Run("symlink chain is followed to its end", func(t *testing.T) {
+		t.Parallel()
+
+		dir := t.TempDir()
+		target := filepath.Join(dir, "real.json")
+		middle := filepath.Join(dir, "middle.json")
+		link := filepath.Join(dir, "link.json")
+
+		require.NoError(t, os.Symlink(target, middle))
+		require.NoError(t, os.Symlink(middle, link))
+
+		require.NoError(t, writeFileAtomic(link, []byte("new")))
+
+		for _, p := range []string{link, middle} {
+			fi, err := os.Lstat(p)
+			require.NoError(t, err)
+			assert.NotZero(t, fi.Mode()&os.ModeSymlink, "%s survives", p)
+		}
+
+		data, err := os.ReadFile(target)
+		require.NoError(t, err)
+		assert.Equal(t, "new", string(data))
+	})
+
+	t.Run("symlink cycle is an error", func(t *testing.T) {
+		t.Parallel()
+
+		dir := t.TempDir()
+		a := filepath.Join(dir, "a.json")
+		b := filepath.Join(dir, "b.json")
+
+		require.NoError(t, os.Symlink(b, a))
+		require.NoError(t, os.Symlink(a, b))
+
+		err := writeFileAtomic(a, []byte("new"))
+		require.ErrorContains(t, err, "too many levels of symbolic links")
+	})
+
+	t.Run("symlink into a missing directory is an error", func(t *testing.T) {
+		t.Parallel()
+
+		dir := t.TempDir()
+		link := filepath.Join(dir, "link.json")
+
+		require.NoError(t, os.Symlink(filepath.Join(dir, "missing", "real.json"), link))
+
+		err := writeFileAtomic(link, []byte("new"))
+		require.ErrorContains(t, err, "create temp file")
+
+		fi, err := os.Lstat(link)
+		require.NoError(t, err)
+		assert.NotZero(t, fi.Mode()&os.ModeSymlink, "the link survives the refused write")
+	})
+
 	t.Run("existing mode is kept", func(t *testing.T) {
 		t.Parallel()
 
