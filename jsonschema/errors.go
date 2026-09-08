@@ -88,13 +88,15 @@ var (
 
 	// ErrUnsupportedDraft is returned by [Compile] and [Inline] when the root
 	// schema's $schema declares an official dialect this package does not
-	// implement (2019-09, draft-06, draft-04, or draft-03). Processing such a
-	// document under a supported draft would silently change keyword semantics
-	// (a 2019-09 $recursiveRef lands in Extra and asserts nothing, a valid
-	// draft-06 tuple-form items is rejected), so the declaration is an error
-	// rather than a guess. A [WithDraft] override processes the document under
-	// the given draft explicitly; an unrecognized non-official $schema URI (a
-	// custom metaschema) keeps the [Draft2020] default as before.
+	// implement (2019-09, draft-06, draft-04, or draft-03), and by every
+	// entry point when [WithDraft] names a [Draft] value the package does
+	// not implement. Processing such a document under a supported draft
+	// would silently change keyword semantics (a 2019-09 $recursiveRef lands
+	// in Extra and asserts nothing, a valid draft-06 tuple-form items is
+	// rejected), so the declaration is an error rather than a guess. A
+	// [WithDraft] override processes the document under the given draft
+	// explicitly; an unrecognized non-official $schema URI (a custom
+	// metaschema) keeps the [Draft2020] default as before.
 	ErrUnsupportedDraft = errors.New("unsupported $schema dialect")
 
 	// ErrNegativeBound is returned by [Compile] and [Inline] when a length or

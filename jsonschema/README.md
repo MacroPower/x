@@ -268,7 +268,8 @@ See
 Generation extracts named struct types into `$defs` and refers to each through
 `$ref`; `WithDefinitions(false)` inlines them. `Draft2020` is the default and
 `Draft7` the alternative, and `WithDraft` serves generation, validation, and
-inlining alike. See
+inlining alike; any other `Draft` value is refused with `ErrUnsupportedDraft`.
+See
 [Definitions](https://pkg.go.dev/go.jacobcolvin.com/x/jsonschema#hdr-Definitions)
 and [Drafts](https://pkg.go.dev/go.jacobcolvin.com/x/jsonschema#hdr-Drafts).
 

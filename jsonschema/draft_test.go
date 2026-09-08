@@ -1,6 +1,7 @@
 package jsonschema_test
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -116,6 +117,47 @@ func TestWithDraft_GenerateUnchanged(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, "http://json-schema.org/draft-07/schema#", s.Schema)
+}
+
+// TestUnknownDraftRefused pins that a WithDraft value naming no draft the
+// package implements fails generation, Compile, and Inline with
+// ErrUnsupportedDraft. Such a value once ran silently: generation emitted a
+// $defs-shaped body with an empty $schema (the earlier
+// TestUnknownDraftDoesNotEmit2020URI pinned only that the 2020-12 URI was
+// withheld), and Compile and Inline reported the bogus draft while walking
+// under the 2020-12 profile. A Generator built with the value reports the
+// refusal per run, like a refused WithJSONOptions.
+func TestUnknownDraftRefused(t *testing.T) {
+	t.Parallel()
+
+	type MyType struct {
+		Name string `json:"name"`
+	}
+
+	for name, draft := range map[string]jsonschema.Draft{
+		"above 2020": jsonschema.Draft(99),
+		"between":    jsonschema.Draft(-50),
+		"below 7":    jsonschema.Draft(-500),
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			opt := jsonschema.WithDraft(draft)
+			schema := &jsonschema.Schema{Type: "object"}
+
+			_, err := jsonschema.GenerateFor[MyType](t.Context(), opt)
+			require.ErrorIs(t, err, jsonschema.ErrUnsupportedDraft)
+
+			_, err = jsonschema.NewGenerator(opt).Generate(t.Context(), reflect.TypeFor[MyType]())
+			require.ErrorIs(t, err, jsonschema.ErrUnsupportedDraft)
+
+			_, err = jsonschema.Compile(t.Context(), schema, opt)
+			require.ErrorIs(t, err, jsonschema.ErrUnsupportedDraft)
+
+			_, err = jsonschema.Inline(t.Context(), schema, opt)
+			require.ErrorIs(t, err, jsonschema.ErrUnsupportedDraft)
+		})
+	}
 }
 
 // TestUnsupportedDeclaredDialect pins that a root schema declaring an official

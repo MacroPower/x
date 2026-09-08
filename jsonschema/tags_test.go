@@ -598,24 +598,6 @@ func TestDraftOrdering(t *testing.T) {
 		"adjacent integer values leave no room for intermediate drafts")
 }
 
-func TestUnknownDraftDoesNotEmit2020URI(t *testing.T) {
-	t.Parallel()
-
-	// An unknown Draft value does not emit the 2020-12 schema URI.
-	type MyType struct {
-		Name string `json:"name"`
-	}
-
-	unknownDraft := jsonschema.Draft(99)
-	s, err := jsonschema.GenerateFor[MyType](t.Context(),
-		jsonschema.WithDraft(unknownDraft),
-	)
-	require.NoError(t, err)
-
-	assert.NotEqual(t, "https://json-schema.org/draft/2020-12/schema", s.Schema,
-		"unknown Draft value should not emit the Draft2020 URI")
-}
-
 func TestVocabSetOmitsMetaData(t *testing.T) {
 	t.Parallel()
 

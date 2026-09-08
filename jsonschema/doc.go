@@ -101,9 +101,10 @@
 // Functional [GenerateOption] values configure [GenerateFor], [Generate], and
 // [NewGenerator]:
 //
-//   - [WithDraft] sets the target draft ([Draft7] or [Draft2020]). The
-//     returned [DraftOption] also serves validation and inlining, where it
-//     overrides $schema draft detection (see Drafts below).
+//   - [WithDraft] sets the target draft ([Draft7] or [Draft2020]); any other
+//     value fails with [ErrUnsupportedDraft]. The returned [DraftOption] also
+//     serves validation and inlining, where it overrides $schema draft
+//     detection (see Drafts below).
 //   - [WithTagInterpreter] registers a [TagInterpreter] under the struct tag
 //     key it reads (see Tag Interpreters below).
 //   - [WithDescriptionProvider] sets the [DescriptionProvider] that supplies
@@ -1013,8 +1014,10 @@
 //
 // # Drafts
 //
-// The package supports [Draft7] and [Draft2020] (the default). The draft
-// decides four things in the generated schema:
+// The package supports [Draft7] and [Draft2020] (the default). [WithDraft]
+// with any other value fails generation, [Compile], and [Inline] with
+// [ErrUnsupportedDraft]. The draft decides four things in the generated
+// schema:
 //
 //   - The $schema URI.
 //   - The definitions keyword, definitions or $defs.

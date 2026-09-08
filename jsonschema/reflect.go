@@ -63,6 +63,9 @@ type generatorConfig struct {
 	// honored flags probed from it sit with the other bools below.
 	jsonOpts    jsonv2.Options
 	jsonOptsErr error
+	// The WithDraft refusal for a Draft the package does not implement,
+	// surfaced per run by generate like jsonOptsErr.
+	draftErr error
 	// Probe is the [encoding/json/v2] refusal oracle: it answers whether v2
 	// refuses a struct declaration, a field, or a type under jsonOpts, and
 	// memoizes each answer. A verdict depends only on the type, the tag,
@@ -166,8 +169,13 @@ func (c *generatorConfig) forRun(ctx context.Context) *run {
 
 // generate produces the root schema for the given type.
 func (g *run) generate(t reflect.Type) (*Schema, error) {
-	// A WithJSONOptions refusal surfaces per run, so NewGenerator-then-
-	// Generate reports it the same way the one-shot entry points do.
+	// A WithDraft or WithJSONOptions refusal surfaces per run, so
+	// NewGenerator-then-Generate reports it the same way the one-shot entry
+	// points do.
+	if g.draftErr != nil {
+		return nil, g.draftErr
+	}
+
 	if g.jsonOptsErr != nil {
 		return nil, g.jsonOptsErr
 	}

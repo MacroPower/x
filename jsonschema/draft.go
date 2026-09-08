@@ -1,6 +1,10 @@
 package jsonschema
 
-import "go.jacobcolvin.com/x/jsonschema/internal/schemavet"
+import (
+	"fmt"
+
+	"go.jacobcolvin.com/x/jsonschema/internal/schemavet"
+)
 
 // Draft represents a JSON Schema draft version. Older drafts compare as
 // less than newer ones, so ordering comparisons are meaningful; the numeric
@@ -37,7 +41,10 @@ type draftOption struct {
 	d Draft
 }
 
-func (o draftOption) applyGenerate(c *generatorConfig) { c.draft = o.d }
+func (o draftOption) applyGenerate(c *generatorConfig) {
+	c.draft = o.d
+	c.draftErr = o.d.check()
+}
 
 func (o draftOption) applyValidate(v *validator) { v.draftOverride = &o.d }
 
@@ -52,12 +59,29 @@ func (o draftOption) applyInline(in *inliner) { in.draftOverride = &o.d }
 // that omit $schema (which would default to [Draft2020]) or carry one that
 // does not reflect the dialect they are written in; the $schema field itself
 // is not modified.
+//
+// A value naming no draft this package implements ([Draft7] and [Draft2020])
+// fails generation, [Compile], and [Inline] with [ErrUnsupportedDraft].
 func WithDraft(d Draft) DraftOption {
 	return draftOption{d: d}
 }
 
-// schemaURI returns the $schema URI for the draft. An unrecognized draft
-// returns the empty string rather than silently defaulting to a known URI.
+// check returns the [ErrUnsupportedDraft] refusal for a Draft outside
+// [draftProfiles], and nil for a draft the package implements. Every entry
+// point reports it before reading the draft's profile or URI, so an
+// arbitrary integer never drives a run under a guessed profile.
+func (d Draft) check() error {
+	if _, ok := draftProfiles[d]; ok {
+		return nil
+	}
+
+	return fmt.Errorf("%w: WithDraft(%d) names no draft this package implements", ErrUnsupportedDraft, int(d))
+}
+
+// schemaURI returns the $schema URI for the draft. Every entry point refuses
+// a draft outside [draftProfiles] through [Draft.check] before reaching here,
+// so the default branch is unreachable; it returns the empty string rather
+// than a known URI so a slipped value can never claim a dialect.
 func (d Draft) schemaURI() string {
 	switch d {
 	case Draft7:
@@ -168,15 +192,11 @@ var draftProfiles = map[Draft]draftProfile{
 	},
 }
 
-// profile returns the [draftProfile] for the draft. An unrecognized draft falls
-// back to the Draft 2020-12 row: a document without $schema defaults to the
-// latest draft, whose reusable schemas live under $defs.
+// profile returns the [draftProfile] for the draft. Every entry point refuses
+// a draft outside [draftProfiles] through [Draft.check] before reading the
+// profile, so the lookup never misses on a run that proceeds.
 func (d Draft) profile() draftProfile {
-	if p, ok := draftProfiles[d]; ok {
-		return p
-	}
-
-	return draftProfiles[Draft2020]
+	return draftProfiles[d]
 }
 
 // vetProfile narrows the draft's profile to the flags the structural vetting

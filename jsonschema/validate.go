@@ -1158,8 +1158,15 @@ func cloneSchema(s *Schema) *Schema {
 // root schema's $schema field. It is the single detect-then-override site the
 // validator and inliner share. Returning the override without reading $schema is
 // behavior-preserving because [detectDraft] is a pure read with no side effect.
+// An override naming no draft the package implements is refused with
+// [ErrUnsupportedDraft] rather than run under a guessed profile.
 func resolveDraft(s *Schema, override *Draft) (Draft, error) {
 	if override != nil {
+		err := override.check()
+		if err != nil {
+			return Draft2020, err
+		}
+
 		return *override, nil
 	}
 
