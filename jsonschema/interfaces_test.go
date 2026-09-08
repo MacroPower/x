@@ -198,6 +198,57 @@ func TestDescriptionProviderFuncs(t *testing.T) {
 	})
 }
 
+// quotedShapeMarshaler is an int kind carrying its own MarshalJSON, which
+// encoding/json/v2 routes the field through, ignoring json:",string".
+type quotedShapeMarshaler int
+
+func (quotedShapeMarshaler) MarshalJSON() ([]byte, error) { return []byte("7"), nil }
+
+// TestDescriptionProviderShapeMatchesInterpreter pins that the description
+// provider and a tag interpreter classify one field to the same Shape. The
+// provider's context once carried the raw json:",string" flag where the
+// interpreters' carried the probe's answer on whether the flag took, so the
+// two contexts disagreed on a marshaler-bearing flagged field.
+func TestDescriptionProviderShapeMatchesInterpreter(t *testing.T) {
+	t.Parallel()
+
+	type doc struct {
+		M quotedShapeMarshaler `json:"m,string" shape:"x"`
+		N int                  `json:"n,string" shape:"x"`
+		S string               `json:"s"        shape:"x"`
+	}
+
+	var (
+		described   = map[string]jsonschema.Shape{}
+		interpreted = map[string]jsonschema.Shape{}
+	)
+
+	provider := jsonschema.DescriptionProviderFuncs{
+		FieldFunc: func(_ context.Context, fc jsonschema.FieldContext) (string, error) {
+			described[fc.Name] = fc.Shape()
+
+			return "", nil
+		},
+	}
+
+	interpreter := jsonschema.TagInterpreterFunc(
+		func(_ context.Context, fc jsonschema.FieldContext, _ jsonschema.Tag) error {
+			interpreted[fc.Name] = fc.Shape()
+
+			return nil
+		},
+	)
+
+	_, err := jsonschema.GenerateFor[doc](t.Context(),
+		jsonschema.WithDescriptionProvider(provider),
+		jsonschema.WithTagInterpreter("shape", interpreter),
+	)
+	require.NoError(t, err)
+
+	require.Len(t, described, 3)
+	assert.Equal(t, interpreted, described)
+}
+
 func TestTagInterpreterFunc(t *testing.T) {
 	t.Parallel()
 

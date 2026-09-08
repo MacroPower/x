@@ -1518,7 +1518,7 @@ func (g *run) hookStruct(obj *node, prefix string) error {
 			continue
 		}
 
-		err := g.applyFieldDescription(obj.typ, p.fi, p.schema, parentView)
+		err := g.applyFieldDescription(obj.typ, p.fi, p.schema, parentView, p.quoted)
 		if err != nil {
 			return err
 		}
@@ -2051,15 +2051,17 @@ func (g *run) applyTypeDescription(t reflect.Type, s *Schema) error {
 // places it). The provider receives the [FieldContext] tag interpreters get,
 // with the tag pair empty and Owner the type declaring the field (see
 // [reflectkind.DeclaringType]); an empty comment leaves the description unset, and a
-// provider error aborts generation.
+// provider error aborts generation. Quoted is the probe's answer on whether
+// the json:",string" flag took, the same bit the interpreters' context
+// carries, so both contexts classify the field alike.
 func (g *run) applyFieldDescription(
-	parentType reflect.Type, fi fieldset.Field, fieldNode *node, parent *Schema,
+	parentType reflect.Type, fi fieldset.Field, fieldNode *node, parent *Schema, quoted bool,
 ) error {
 	if g.descriptionProvider == nil {
 		return nil
 	}
 
-	fc := g.fieldContext(parentType, fi, fieldNode, parent, fi.JSONString)
+	fc := g.fieldContext(parentType, fi, fieldNode, parent, quoted)
 
 	comment, err := g.descriptionProvider.FieldDescription(g.ctx, fc)
 	if err != nil {
