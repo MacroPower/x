@@ -85,6 +85,39 @@ func TestZeroValueGoCommentProvider(t *testing.T) {
 	assert.Contains(t, s.Properties["size"].Description, "documents the widget size")
 }
 
+// TestGoCommentProviderContextWithoutType pins that the built-in provider
+// answers an empty description for a caller-built context naming no type,
+// the zero TypeContext and a FieldContext with no Owner, instead of
+// dereferencing the nil reflect.Type. The generator always fills both, so only
+// a test or a wrapping provider reaches the provider this way, and the package
+// promises no exported method panics on a zero context.
+func TestGoCommentProviderContextWithoutType(t *testing.T) {
+	t.Parallel()
+
+	provider := jsonschema.NewGoCommentProvider()
+
+	tests := map[string]func(ctx context.Context) (string, error){
+		"zero TypeContext": func(ctx context.Context) (string, error) {
+			return provider.TypeDescription(ctx, jsonschema.TypeContext{})
+		},
+		"FieldContext without an Owner": func(ctx context.Context) (string, error) {
+			return provider.FieldDescription(ctx, jsonschema.FieldContext{
+				StructField: reflect.StructField{Name: "X"},
+			})
+		},
+	}
+
+	for name, lookup := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := lookup(t.Context())
+			require.NoError(t, err)
+			assert.Empty(t, got)
+		})
+	}
+}
+
 // TestEmbeddedGenericFieldDescription covers comment extraction for an embedded
 // generic instantiation. The source AST embeds the type as an index expression
 // (Box[int]) with no name identifier, so embeddedFieldName must unwrap it to

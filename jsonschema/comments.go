@@ -19,10 +19,12 @@ import (
 // is likewise extracted without descriptions even when reflection sees it. A
 // canceled or expired context is the exception: it is reported as an error,
 // aborting generation, since package loading is the cancellable work the Generate
-// context exists for. Construct it with [NewGoCommentProvider] and register
-// it with [WithDescriptionProvider]. Wrapping it composes other sources with AST
-// extraction: overrides for specific types, or a pre-extracted map
-// consulted first.
+// context exists for. A context naming no type (the zero [TypeContext], or a
+// [FieldContext] a test built without an Owner) answers an empty description.
+// Construct it with [NewGoCommentProvider] and register it with
+// [WithDescriptionProvider]. Wrapping it composes other sources with AST
+// extraction: overrides for specific types, or a pre-extracted map consulted
+// first.
 //
 // Parsed packages are cached on the provider, keyed by import path, so a
 // provider shared across Generate calls loads each package once in the steady
@@ -85,7 +87,7 @@ func NewGoCommentProvider(opts ...GoCommentProviderOption) *GoCommentProvider {
 // receive the package-level type's comment.
 func (ce *GoCommentProvider) TypeDescription(ctx context.Context, tc TypeContext) (string, error) {
 	t := tc.Type
-	if t.Name() == "" || t.PkgPath() == "" {
+	if t == nil || t.Name() == "" || t.PkgPath() == "" {
 		return "", nil
 	}
 
@@ -110,7 +112,7 @@ func (ce *GoCommentProvider) TypeDescription(ctx context.Context, tc TypeContext
 // the package-level struct's field comments.
 func (ce *GoCommentProvider) FieldDescription(ctx context.Context, fc FieldContext) (string, error) {
 	structType, fieldName := fc.Owner, fc.StructField.Name
-	if structType.Name() == "" || structType.PkgPath() == "" {
+	if structType == nil || structType.Name() == "" || structType.PkgPath() == "" {
 		return "", nil
 	}
 
