@@ -266,9 +266,10 @@ func (c *Collector) phases(t reflect.Type) (Collection, Resolution, Result, erro
 }
 
 // promoted resolves each composed embed type the walk scanned. The shadow
-// marking compares those fields against the enclosing resolution.
-func (c *Collector) promoted(col Collection) (map[reflect.Type][]Field, error) {
-	out := make(map[reflect.Type][]Field, len(col.Scanned))
+// marking compares the names each one carries against the enclosing
+// resolution.
+func (c *Collector) promoted(col Collection) (map[reflect.Type]Result, error) {
+	out := make(map[reflect.Type]Result, len(col.Scanned))
 
 	var firstErr error
 
@@ -278,7 +279,7 @@ func (c *Collector) promoted(col Collection) (map[reflect.Type][]Field, error) {
 			firstErr = err
 		}
 
-		out[ft] = r.Fields
+		out[ft] = r
 	}
 
 	return out, firstErr
@@ -786,9 +787,9 @@ func Resolve(col Collection) Resolution {
 // Classify turns each winner into a property, an allOf-composed embed, or a
 // ghost, then marks the composed embeds whose promoted names the resolution
 // took away. The promoted map carries each scanned composed embed type's own
-// resolved fields; a type absent from it was skipped as a self- or mutually
+// resolution; a type absent from it was skipped as a self- or mutually
 // composed cycle and keeps its unconditional branch.
-func Classify(res Resolution, promoted map[reflect.Type][]Field) Result {
+func Classify(res Resolution, promoted map[reflect.Type]Result) Result {
 	// Each real JSON name's outcome feeds the shadow marking below. Folding the
 	// annihilated names in first rather than in resolution order is safe
 	// because every write targets a distinct name: an annihilated name has no
@@ -864,10 +865,17 @@ func Classify(res Resolution, promoted map[reflect.Type][]Field) Result {
 // the branch must not be unconditional. The outcomes map is the enclosing
 // resolution's per-name verdict, ghost sightings included, so it already
 // replays the tag tie-break.
+//
+// The names an embed carries are its own resolved fields plus the names a
+// composition nested inside it won as ghosts. The embed's resolution flattens
+// every nested composition's subtree, however deep, so its GhostWon list holds
+// each name the embed's marshaled object takes from one, and a name a nested
+// composition lost inside the embed (to a field of the embed, or to a tie) is
+// absent from both lists and asserts nothing here.
 func markShadowedCompositions(
 	fields []Field,
 	outcomes map[string]outcome,
-	promoted map[reflect.Type][]Field,
+	promoted map[reflect.Type]Result,
 ) {
 	for i := range fields {
 		fi := &fields[i]
@@ -880,7 +888,7 @@ func markShadowedCompositions(
 		// on the pointer level.
 		ft := reflectkind.IndirectType(fi.StructField.Type)
 
-		embedFields, scanned := promoted[ft]
+		embed, scanned := promoted[ft]
 		if !scanned {
 			continue
 		}
@@ -889,44 +897,66 @@ func markShadowedCompositions(
 
 		var shadowedAny, unshadowedAny bool
 
-		for j := range embedFields {
-			p := &embedFields[j]
-			if p.ComposeViaAllOf {
-				// A nested composition's names are opaque to this analysis;
-				// assume it contributes to the marshaled object.
+		mark := func(shadowed bool) {
+			if shadowed {
+				shadowedAny = true
+			} else {
 				unshadowedAny = true
+			}
+		}
 
+		for j := range embed.Fields {
+			p := &embed.Fields[j]
+			if p.ComposeViaAllOf {
+				// A nested composition contributes no name of its own; the
+				// names it won inside the embed are in embed.GhostWon.
 				continue
 			}
 
 			// The promoted name sits at the embed's depth plus its own depth
 			// within the embed type.
-			de := embedDepth + len(p.StructField.Index)
+			mark(shadows(outcomes, p.JSONName, ft, embedDepth+len(p.StructField.Index)))
+		}
 
-			out, ok := outcomes[p.JSONName]
-
-			switch {
-			case !ok:
-				// A backstop. Every promoted name of a scanned embed is sighted
-				// in the enclosing ghost walk, so an outcome always exists.
-				// Keep the branch's claim if one ever does not.
-				unshadowedAny = true
-			case !out.annihilated && out.ghostOwner == ft && out.depth == de:
-				// This embed's own ghost won the name, so the marshaled object
-				// carries the embed's value there.
-				unshadowedAny = true
-			case out.depth <= de:
-				// A real field won the tie-break, the name annihilated, or
-				// another embed claimed it at or above this depth.
-				shadowedAny = true
-			default:
-				// A backstop. The ghost walk cannot sight a name deeper than
-				// the embed promotes it, so no outcome sits deeper than de.
-				unshadowedAny = true
-			}
+		for _, name := range embed.GhostWon {
+			// The enclosing ghost walk flattens the nested composition under
+			// this embed's ownership, so the sighting carries ft as its owner
+			// at the depth the embed promotes it from. That depth is not
+			// recorded, and the owner alone settles the verdict: the walk
+			// orders the embed's subtree the way the embed's own resolution
+			// did, so a winner owned by ft is the sighting that won inside
+			// the embed.
+			mark(shadows(outcomes, name, ft, -1))
 		}
 
 		fi.Shadowed = shadowedAny
 		fi.ShadowPartial = shadowedAny && unshadowedAny
+	}
+}
+
+// shadows reports whether the enclosing resolution took name away from the
+// composed embed ft, which promotes it at depth de. A negative de leaves the
+// depth unknown, and the owner alone decides.
+func shadows(outcomes map[string]outcome, name string, ft reflect.Type, de int) bool {
+	out, ok := outcomes[name]
+
+	switch {
+	case !ok:
+		// A backstop. Every name a scanned embed carries is sighted in the
+		// enclosing ghost walk, so an outcome always exists. Keep the branch's
+		// claim if one ever does not.
+		return false
+	case !out.annihilated && out.ghostOwner == ft && (de < 0 || out.depth == de):
+		// This embed's own ghost won the name, so the marshaled object carries
+		// the embed's value there.
+		return false
+	case de < 0 || out.depth <= de:
+		// A real field won the tie-break, the name annihilated, or another
+		// embed claimed it at or above this depth.
+		return true
+	default:
+		// A backstop. The ghost walk cannot sight a name deeper than the embed
+		// promotes it, so no outcome sits deeper than de.
+		return false
 	}
 }

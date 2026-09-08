@@ -198,12 +198,51 @@ type excludedFields struct {
 
 // nestedComposition embeds Deep, whose own Epsilon the outer field shadows.
 // Composing both Deep and Base leaves the nested composition of Base as Deep's
-// only unshadowed contribution, the one arm of the shadow marking no other
-// roster type reaches.
+// only unshadowed contribution, which reaches the shadow marking through
+// Deep's ghost-won names.
 type nestedComposition struct {
 	Deep
 
 	Epsilon int `json:"epsilon"`
+}
+
+// Inner is the innermost of two composed levels; see Wrapper.
+type Inner struct {
+	X int `json:"x"`
+}
+
+// Wrapper embeds Inner and nothing else. Composing both makes Inner's name
+// reach an enclosing type through two composed levels, where only Wrapper's
+// ghost-won names carry it to the shadow marking.
+type Wrapper struct {
+	Inner
+}
+
+// WrapperShadows takes Inner's name with a field of its own, so composing
+// both leaves Inner shadowed inside WrapperShadows and its name absent from
+// what WrapperShadows carries outward.
+type WrapperShadows struct {
+	Inner
+
+	X int `json:"x"`
+}
+
+// nestedShadow shadows, with a real field, the name Wrapper carries from the
+// composition nested inside it. The shadow marking once treated a nested
+// composition as opaque and left Wrapper's branch unconditional, which
+// asserted Inner's integer against the outer string.
+type nestedShadow struct {
+	Wrapper
+
+	X string `json:"x"`
+}
+
+// nestedShadowInside embeds WrapperShadows, whose own X wins the name, so
+// the enclosing resolution takes nothing away from it.
+type nestedShadowInside struct {
+	WrapperShadows
+
+	Y int `json:"y"`
 }
 
 // NonStructOwner embeds a non-struct, so composing it exercises the ghost flags
@@ -399,6 +438,8 @@ var (
 		"excluded fields":       reflect.TypeFor[excludedFields](),
 		"string-coerced fields": reflect.TypeFor[stringOptFields](),
 		"nested composition":    reflect.TypeFor[nestedComposition](),
+		"nested shadow":         reflect.TypeFor[nestedShadow](),
+		"nested shadow inside":  reflect.TypeFor[nestedShadowInside](),
 		"allOf name clash":      reflect.TypeFor[allOfNameClash](),
 		"composed non-struct":   reflect.TypeFor[composedNonStruct](),
 		"shadowed pointer":      reflect.TypeFor[shadowedPointerEmbed](),
@@ -429,6 +470,9 @@ var (
 		"WrapA":           reflect.TypeFor[WrapA](),
 		"NonStructOwner":  reflect.TypeFor[NonStructOwner](),
 		"FallbackCarrier": reflect.TypeFor[FallbackCarrier](),
+		"Inner":           reflect.TypeFor[Inner](),
+		"Wrapper":         reflect.TypeFor[Wrapper](),
+		"WrapperShadows":  reflect.TypeFor[WrapperShadows](),
 		"Alpha":           reflect.TypeFor[fuzzshape.Alpha](),
 		"Beta":            reflect.TypeFor[fuzzshape.Beta](),
 	}
@@ -450,9 +494,10 @@ var (
 		"alpha+beta":       {"Alpha", "Beta"},
 		"non-struct owner": {"NonStructOwner"},
 		"fallback carrier": {"FallbackCarrier"},
+		"wrappers":         {"Inner", "Wrapper", "WrapperShadows"},
 		"all embeds": {
 			"Base", "Other", "Deep", "TaggedShared", "WrapA", "NonStructOwner",
-			"FallbackCarrier", "Alpha", "Beta",
+			"FallbackCarrier", "Alpha", "Beta", "Inner", "Wrapper", "WrapperShadows",
 		},
 	}
 )
@@ -1098,8 +1143,31 @@ func TestClassificationPins(t *testing.T) {
 			},
 			// The outer Epsilon shadows the one Deep promotes, so Deep's only
 			// unshadowed contribution is the composition of Base nested inside
-			// it, whose names the shadow marking treats as opaque.
+			// it, whose names Deep's ghost wins here.
 			ghostWon: []string{"alpha", "beta"},
+		},
+		"nested composition shadowed by an outer field": {
+			typ:      reflect.TypeFor[nestedShadow](),
+			composed: []string{"Wrapper", "Inner"},
+			want: []wantField{
+				{index: []int{0}, compose: true, shadowed: true},
+				{name: "x", index: []int{1}},
+			},
+			// Wrapper carries only the name Inner's ghost won inside it, and
+			// the outer X takes that name, so Wrapper's branch is conditional
+			// and nothing of it survives to keep the object open.
+		},
+		"nested composition shadowed inside the composed embed": {
+			typ:      reflect.TypeFor[nestedShadowInside](),
+			composed: []string{"WrapperShadows", "Inner"},
+			want: []wantField{
+				{index: []int{0}, compose: true},
+				{name: "y", index: []int{1}},
+			},
+			// WrapperShadows' own X wins the name inside it and again here,
+			// so the marshaled object carries WrapperShadows' value and its
+			// branch stays unconditional.
+			ghostWon: []string{"x"},
 		},
 		"field named like a composition key": {
 			typ:      reflect.TypeFor[allOfNameClash](),
@@ -1218,12 +1286,11 @@ func TestPhasesComposeIntoOf(t *testing.T) {
 
 				// A caller builds the shadow marking's input from
 				// Collection.Scanned, so build it the same way here.
-				promoted := map[reflect.Type][]Field{}
+				promoted := map[reflect.Type]Result{}
 				for _, ft := range col.Scanned {
 					// A scanned embed that v2 refuses still classifies through
 					// its recovered output.
-					fields, _ := c.Of(ft) //nolint:errcheck // See the comment above.
-					promoted[ft] = fields.Fields
+					promoted[ft], _ = c.Of(ft) //nolint:errcheck // See the comment above.
 				}
 
 				whole, wholeErr := c.Of(typ)

@@ -254,6 +254,13 @@ type shadowedUntagged struct {
 	X int
 }
 
+// shadowedProvidedNested composes shadowedProvided inside itself, so the
+// name X reaches an enclosing struct through two composed levels and only
+// the outer branch carries it there.
+type shadowedProvidedNested struct {
+	shadowedProvided //nolint:unused // Embedded only; exercised via reflection.
+}
+
 // TestGenerateShadowedComposedEmbed pins the module's core accept property
 // for allOf-composed embeds under field shadowing: encoding/json resolves a
 // composed embed's promoted fields normally, so a shallower outer field wins
@@ -445,6 +452,39 @@ func TestGenerateShadowedComposedEmbed(t *testing.T) {
 
 		require.NoError(t, v.ValidateJSON(t.Context(), data),
 			"neither branch may stay unconditionally required")
+	})
+
+	// The shadow marking once treated a composition nested inside a composed
+	// embed as opaque, so the outer branch stayed unconditional and asserted
+	// the nested embed's integer against the outer string.
+	t.Run("nested composition shadowed by an outer field", func(t *testing.T) {
+		t.Parallel()
+
+		type outer struct {
+			shadowedProvidedNested //nolint:unused // Embedded only; exercised via reflection.
+
+			X string `json:"X"`
+		}
+
+		s, err := jsonschema.GenerateFor[outer](t.Context(),
+			jsonschema.WithTypeSchema(reflect.TypeFor[shadowedProvided](), provided),
+			jsonschema.WithTypeSchema(reflect.TypeFor[shadowedProvidedNested](), provided))
+		require.NoError(t, err)
+
+		require.Len(t, s.AllOf, 1)
+		require.Len(t, s.AllOf[0].AnyOf, 2, "the shadowed branch is conditional")
+		assert.NotEmpty(t, s.AllOf[0].AnyOf[0].Ref)
+		assert.Equal(t, &jsonschema.Schema{}, s.AllOf[0].AnyOf[1], "the escape arm is the true schema")
+
+		v, err := jsonschema.Compile(t.Context(), s)
+		require.NoError(t, err)
+
+		data, err := json.Marshal(outer{X: "str"})
+		require.NoError(t, err)
+		require.JSONEq(t, `{"X":"str"}`, string(data))
+
+		require.NoError(t, v.ValidateJSON(t.Context(), data),
+			"the generated schema must accept the type's own marshaled JSON")
 	})
 
 	t.Run("unshadowed embed keeps the unconditional branch", func(t *testing.T) {
