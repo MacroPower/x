@@ -1035,12 +1035,14 @@
 // schema documents that omit $schema or carry one that does not reflect their
 // dialect.
 //
-// Detection recognizes the Draft-07 and 2020-12 URIs. A document omitting
-// $schema, or carrying a custom metaschema URI, defaults to [Draft2020]. A
-// $schema declaring an official dialect this package does not implement
-// (2019-09, draft-06, draft-04, or draft-03) fails [Compile] and [Inline]
-// with [ErrUnsupportedDraft], so neither processes it under different
-// semantics. A [WithDraft] override processes such a document explicitly.
+// Detection recognizes the Draft-07 and 2020-12 URIs, in the schema and
+// hyper-schema spellings alike; the hyper-schema keywords (links, base) stay
+// unknown keywords. A document omitting $schema, or carrying a custom
+// metaschema URI, defaults to [Draft2020]. A $schema declaring an official
+// dialect this package does not implement (2019-09, draft-06, draft-04, or
+// draft-03, in either spelling) fails [Compile] and [Inline] with
+// [ErrUnsupportedDraft], so neither processes it under different semantics.
+// A [WithDraft] override processes such a document explicitly.
 //
 // # Null Encoding
 //

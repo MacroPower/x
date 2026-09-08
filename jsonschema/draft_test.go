@@ -13,7 +13,10 @@ import (
 // TestWithDraft_ValidationOverride covers WithDraft as a ValidateOption: it
 // overrides the draft otherwise detected from the root schema's $schema.
 // Format assertion makes the draft observable: Draft-07 asserts format by
-// default, while Draft 2020-12 treats it as annotation-only.
+// default, while Draft 2020-12 treats it as annotation-only. The
+// hyper-schema cases pin that detection reads the hyper-schema meta-schema
+// URI of each draft like its schema URI; the draft-07 one once fell through
+// to the custom-metaschema default and ran under 2020-12.
 func TestWithDraft_ValidationOverride(t *testing.T) {
 	t.Parallel()
 
@@ -32,6 +35,14 @@ func TestWithDraft_ValidationOverride(t *testing.T) {
 		"draft-07 $schema asserts": {
 			schemaURI: "http://json-schema.org/draft-07/schema#",
 			valid:     false,
+		},
+		"draft-07 hyper-schema $schema asserts": {
+			schemaURI: "http://json-schema.org/draft-07/hyper-schema#",
+			valid:     false,
+		},
+		"2020-12 hyper-schema $schema annotates": {
+			schemaURI: "https://json-schema.org/draft/2020-12/hyper-schema",
+			valid:     true,
 		},
 		"Draft2020 override beats draft-07 $schema": {
 			schemaURI: "http://json-schema.org/draft-07/schema#",
@@ -165,16 +176,22 @@ func TestUnknownDraftRefused(t *testing.T) {
 // ErrUnsupportedDraft instead of being silently processed as 2020-12 (under
 // which, for example, a 2019-09 $recursiveRef lands in Extra and asserts
 // nothing). A WithDraft override processes the document explicitly, and a
-// non-official custom metaschema URI keeps the 2020-12 default.
+// non-official custom metaschema URI keeps the 2020-12 default. The
+// hyper-schema URIs of those drafts are the same dialects and once slipped
+// through as custom metaschemas.
 func TestUnsupportedDeclaredDialect(t *testing.T) {
 	t.Parallel()
 
 	for name, uri := range map[string]string{
 		"2019-09":                "https://json-schema.org/draft/2019-09/schema",
 		"2019-09 with fragment":  "https://json-schema.org/draft/2019-09/schema#",
+		"2019-09 hyper-schema":   "https://json-schema.org/draft/2019-09/hyper-schema",
 		"draft-06":               "http://json-schema.org/draft-06/schema#",
+		"draft-06 hyper-schema":  "http://json-schema.org/draft-06/hyper-schema#",
 		"draft-04":               "http://json-schema.org/draft-04/schema#",
+		"draft-04 hyper-schema":  "http://json-schema.org/draft-04/hyper-schema#",
 		"draft-03":               "http://json-schema.org/draft-03/schema#",
+		"draft-03 hyper-schema":  "http://json-schema.org/draft-03/hyper-schema#",
 		"draft-04 https no frag": "https://json-schema.org/draft-04/schema",
 	} {
 		t.Run(name, func(t *testing.T) {

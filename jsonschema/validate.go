@@ -1173,19 +1173,20 @@ func resolveDraft(s *Schema, override *Draft) (Draft, error) {
 	return detectDraft(s)
 }
 
-// detectDraft determines the draft from the root schema's $schema field. A
-// declared official dialect this package does not implement is an error
-// rather than a guess (see [ErrUnsupportedDraft]); any other unrecognized URI
-// is a custom metaschema and keeps the [Draft2020] default.
+// detectDraft determines the draft from the root schema's $schema field. It
+// recognizes each draft's schema and hyper-schema meta-schema URIs alike, in
+// every published spelling (see [dialectPath]); the hyper-schema keywords
+// (links, base) stay unknown keywords. A declared official dialect this
+// package does not implement is an error rather than a guess (see
+// [ErrUnsupportedDraft]); any other unrecognized URI is a custom metaschema
+// and keeps the [Draft2020] default.
 func detectDraft(s *Schema) (Draft, error) {
-	switch s.Schema {
-	case Draft7.schemaURI(),
-		"http://json-schema.org/draft-07/schema",
-		"https://json-schema.org/draft-07/schema#",
-		"https://json-schema.org/draft-07/schema":
+	switch dialectPath(s.Schema) {
+	case "json-schema.org/draft-07/schema",
+		"json-schema.org/draft-07/hyper-schema":
 		return Draft7, nil
-	case Draft2020.schemaURI(),
-		"https://json-schema.org/draft/2020-12/schema#":
+	case "json-schema.org/draft/2020-12/schema",
+		"json-schema.org/draft/2020-12/hyper-schema":
 		return Draft2020, nil
 	}
 
@@ -1196,19 +1197,30 @@ func detectDraft(s *Schema) (Draft, error) {
 	return Draft2020, nil
 }
 
-// unsupportedDialect reports whether uri names an official json-schema.org
-// dialect this package does not implement, in any of its published spellings
-// (http or https scheme, with or without the trailing empty fragment).
-func unsupportedDialect(uri string) bool {
+// dialectPath normalizes a $schema URI to the scheme-less, fragment-less path
+// every published spelling of an official json-schema.org dialect shares:
+// the http and https schemes and the trailing empty fragment are stripped.
+func dialectPath(uri string) string {
 	uri = strings.TrimSuffix(uri, "#")
 	uri = strings.TrimPrefix(uri, "http://")
 	uri = strings.TrimPrefix(uri, "https://")
 
-	switch uri {
+	return uri
+}
+
+// unsupportedDialect reports whether uri names an official json-schema.org
+// dialect this package does not implement, in any of its published spellings
+// (see [dialectPath]) and in the schema and hyper-schema forms alike.
+func unsupportedDialect(uri string) bool {
+	switch dialectPath(uri) {
 	case "json-schema.org/draft/2019-09/schema",
+		"json-schema.org/draft/2019-09/hyper-schema",
 		"json-schema.org/draft-06/schema",
+		"json-schema.org/draft-06/hyper-schema",
 		"json-schema.org/draft-04/schema",
-		"json-schema.org/draft-03/schema":
+		"json-schema.org/draft-04/hyper-schema",
+		"json-schema.org/draft-03/schema",
+		"json-schema.org/draft-03/hyper-schema":
 		return true
 	default:
 		return false
