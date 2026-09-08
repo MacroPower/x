@@ -1341,7 +1341,8 @@
 //     ignored). The media-type assertion judges the decoded content as
 //     application/json per RFC 8259, so duplicate member names and invalid
 //     UTF-8 pass there even though the validation entry points reject both
-//     in the instance document itself.
+//     in the instance document itself. The keywords belong to the content
+//     vocabulary and are skipped when it is inactive.
 //   - [WithVocabularies] directly specifies the active vocabularies for the
 //     validation run. The listed URIs are active, and every other vocabulary
 //     is inactive.

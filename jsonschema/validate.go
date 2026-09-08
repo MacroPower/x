@@ -77,7 +77,11 @@ func WithFormats(enabled bool) ValidateOption {
 // (per the JSON Schema spec, which makes content assertion optional). With this
 // option, a contentEncoding of base64 must decode and a contentMediaType of
 // application/json must be valid JSON; other encodings and media types remain
-// annotations. Non-string instances are unaffected. Mirrors [WithFormats].
+// annotations. Non-string instances are unaffected. Like [WithFormats] it is
+// an opt-in, but the content keywords belong to the content vocabulary, so
+// the option asserts nothing when a [WithVocabularies] list or a
+// metaschema's $vocabulary leaves that vocabulary inactive (the default set
+// includes it).
 func WithContent(enabled bool) ValidateOption {
 	return validateOptionFunc(func(v *validator) { v.contentEnabled = enabled })
 }
