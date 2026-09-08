@@ -1868,13 +1868,14 @@ func TestTrailingDiveIsNoOp(t *testing.T) {
 	})
 }
 
-func TestMissingEndkeysStillAppliesValueConstraints(t *testing.T) {
+// TestUnmatchedKeysRunsToEndOfTag pins the reading go-playground gives a keys
+// with no endkeys: its parser collects every later part into the key block,
+// so min=3 here constrains the keys and never the values. The interpreter
+// used to drop the keys marker instead and emit minLength 3 on the value
+// schema, which rejected {"abc": "x"} where go-playground accepts it.
+func TestUnmatchedKeysRunsToEndOfTag(t *testing.T) {
 	t.Parallel()
 
-	// A keys marker without a matching endkeys is malformed. Rather than
-	// swallowing every later constraint, the keys marker is ignored so the
-	// remaining constraints still apply to the value schema. Here min=3 reaches
-	// the value's minLength.
 	type MyType struct {
 		Data map[string]string `json:"data" validate:"dive,keys,min=1,min=3"`
 	}
@@ -1889,8 +1890,8 @@ func TestMissingEndkeysStillAppliesValueConstraints(t *testing.T) {
 
 	require.NotNil(t, prop.AdditionalProperties,
 		"map has an additionalProperties schema")
-	assert.NotNil(t, prop.AdditionalProperties.MinLength,
-		"min=3 after the unmatched keys marker applies to the value's minLength")
+	assert.Nil(t, prop.AdditionalProperties.MinLength,
+		"every constraint after the unmatched keys marker is a key constraint, so none reaches the value schema")
 }
 
 func TestExplicitJSONSchemaTagTakesPrecedenceOverValidate(t *testing.T) {

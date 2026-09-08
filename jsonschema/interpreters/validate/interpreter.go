@@ -138,14 +138,13 @@ func applyParts(parts []string, field jsonschema.FieldContext) error {
 		}
 
 		// Map key validators: constraints between keys and endkeys apply to
-		// the map's keys (not modeled here) and are skipped. A keys without a
-		// matching endkeys is malformed; rather than swallowing every later
-		// constraint, the keys marker is ignored so the remaining constraints
-		// still apply to the value schema.
+		// the map's keys (not modeled here) and are skipped. A keys with no
+		// endkeys runs to the end of the tag, as it does in go-playground,
+		// which collects every later part into the key block; applying them
+		// to the value schema instead would emit a constraint the tag never
+		// places there.
 		if part == keysTag {
-			if hasEndkeys(parts[idx+1:]) {
-				inKeys = true
-			}
+			inKeys = true
 
 			continue
 		}
@@ -361,17 +360,6 @@ func hasConstraint(parts []string) bool {
 		}
 
 		return true
-	}
-
-	return false
-}
-
-// hasEndkeys reports whether parts contains an "endkeys" marker.
-func hasEndkeys(parts []string) bool {
-	for _, p := range parts {
-		if strings.TrimSpace(p) == endkeysTag {
-			return true
-		}
 	}
 
 	return false

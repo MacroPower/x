@@ -278,7 +278,9 @@
 // conditional validators (eqfield, required_if, skip_unless, ...), control tags
 // that govern when validation runs (omitempty, structonly, ...), and the
 // constraints inside a keys...endkeys block (map-key constraints are not
-// modeled). A control tag, dive, keys, and endkeys are each matched as a whole
+// modeled). A keys with no endkeys runs to the end of the tag, as it does in
+// go-playground, so every later constraint is a key constraint and is
+// skipped. A control tag, dive, keys, and endkeys are each matched as a whole
 // part, as go-playground matches them, so one carrying a parameter
 // (omitempty=) is an unrecognized validator rather than the tag it starts
 // with. A trailing dive with nothing after it applies nothing to the
