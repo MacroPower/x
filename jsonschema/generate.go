@@ -156,6 +156,9 @@ func (p exactTypeProvider) SchemaForType(_ context.Context, tc TypeContext) (Typ
 // Providers are consulted newest registration first, so if called multiple
 // times for the same type, the last registration wins. Every call adds a
 // registration; a zero [TypeSchema] marks the type unrestricted ({}).
+// Resolution strips every pointer level first, so a registration for *T is
+// never consulted: register T and declare the null stance through
+// [TypeSchema.Nullability].
 //
 // The override's [TypeSchema.Value] (or [TypeSchema.Verbatim]) is copied before
 // use: its sub-schemas are deep-copied and its Enum, Const, Default, and Extra

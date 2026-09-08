@@ -300,6 +300,12 @@
 //     implementation, for types implementing no JSON marshaler interface.
 //  6. Kind-based reflection.
 //
+// Resolution runs on the type with every pointer level removed, and so does
+// every hook: a [TypeContext.Type] is never a pointer type, and a
+// [WithTypeSchema] or [TypeSchemaProvider] registration for *T is never
+// consulted. Register T and declare the null stance through
+// [TypeSchema.Nullability].
+//
 // A direct JSON marshaler implementation ([encoding/json/v2.MarshalerTo] or
 // [encoding/json.Marshaler]) is not in this chain. Kind-based reflection
 // handles a type that implements one directly, since the method can return

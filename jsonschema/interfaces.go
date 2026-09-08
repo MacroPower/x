@@ -61,7 +61,9 @@ type JSONSchemaExtender interface {
 // type-level counterpart of [FieldContext]: a struct rather than positional
 // parameters, so the context can grow without changing the hook signatures.
 type TypeContext struct {
-	// Type is the Go type whose schema is being resolved or extended.
+	// Type is the Go type whose schema is being resolved or extended. It is
+	// never a pointer type: resolution strips every pointer level first and
+	// records pointer-ness as a fact of the occurrence.
 	Type reflect.Type
 	// Draft is the target draft of the generation run, so a hook can emit
 	// draft-appropriate keywords (for example dependentRequired under
