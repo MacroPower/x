@@ -278,6 +278,9 @@ func TestType(t *testing.T) {
 		"float key":           {typ: reflect.TypeFor[map[float64]int]()},
 		"text marshaler key":  {typ: reflect.TypeFor[map[textKey]int]()},
 		"pointer text key":    {typ: reflect.TypeFor[map[*textKey]int]()},
+		"pointer int key":     {typ: reflect.TypeFor[map[*int]int]()},
+		"pointer string key":  {typ: reflect.TypeFor[map[*string]int]()},
+		"pointer time key":    {typ: reflect.TypeFor[map[*time.Time]int]()},
 		"time":                {typ: reflect.TypeFor[time.Time]()},
 		"panicking marshaler": {typ: reflect.TypeFor[panicker]()},
 		"panicking marshaler ptr": {
@@ -297,6 +300,12 @@ func TestType(t *testing.T) {
 		"bool key":       {typ: reflect.TypeFor[map[bool]int](), err: ErrMapKey},
 		"struct key":     {typ: reflect.TypeFor[map[struct{ A int }]int](), err: ErrMapKey},
 		"duration key":   {typ: reflect.TypeFor[map[time.Duration]int](), err: ErrMapKey},
+		"pointer bool key": {
+			typ: reflect.TypeFor[map[*bool]int](), err: ErrMapKey,
+		},
+		"pointer to array key": {
+			typ: reflect.TypeFor[map[*[2]int]int](), err: ErrMapKey,
+		},
 		"element fault belongs to the element": {
 			typ: reflect.TypeFor[[]func()](),
 		},

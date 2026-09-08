@@ -336,6 +336,36 @@ func TestGenerateFor_UnsupportedMapKey(t *testing.T) {
 	assert.Equal(t, "object", f.Type)
 }
 
+// TestGenerateFor_PointerMapKey pins that a map keyed by a pointer to a
+// nameable kind generates, as v2 marshals it by naming the pointee. The
+// probe once refused such a map because its periodic fill handed two
+// distinct pointer keys one pointee, and the resulting duplicate member
+// name, a fault of the filled value rather than the type, read as a refusal
+// of the type.
+func TestGenerateFor_PointerMapKey(t *testing.T) {
+	t.Parallel()
+
+	one, two := 1, 2
+
+	data, err := json.Marshal(map[*int]int{&one: 1, &two: 2})
+	require.NoError(t, err, "encoding/json/v2 names the pointee")
+
+	s, err := jsonschema.GenerateFor[map[*int]int](t.Context())
+	require.NoError(t, err)
+
+	got, err := json.Marshal(s)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{
+		"$schema":"https://json-schema.org/draft/2020-12/schema",
+		"type":"object",
+		"additionalProperties":{"type":"integer"}
+	}`, string(got))
+	require.NoError(t, validateJSON(t.Context(), s, data))
+
+	_, err = jsonschema.GenerateFor[map[*[2]int]int](t.Context())
+	require.ErrorIs(t, err, jsonschema.ErrUnsupportedMapKey, "a pointer to an unnameable kind stays refused")
+}
+
 // TestGenerateFor_DurationMapKeyRefused pins the scope of the duration
 // map-key refusal: the exact time.Duration key is refused, since v2's native
 // duration codec pre-empts the integer-kind key encoding and has no default

@@ -161,7 +161,12 @@ func New(opts json.Options) *Probe {
 		intercept[encoding.TextMarshaler](),
 	)
 
-	joined := json.WithMarshalers(marshalers)
+	// The fill draws every scalar from a periodic blob, so two keys of one
+	// map can name the same member (two distinct *int keys with one pointee,
+	// say). A duplicate member name is a fault of the filled value, never of
+	// the type. The probe allows it after the caller's options, which keeps
+	// a caller's own setting from turning it back into a refusal.
+	joined := json.JoinOptions(json.WithMarshalers(marshalers), jsontext.AllowDuplicateNames(true))
 	if opts != nil {
 		joined = json.JoinOptions(opts, joined)
 	}
@@ -187,9 +192,9 @@ func intercept[T any]() *json.Marshalers {
 		}
 
 		if inNamePosition(enc) {
-			// A null is not a member name, and two equal names are a
-			// duplicate-name fault, so the stand-in name is the unique
-			// output offset.
+			// A null is not a member name, so the stand-in name is the
+			// unique output offset, which keeps the output well-formed
+			// under the duplicate-name allowance.
 			return enc.WriteToken(jsontext.String(strconv.FormatInt(enc.OutputOffset(), 10)))
 		}
 

@@ -56,7 +56,8 @@
 //     [time.Duration], which v2's native codec refuses with no format.
 //   - [ErrUnsupportedMapKey] reports a map key [encoding/json/v2] cannot
 //     encode as an object member name on the probe's filled value. V2 accepts
-//     a string, integer, or float kind and any marshaler-bearing key. It
+//     a string, integer, or float kind, a pointer to one of those (it names
+//     the pointee), and any marshaler-bearing key. It
 //     refuses the exact [time.Duration] key, since its native duration codec
 //     pre-empts the integer-kind encoding, and it refuses the nil the probe
 //     fills an interface-kind key with, though at run time it accepts such a
@@ -216,7 +217,9 @@
 //     marshals as {} under the defaults, so it admits no null. Under
 //     [WithJSONOptions] with FormatNilMapAsNull every map occurrence admits
 //     null. K must be a string, integer, or float kind, or carry a marshaler
-//     method (through its pointer method set included). A key v2 cannot name
+//     method (through its pointer method set included), or be a pointer to
+//     such a kind; a nil pointer key is a marshal-time fault the probe's
+//     filled value never holds, so the type generates. A key v2 cannot name
 //     returns [ErrUnsupportedMapKey], and so does the exact [time.Duration]
 //     key, whose native v2 codec pre-empts the integer-kind encoding.
 //   - An interface type produces the unrestricted schema ({}). A nil
