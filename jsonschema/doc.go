@@ -1698,7 +1698,10 @@
 // The run reports an unresolvable local fragment ref the same way when it sits
 // inside a document first fetched during that run or inside a schema reached
 // through an unknown keyword. Inside a document Compile checked, the run skips
-// such a ref, since Compile already rejected the broken ones.
+// such a ref, since Compile already rejected the broken ones. A run starts
+// from the JSON-pointer targets the compile-time walk registered, so an
+// identifier one of them declares resolves in the run as it did at compile
+// time, whichever properties the instance holds.
 //
 // A reference that leads the run back into a schema it is already validating
 // at the same instance position would never return, so the second entry

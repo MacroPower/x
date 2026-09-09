@@ -341,6 +341,12 @@ type validator struct {
 	// forInstance and the inliner each derive their own.
 	refSession *refresolve.Session
 
+	// The fallback registrations the compile-time walk made, taken once the
+	// walk is done and seeded into every run's session, so a reference the
+	// walk resolved through a JSON-pointer target resolves the same way in
+	// a run whichever properties the instance holds.
+	compiledFallback refresolve.FallbackState
+
 	// The remote-fetch strategy passed to refSession resolution. On the compiled
 	// proto it writes the shared refReg directly (so compile-time fetches persist
 	// into the compiled registry); on a per-run session it clones the registry
@@ -616,6 +622,8 @@ func (v *validator) forInstance(ctx context.Context) *validator {
 	// as an error wrapping [ErrRefResolve], matching the
 	// late-fetched-document vet.
 	rv.refSession = v.refReg.NewSession(newFallbackVet(rv.vetProfile(), true))
+	rv.refSession.InheritFallback(v.compiledFallback)
+
 	if rv.profile.dynamicRef {
 		rv.refSession.SeedDynamicScope(rv.refSession.SchemaBase(rv.root))
 	}
@@ -1381,6 +1389,7 @@ func Compile(ctx context.Context, schema *Schema, opts ...ValidateOption) (*Vali
 	// supplies its own through forInstance, which overwrites the session and
 	// the fetch before any walk reads them. The fetch goes too, since it
 	// closes over both the session and the context.
+	v.compiledFallback = v.refSession.FallbackState()
 	v.ctx = nil
 	v.refSession = nil
 	v.refFetch = nil

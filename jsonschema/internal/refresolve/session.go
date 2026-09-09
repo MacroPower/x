@@ -1,6 +1,8 @@
 package refresolve
 
 import (
+	"maps"
+
 	"github.com/google/jsonschema-go/jsonschema"
 
 	"go.jacobcolvin.com/x/jsonschema/internal/jsonptr"
@@ -538,6 +540,50 @@ func (s *Session) RegisterFallbackDocument(doc schemavet.Doc, claimant string) e
 	s.mergeFallback(doc.Frozen(), false)
 
 	return nil
+}
+
+// FallbackState is the fallback registrations a session holds, exported so a
+// later session can start from them through [Session.InheritFallback]. The
+// compile-time walk materializes JSON-pointer targets in the order references
+// reach them, and a reference to an identifier one declares resolves only
+// once that target is registered; a run inheriting the walk's registrations
+// resolves the same references the walk did, whichever properties the
+// instance holds. The maps are shared with the session that produced them,
+// so the caller takes the state only from a session that writes no more.
+type FallbackState struct {
+	uri      map[uriref.DocKey]*jsonschema.Schema
+	anchor   map[uriref.AnchorKey]*jsonschema.Schema
+	baseURIs map[*jsonschema.Schema]uriref.DocKey
+	nodes    map[*jsonschema.Schema]*schemavet.Frozen
+	minted   map[*jsonschema.Schema]schemavet.Node
+}
+
+// FallbackState returns the session's fallback registrations.
+func (s *Session) FallbackState() FallbackState {
+	return FallbackState{
+		uri:      s.fallbackURI,
+		anchor:   s.fallbackAnchor,
+		baseURIs: s.fallbackBaseURIs,
+		nodes:    s.fallbackNodes,
+		minted:   s.fallbackMinted,
+	}
+}
+
+// InheritFallback seeds a fresh session's fallback registrations from state,
+// copying every table so the session's own registrations never write the
+// tables the state shares. A session that has registered anything already
+// keeps its tables; the seed is for a session that has resolved nothing yet.
+// An empty state seeds nothing, so the common case allocates nothing.
+func (s *Session) InheritFallback(state FallbackState) {
+	if s.fallbackBaseURIs != nil || state.baseURIs == nil {
+		return
+	}
+
+	s.fallbackURI = maps.Clone(state.uri)
+	s.fallbackAnchor = maps.Clone(state.anchor)
+	s.fallbackBaseURIs = maps.Clone(state.baseURIs)
+	s.fallbackNodes = maps.Clone(state.nodes)
+	s.fallbackMinted = maps.Clone(state.minted)
 }
 
 // RegisterFallback records a schema the JSON-pointer fallback materialized:

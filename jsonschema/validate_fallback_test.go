@@ -211,6 +211,44 @@ func TestFallbackTargetConstExactInLateFetchedDocument(t *testing.T) {
 // fallback: schemas carried inside unknown keywords, which the typed root
 // pass never reaches. Without the extension such a target compiles cleanly
 // and then silently mis-validates.
+// TestAnchorInFallbackTargetResolvesEveryRun pins that a reference to an
+// anchor declared inside an unknown keyword resolves in a run the way it did
+// at compile time. The compile-time walk reaches "#/x-defs/anch" first, which
+// materializes the target and registers its anchor, so "#anchor1" resolves
+// and Compile succeeds. A run used to start with no registrations, so the
+// anchor resolved only after the instance's own "a" member drove the pointer
+// ref, and {"b": 1} passed while {"a": "s", "b": 1} failed.
+func TestAnchorInFallbackTargetResolvesEveryRun(t *testing.T) {
+	t.Parallel()
+
+	schema, err := jsonschema.ParseSchema([]byte(`{
+		"properties": {
+			"a": {"$ref": "#/x-defs/anch"},
+			"b": {"$ref": "#anchor1"}
+		},
+		"x-defs": {"anch": {"$anchor": "anchor1", "type": "string"}}
+	}`))
+	require.NoError(t, err)
+
+	v, err := jsonschema.Compile(t.Context(), schema)
+	require.NoError(t, err)
+
+	require.NoError(t, v.Validate(t.Context(), map[string]any{"b": "s"}))
+
+	for name, instance := range map[string]map[string]any{
+		"without the pointer-driven member": {"b": 1},
+		"with the pointer-driven member":    {"a": "s", "b": 1},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := v.Validate(t.Context(), instance)
+			require.Error(t, err, "b must be a string whichever members the instance holds")
+			assert.Contains(t, err.Error(), "/b")
+		})
+	}
+}
+
 func TestCompileChecksJSONPointerFallbackTargets(t *testing.T) {
 	t.Parallel()
 
