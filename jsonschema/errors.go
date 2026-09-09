@@ -236,6 +236,18 @@ var (
 	// JSON object or boolean.
 	ErrInvalidSchemaDocument = errors.New("schema document must be a JSON object or boolean")
 
+	// ErrEmptyRef is returned by [ParseSchemaValue], [ParseSchema],
+	// [CompileJSON], and [FileResolver] for a "$ref": "" in any sub-schema
+	// position of a document. RFC 3986 reads the empty reference as the
+	// current document, but the upstream decode reads it as the absent
+	// keyword, so the reference would silently become the empty schema. A
+	// data position (const, enum, default, examples) or an unknown keyword
+	// is not checked until a JSON Pointer materializes the unknown keyword as
+	// a schema, which runs the same check and reports the refusal at the
+	// referencing ref. A hand-built [Schema] with an empty Ref is the absent
+	// keyword.
+	ErrEmptyRef = errors.New("empty $ref names the current document; spell it \"#\"")
+
 	// ErrNilSchema is returned by [Compile] (and the one-shot [Validate]
 	// helper) when the schema argument is nil. A nil *Schema carries no draft,
 	// vocabulary, or structure to compile; it is reported through the error

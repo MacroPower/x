@@ -80,12 +80,14 @@ type Result struct {
 	// to.
 	DocumentMiss bool
 
-	// TargetRejected reports that the session's [FallbackVet] refused a
-	// materialized JSON-pointer target, with the vet's error in Err. The
-	// refusal is a settled answer, since the target is a fragment of a
-	// document the run already holds and no later fetch changes it. That
-	// separates it from an unlocatable pointer inside a present document,
-	// which arrives with a nil Err and which a tolerant walk defers.
+	// TargetRejected reports that a JSON-pointer target was refused, with
+	// the cause in Err: the materializer refused to decode the located
+	// value as a schema, or the session's [FallbackVet] rejected the
+	// materialized target. The refusal is a settled answer, since the target
+	// is a fragment of a document the run already holds and no later fetch
+	// changes it. That separates it from an unlocatable pointer inside a
+	// present document, which arrives with a nil Err and which a tolerant
+	// walk defers.
 	TargetRejected bool
 }
 
@@ -149,9 +151,9 @@ func (s *Session) resolveRefUncached(schema *jsonschema.Schema, ref string, fetc
 
 			t, ptrErr := s.ResolveJSONPointer(resourceRoot, raw, encoded)
 
-			// A non-nil error from the pointer resolution is the fallback
-			// vet's refusal and nothing else; an unlocatable pointer answers
-			// (nil, nil).
+			// A non-nil error from the pointer resolution is a refused
+			// target, by the materializer or the fallback vet, and nothing
+			// else; an unlocatable pointer answers (nil, nil).
 			return Result{Target: t, Err: ptrErr, TargetRejected: ptrErr != nil}
 		}
 
@@ -188,7 +190,7 @@ func (s *Session) resolveRefUncached(schema *jsonschema.Schema, ref string, fetc
 		}
 
 		// The fragment-only path above holds the same invariant. A non-nil
-		// error from the pointer resolution is the fallback vet's refusal.
+		// error from the pointer resolution is a refused target.
 		return Result{Err: ptrErr, TargetRejected: ptrErr != nil}
 	}
 

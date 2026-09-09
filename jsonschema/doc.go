@@ -1212,6 +1212,17 @@
 // schema. Malformed JSON returns the wrapped decode error without the
 // sentinel.
 //
+// All three also return an error wrapping [ErrEmptyRef] for a "$ref": "" in
+// any sub-schema position, naming the pointer of the offending node. RFC 3986
+// reads the empty reference as the current document, and unmarshaling into a
+// [Schema] directly reads it as the absent keyword, so the reference would
+// silently become the empty schema. Spell the reference "#". A "$ref" key
+// inside a data keyword (const, enum, default, examples) is data, and one
+// inside an unknown keyword is not checked until a JSON Pointer materializes
+// the unknown keyword as a schema, which runs the same check and reports the
+// refusal at the referencing ref. A hand-built [Schema] whose Ref is empty
+// is the absent keyword, not a reference.
+//
 // Every compile and validate entry point takes a [context.Context] as its
 // first parameter and carries it to the [RefResolver] (see Remote References
 // below); the Must* forms pass [context.Background], the right context for
@@ -1221,9 +1232,9 @@
 // error that unwraps to [*ValidationError] via [errors.AsType].
 // Non-validation failures return ordinary wrapped errors that do not unwrap
 // to [*ValidationError]. These cover JSON decoding, an unaccepted instance
-// type, an invalid schema document ([ErrInvalidSchemaDocument]), the
-// compile-time sentinels listed below, [ErrNotResolved], and
-// [ErrUnknownVocabulary].
+// type, an invalid schema document ([ErrInvalidSchemaDocument]), an empty
+// $ref ([ErrEmptyRef]), the compile-time sentinels listed below,
+// [ErrNotResolved], and [ErrUnknownVocabulary].
 //
 // Compile rejects a malformed document before any instance is validated, so
 // a typo surfaces at construction instead of silently rejecting or accepting
@@ -1787,7 +1798,9 @@
 // cannot follow references, such as code generators. Inline never mutates the
 // input or any resolver-returned schema, and the output shares no schema with
 // either. Every position in the result is its own *Schema, so the result
-// compiles whatever the input's pointer graph looked like.
+// compiles whatever the input's pointer graph looked like. A document a
+// [FileResolver] serves passes through [ParseSchema], so a "$ref": "" in it
+// is refused with [ErrEmptyRef] like one in the root.
 //
 // Inline applies its options per call. [NewInliner] applies them once and
 // returns a reusable [Inliner], completing the reusable trio with [Generator]

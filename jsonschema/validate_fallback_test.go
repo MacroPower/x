@@ -282,6 +282,22 @@ func TestCompileChecksJSONPointerFallbackTargets(t *testing.T) {
 	}
 }
 
+// TestCompileEmptyRefUnderUnknownKeyword pins that the empty-$ref refusal
+// reaches a schema carried inside an unknown keyword. ParseSchema does not
+// look inside x-ext, so the document parses; the JSON-pointer fallback then
+// materializes the target through ParseSchemaValue, whose refusal the
+// resolver reports as a rejected target at the referencing ref instead of
+// swallowing it as an unlocatable pointer.
+func TestCompileEmptyRefUnderUnknownKeyword(t *testing.T) {
+	t.Parallel()
+
+	_, err := jsonschema.CompileJSON(t.Context(), []byte(`{"$ref": "#/x-ext", "x-ext": {"$ref": ""}}`))
+	require.ErrorIs(t, err, jsonschema.ErrEmptyRef)
+	require.NotErrorIs(t, err, jsonschema.ErrNotResolved)
+	assert.Contains(t, err.Error(), `cannot resolve $ref "#/x-ext"`,
+		"the refusal is reported at the reference that materialized the target")
+}
+
 // TestCompileFallbackTargetErrorNamesLocation pins the error path. The error
 // names the JSON Pointer that materialized the target, so the offending
 // keyword is addressable. It also names the reference that reached the target,

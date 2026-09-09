@@ -98,7 +98,9 @@ type Materialize func(node any) (*jsonschema.Schema, error)
 
 // SchemaAtJSONForm navigates schema by segments through its JSON form and
 // returns the value located there, materialized as a Schema when it is
-// itself a schema (a JSON object or boolean), or nil otherwise. The schema
+// itself a schema (a JSON object or boolean), or nil otherwise. A located
+// schema that materialize refuses returns nil with the refusal, so the
+// caller can report the cause instead of a miss. The schema
 // round-trips through [jsonvalue.Exact] alone, so numbers survive as exact
 // [encoding/json.Number] literals without re-encoding any enclosing document,
 // and the located node is handed to materialize as a fresh copy unaliased
@@ -128,14 +130,14 @@ func SchemaAtJSONForm(
 	schema *jsonschema.Schema, segments []string, base uriref.DocKey,
 	rebase func(obj map[string]any, base uriref.DocKey) uriref.DocKey,
 	materialize Materialize,
-) (*jsonschema.Schema, uriref.DocKey) {
+) (*jsonschema.Schema, uriref.DocKey, error) {
 	// Exact is the marshal + exact-decode round trip, so a number beyond
 	// float64 precision keeps its literal form: the materialized target's
 	// const/enum must hold what the author wrote, not the rounded float64
 	// neighbor.
 	node, ok := jsonvalue.Exact(schema)
 	if !ok {
-		return nil, uriref.DocKey{}
+		return nil, uriref.DocKey{}, nil
 	}
 
 	pos := posSchema
@@ -151,7 +153,7 @@ func SchemaAtJSONForm(
 		case map[string]any:
 			next, ok := container[seg]
 			if !ok {
-				return nil, uriref.DocKey{}
+				return nil, uriref.DocKey{}, nil
 			}
 
 			pos = nextPosition(pos, seg, next)
@@ -160,14 +162,14 @@ func SchemaAtJSONForm(
 		case []any:
 			idx, ok := ParseArrayIndex(seg)
 			if !ok || idx >= len(container) {
-				return nil, uriref.DocKey{}
+				return nil, uriref.DocKey{}, nil
 			}
 
 			pos = nextPosition(pos, seg, container[idx])
 			node = container[idx]
 
 		default:
-			return nil, uriref.DocKey{}
+			return nil, uriref.DocKey{}, nil
 		}
 	}
 
@@ -175,12 +177,12 @@ func SchemaAtJSONForm(
 	case map[string]any, bool:
 		schema, err := materialize(node)
 		if err != nil {
-			return nil, uriref.DocKey{}
+			return nil, uriref.DocKey{}, err
 		}
 
-		return schema, base
+		return schema, base, nil
 
 	default:
-		return nil, uriref.DocKey{}
+		return nil, uriref.DocKey{}, nil
 	}
 }

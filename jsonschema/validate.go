@@ -1429,6 +1429,11 @@ func ParseSchemaValue(doc any) (*Schema, error) {
 			return nil, fmt.Errorf("decode schema document: %w", err)
 		}
 
+		err = refuseEmptyRef(&s, d)
+		if err != nil {
+			return nil, err
+		}
+
 		restoreExactValues(&s, d)
 		dropUnderflowedMultipleOf(&s, d)
 
@@ -1437,6 +1442,28 @@ func ParseSchemaValue(doc any) (*Schema, error) {
 	default:
 		return nil, fmt.Errorf("%w: got %T", ErrInvalidSchemaDocument, doc)
 	}
+}
+
+// refuseEmptyRef refuses a "$ref": "" in any sub-schema position of the
+// decoded document. The upstream decode reads the empty string as the absent
+// keyword, so without the check RFC 3986's reference to the current document
+// would silently become the empty schema. Each typed node's [Location]
+// segments resolve its source object, the pairing restoreExactValues uses; a
+// boolean source has no members and is skipped. The error names the
+// pointer of the offending node.
+func refuseEmptyRef(s *Schema, doc map[string]any) error {
+	return Walk(s, func(loc Location, node *Schema) error {
+		src, ok := resolveDocValue(doc, loc.Segments).(map[string]any)
+		if !ok {
+			return nil
+		}
+
+		if ref, present := src[KeywordRef]; present && ref == "" {
+			return fmt.Errorf("#%s: %w", loc.Pointer, ErrEmptyRef)
+		}
+
+		return nil
+	})
 }
 
 // restoreExactValues re-copies each decoded node's any-typed value members

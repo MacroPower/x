@@ -86,9 +86,10 @@ func TestSchemaAtJSONFormDataIDsInert(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got, base := jsonptr.SchemaAtJSONForm(
+			got, base, err := jsonptr.SchemaAtJSONForm(
 				tc.root, tc.segments, mustBase(t, rootBase), rebaseByID, materializeSchema,
 			)
+			require.NoError(t, err)
 			require.NotNil(t, got)
 			assert.Equal(t, tc.want, base.String())
 		})

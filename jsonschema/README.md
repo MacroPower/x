@@ -280,7 +280,10 @@ and [Drafts](https://pkg.go.dev/go.jacobcolvin.com/x/jsonschema#hdr-Drafts).
 method per instance shape: `Validate` for a pre-parsed Go value (JSON, YAML,
 or TOML decoder output), `ValidateJSON` and `ValidateReader` for raw JSON, and
 `ValidateValue` for a Go value, which marshals it first. `CompileJSON` compiles
-a schema arriving as a JSON document.
+a schema arriving as a JSON document. A `"$ref": ""` in any sub-schema
+position of that document is refused with `ErrEmptyRef`, because RFC 3986
+reads the empty reference as the current document while decoding into a
+`Schema` reads it as the absent keyword. Spell the reference `"#"`.
 
 `Compile` rejects a malformed schema before any instance is validated. Each
 refusal wraps a sentinel error matched with `errors.Is`. A validation failure

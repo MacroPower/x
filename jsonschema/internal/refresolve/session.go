@@ -278,8 +278,8 @@ func (s *Session) rebaseJSON() func(map[string]any, uriref.DocKey) uriref.DocKey
 // sub-schema carried as raw JSON in an unknown keyword, or the internals of
 // a non-applicator keyword such as examples), so resolution continues from
 // the deepest typed node through the schema's JSON form. A non-nil error
-// reports a fallback target the session's [FallbackVet] rejected; an
-// unlocatable pointer is a plain (nil, nil) miss.
+// reports a fallback target the materializer refused or the session's
+// [FallbackVet] rejected; an unlocatable pointer is a plain (nil, nil) miss.
 func (s *Session) ResolveJSONPointer(
 	root *jsonschema.Schema, fragment string, encoded bool,
 ) (*jsonschema.Schema, error) {
@@ -366,13 +366,11 @@ func (s *Session) resolveJSONPointerViaJSON(
 		return cached.target, cached.err
 	}
 
-	target, base := jsonptr.SchemaAtJSONForm(
+	target, base, vetErr := jsonptr.SchemaAtJSONForm(
 		node, rest, prefixBase, s.rebaseJSON(), s.reg.deps.Materialize,
 	)
 
 	locator := s.SchemaBase(root).At(displayPointer(segments)).String()
-
-	var vetErr error
 
 	if target != nil {
 		var minted schemavet.Node

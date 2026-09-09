@@ -155,9 +155,10 @@ func TestSchemaAtJSONForm(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got, base := jsonptr.SchemaAtJSONForm(
+			got, base, err := jsonptr.SchemaAtJSONForm(
 				tt.root, tt.segs, mustBase(t, tt.base), rebaseFor(tt.trackIDs), materializeSchema,
 			)
+			require.NoError(t, err)
 
 			if tt.want == nil {
 				assert.Nil(t, got)

@@ -7293,6 +7293,30 @@ func TestParseSchemaValue(t *testing.T) {
 			err:      jsonschema.ErrInvalidSchemaDocument,
 			contains: "float64",
 		},
+
+		// An empty $ref names the current document under RFC 3986, which the
+		// upstream decode would silently drop, so every sub-schema position
+		// refuses it by pointer. A $ref key inside a data keyword is data.
+		"empty $ref at the root": {
+			doc:      map[string]any{"$ref": ""},
+			err:      jsonschema.ErrEmptyRef,
+			contains: "#: empty $ref",
+		},
+		"empty $ref in a property": {
+			doc:      map[string]any{"properties": map[string]any{"a": map[string]any{"$ref": ""}}},
+			err:      jsonschema.ErrEmptyRef,
+			contains: "#/properties/a: empty $ref",
+		},
+		"empty $ref in an allOf element": {
+			doc:      map[string]any{"allOf": []any{map[string]any{"$ref": ""}}},
+			err:      jsonschema.ErrEmptyRef,
+			contains: "#/allOf/0: empty $ref",
+		},
+		"$ref inside const is data": {
+			doc:      map[string]any{"const": map[string]any{"$ref": ""}},
+			instance: map[string]any{"$ref": ""},
+			valid:    true,
+		},
 	}
 
 	for name, tt := range tests {
@@ -7370,6 +7394,11 @@ func TestParseSchema(t *testing.T) {
 			data:     `null`,
 			err:      jsonschema.ErrInvalidSchemaDocument,
 			contains: "<nil>",
+		},
+		"empty $ref is refused": {
+			data:     `{"$ref":""}`,
+			err:      jsonschema.ErrEmptyRef,
+			contains: "#: empty $ref",
 		},
 		"string document": {
 			data: `"oops"`,
@@ -7474,6 +7503,11 @@ func TestCompileJSON(t *testing.T) {
 			data:     `null`,
 			err:      jsonschema.ErrInvalidSchemaDocument,
 			contains: "<nil>",
+		},
+		"empty $ref is refused": {
+			data:     `{"$ref":""}`,
+			err:      jsonschema.ErrEmptyRef,
+			contains: "#: empty $ref",
 		},
 		"string document": {
 			data: `"oops"`,
