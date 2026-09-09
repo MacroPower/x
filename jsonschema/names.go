@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"sort"
 	"strconv"
+	"strings"
 
 	"go.jacobcolvin.com/x/jsonschema/internal/jsonptr"
 	"go.jacobcolvin.com/x/jsonschema/internal/schemafield"
@@ -68,17 +69,46 @@ func extractable(t reflect.Type) bool {
 	return implementsProvider(t) || implementsExtender(t)
 }
 
+// emittedDefs returns the def entries render will emit: every entry the
+// root graph reaches, through node links and the raw $ref strings in
+// payloads, minus the root's own entry when the root is a bare $ref that
+// [run.maybeInlineRoot] inlines (one no other node references). It reads the
+// root's wrapper decision, so it runs after [run.resolveNullability], and it
+// keys on the provisional tokens, so it runs before [run.finalizeRefs].
+func (g *run) emittedDefs(root *node) map[*defEntry]bool {
+	emitted := map[*defEntry]bool{}
+	g.walkReachable(root, emitted, func(*node) {}, nil)
+
+	if root.kind == kindRef && !root.null.wrap && !g.referencedElsewhere(root, root.def) {
+		delete(emitted, root.def)
+	}
+
+	return emitted
+}
+
 // assignDefNames assigns each def entry its final $defs key, disambiguating
-// name collisions by prefixing with the package's base directory name, then
-// with the full import path if collisions persist. It runs before render, so
-// renderRef emits final names directly; because refs are defEntry pointer
-// links, no ref re-pointing pass is needed for them. The provisional tokens
-// the reflection phase wrote into payloads are rewritten afterward by
+// name collisions among the emitted entries by prefixing with the package's
+// base directory name, then with the full import path if collisions persist.
+// An entry outside emitted (one a type= override or root inlining orphaned)
+// never reaches the output, so it joins no collision group and takes a
+// token-shaped name instead, which no emitted key can spell. It runs before
+// render, so renderRef emits final names directly; because refs are defEntry
+// pointer links, no ref re-pointing pass is needed for them. The provisional
+// tokens the reflection phase wrote into payloads are rewritten afterward by
 // [run.finalizeRefs].
-func (g *run) assignDefNames() {
-	// Group entries by their pre-disambiguation base name.
+func (g *run) assignDefNames(emitted map[*defEntry]bool) {
+	prefix := g.profile.refPrefix()
+
+	// Group emitted entries by their pre-disambiguation base name.
 	byBase := map[string][]*defEntry{}
+
 	for _, e := range g.defs {
+		if !emitted[e] {
+			e.name = strings.TrimPrefix(e.token, prefix)
+
+			continue
+		}
+
 		byBase[e.baseName] = append(byBase[e.baseName], e)
 	}
 
@@ -157,7 +187,10 @@ func (g *run) assignDefNames() {
 // hook copied it into, such as a branch grafted beside a property or a slot
 // replaced wholesale. The walk covers the root graph, every def body whether
 // or not the root reaches it, and the node a type= override replaced, whose
-// view the jsonschema tag reads later. Payload subtrees are scanned once each
+// view the jsonschema tag reads later. An entry render never emits keeps its
+// token-shaped name, so a field inside an orphaned body whose type is another
+// orphaned entry reads that spelling in its Base; only a hook on a body that
+// is never rendered observes it. Payload subtrees are scanned once each
 // through the scanned set, so a subtree a hook aliased into two slots is
 // rewritten once.
 func (g *run) finalizeRefs(root *node) {

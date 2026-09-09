@@ -198,19 +198,21 @@ func (g *run) generate(t reflect.Type) (*Schema, error) {
 		return nil, err
 	}
 
-	// Phase 2: assign final $defs names (disambiguating collisions) before
-	// render emits any $ref string, then rewrite every provisional token the
-	// reflection phase wrote into a payload, whether a ref node's own or one
-	// a type-level hook copied into a literal, so nothing after this phase
-	// sees a token. Names are keyed on defEntry identity, so reachability and
-	// root inlining below key on identity too and need no renamed-entry
-	// lookup.
-	g.assignDefNames()
-	g.finalizeRefs(root)
-
-	// Phase 3: decide the null admission of every node from the facts the
-	// build recorded and the stances the type-level hooks declared.
+	// Phase 2: decide the null admission of every node from the facts the
+	// build recorded and the stances the type-level hooks declared. It runs
+	// before naming because the emitted set below reads the root's wrapper
+	// decision, and it reads no name itself.
 	g.resolveNullability(root)
+
+	// Phase 3: assign final $defs names (disambiguating collisions over the
+	// defs render will emit) before render emits any $ref string, then
+	// rewrite every provisional token the reflection phase wrote into a
+	// payload, whether a ref node's own or one a type-level hook copied into
+	// a literal, so nothing after this phase sees a token. Names are keyed on
+	// defEntry identity, so reachability and root inlining below key on
+	// identity too and need no renamed-entry lookup.
+	g.assignDefNames(g.emittedDefs(root))
+	g.finalizeRefs(root)
 
 	// Phase 4: the field-level hooks, which read the final decision.
 	err = g.applyFieldHooks(root)

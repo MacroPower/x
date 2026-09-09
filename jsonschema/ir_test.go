@@ -384,11 +384,13 @@ func TestExtenderNestedSlotEditsReachTheChild(t *testing.T) {
 }
 
 // TestGenerateFor_TypeOverrideDropsOrphanedDefUnderCollision pins that
-// reachability keys on def identity under a base-name collision. Field A
-// registers alpha.Widget's def first, then the type= override detaches its
-// only reference. Field B's reference to beta.Widget shares the base name
-// "Widget"; resolving it to the earlier-registered alpha.Widget would retain
-// that def as an unreferenced $defs entry.
+// reachability keys on def identity under a base-name collision, and that
+// the orphan joins no collision group. Field A registers alpha.Widget's def
+// first, then the type= override detaches its only reference. Field B's
+// reference to beta.Widget shares the base name "Widget"; resolving it to
+// the earlier-registered alpha.Widget would retain that def as an
+// unreferenced $defs entry, and grouping the two would prefix the survivor
+// although the output holds no other Widget.
 func TestGenerateFor_TypeOverrideDropsOrphanedDefUnderCollision(t *testing.T) {
 	t.Parallel()
 
@@ -401,22 +403,51 @@ func TestGenerateFor_TypeOverrideDropsOrphanedDefUnderCollision(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, "integer", s.Properties["a"].Type)
-	require.Equal(t, "#/$defs/beta_Widget", s.Properties["b"].Ref)
+	require.Equal(t, "#/$defs/Widget", s.Properties["b"].Ref)
 
-	require.Contains(t, s.Defs, "beta_Widget")
+	require.Contains(t, s.Defs, "Widget")
 	assert.NotContains(t, s.Defs, "alpha_Widget",
 		"a def orphaned by a type= override must be dropped even when its base name collides with a live def")
+	assert.NotContains(t, s.Defs, "beta_Widget",
+		"a def orphaned by a type= override must not prefix the live def it collides with")
+}
+
+// TestGenerateFor_OrphanedDefNeverPrefixesName pins that the key an emitted
+// def takes does not depend on the orphaned types a run happens to reflect:
+// a root that also touches an orphaned twin of the same base name emits the
+// key the root without the twin does.
+func TestGenerateFor_OrphanedDefNeverPrefixesName(t *testing.T) {
+	t.Parallel()
+
+	type Alone struct {
+		B beta.Widget `json:"b"`
+	}
+
+	type WithTwin struct {
+		A alpha.Widget `json:"a" jsonschema:"type=integer"`
+		B beta.Widget  `json:"b"`
+	}
+
+	alone, err := jsonschema.GenerateFor[Alone](t.Context())
+	require.NoError(t, err)
+
+	withTwin, err := jsonschema.GenerateFor[WithTwin](t.Context())
+	require.NoError(t, err)
+
+	assert.Equal(t, alone.Properties["b"].Ref, withTwin.Properties["b"].Ref)
+	assert.Equal(t, alone.Defs, withTwin.Defs)
 }
 
 // TestGenerateFor_RootInliningUnderBaseNameCollision pins that the
 // reachability walk resolves a ref node's $ref string to the def the node
 // links, under a base-name collision. Each field ref's payload is aliased
 // into its parent's Properties, so the scan can reach it through the parent
-// before the node walk claims it; a bare "#/$defs/Knot" on B's ref would then
-// resolve to the first-registered claimant -- the orphaned alpha.Knot def,
-// whose body's back-reference to KnotRoot would falsely report the root's def
-// as referenced elsewhere and suppress root inlining. The string the scan
-// sees is the final key finalizeRefs wrote, which names beta.Knot alone.
+// before the node walk claims it; a string shared by both Knot defs would
+// then resolve to the first-registered claimant -- the orphaned alpha.Knot
+// def, whose body's back-reference to KnotRoot would falsely report the
+// root's def as referenced elsewhere and suppress root inlining. The string
+// the scan sees is the per-entry token before naming and the final key
+// after it, and each names beta.Knot alone.
 func TestGenerateFor_RootInliningUnderBaseNameCollision(t *testing.T) {
 	t.Parallel()
 
@@ -427,11 +458,13 @@ func TestGenerateFor_RootInliningUnderBaseNameCollision(t *testing.T) {
 		"the root's def is referenced from nowhere once alpha.Knot is orphaned, so the root must inline")
 	assert.Equal(t, "object", s.Type)
 	require.Contains(t, s.Properties, "b")
-	assert.Equal(t, "#/$defs/beta_Knot", s.Properties["b"].Ref)
+	assert.Equal(t, "#/$defs/Knot", s.Properties["b"].Ref)
 
-	require.Contains(t, s.Defs, "beta_Knot")
+	require.Contains(t, s.Defs, "Knot")
 	assert.NotContains(t, s.Defs, "alpha_Knot",
 		"the orphaned colliding def must be dropped")
+	assert.NotContains(t, s.Defs, "beta_Knot",
+		"the orphaned colliding def must not prefix the live def")
 	assert.NotContains(t, s.Defs, "KnotRoot",
 		"an inlined root leaves no def behind")
 }

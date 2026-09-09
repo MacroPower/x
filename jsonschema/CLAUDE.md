@@ -24,16 +24,19 @@ one generation derives from a config. `run.generate` is eight phases, in order:
    does the jsonschema tag's `type=` pair, which rewrites the field's node in
    place (`node.overrideType`) and keeps the reflected occurrence as a value
    copy for the directives before the pair.
-2. **Assign def names** (`names.go`): every `$defs` entry gets its final key
-   before any `$ref` string is emitted, and `finalizeRefs` rewrites the
-   per-entry provisional token phase 1 wrote into every payload (a ref node's
-   own, and any literal a type-level hook copied it into) to that key, so no
-   later phase sees a token.
-3. **Resolve nullability** (`ir.go`): `resolveNullability` fills `node.null`
+2. **Resolve nullability** (`ir.go`): `resolveNullability` fills `node.null`
    for every node in one walk, from the `nullFacts` reflection recorded (a
    reference reads its body's container kind and stance off the def entry,
    never the body's decision), through the pure `admitNull` and `wrapNull`.
    Nothing reads the decision earlier and nothing changes it later.
+3. **Assign def names** (`names.go`): `emittedDefs` collects the entries
+   render will emit (reachable from the root, minus a bare `$ref` root that
+   phase 5 inlines), and every one of them gets its final key, disambiguated
+   among themselves alone, before any `$ref` string is emitted; an orphaned
+   entry keeps a token-shaped name. `finalizeRefs` then rewrites the
+   per-entry provisional token phase 1 wrote into every payload (a ref node's
+   own, and any literal a type-level hook copied it into) to that key, so no
+   later phase sees a token.
 4. **Field hooks** (`reflect.go`): the description provider, the rest of the
    jsonschema tag, and the tag interpreters run per field on private
    `node.view` copies. The one write read back is a name appended to

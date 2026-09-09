@@ -518,3 +518,75 @@ func TestNullDecisionRules(t *testing.T) {
 		})
 	}
 }
+
+// emittedOrphan is a named struct a type= pair orphans in emittedRoot.
+type emittedOrphan struct {
+	X int `json:"x"`
+}
+
+// emittedKept is a named struct emittedRoot keeps referenced.
+type emittedKept struct {
+	Y int `json:"y"`
+}
+
+// emittedRoot is a bare-$ref root the render inlines, with one orphaned and
+// one kept def beneath it.
+type emittedRoot struct {
+	A emittedOrphan `json:"a" jsonschema:"type=string"`
+	B emittedKept   `json:"b"`
+}
+
+// emittedRecursive is a self-recursive root, which keeps its own def.
+type emittedRecursive struct {
+	Next *emittedRecursive `json:"next"`
+}
+
+// TestEmittedDefsMatchRender pins that the def set naming disambiguates over
+// is the set render emits: emittedDefs, read before naming off the tokens
+// and the root's wrapper decision, agrees with collectReferencedDefs, read
+// after the field hooks and root inlining, on a type= orphan, an inlined
+// root, and a self-recursive root.
+func TestEmittedDefsMatchRender(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		typ  reflect.Type
+		want []string
+	}{
+		"orphan beside an inlined root": {typ: reflect.TypeFor[emittedRoot](), want: []string{"emittedKept"}},
+		"self-recursive root":           {typ: reflect.TypeFor[emittedRecursive](), want: []string{"emittedRecursive"}},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			g := newConfig(nil).forRun(t.Context())
+
+			root, err := g.schemaForType(tc.typ, false)
+			require.NoError(t, err)
+
+			g.resolveNullability(root)
+
+			emitted := g.emittedDefs(root)
+			g.assignDefNames(emitted)
+			g.finalizeRefs(root)
+			require.NoError(t, g.applyFieldHooks(root))
+
+			root = g.maybeInlineRoot(root)
+
+			var got, want []string
+
+			for _, e := range g.collectReferencedDefs(root) {
+				got = append(got, e.name)
+			}
+
+			for e := range emitted {
+				want = append(want, e.name)
+			}
+
+			assert.ElementsMatch(t, want, got, "the naming-time set is the render-time set")
+			assert.ElementsMatch(t, tc.want, got)
+		})
+	}
+}

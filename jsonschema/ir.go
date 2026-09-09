@@ -248,7 +248,7 @@ type defEntry struct {
 	typ      reflect.Type
 	body     *node  // bare value node; nil while a cycle placeholder
 	baseName string // namer output, pre-disambiguation; collisions are grouped on it
-	name     string // final $defs key; set by assignDefNames before render
+	name     string // final $defs key, set by assignDefNames; token-shaped on an entry render never emits
 	// Token is the provisional $ref string every reference to the entry
 	// carries until assignDefNames settles the final key. It is unique per
 	// run, and its "@" separator is a character no final key contains, so a
@@ -1248,17 +1248,31 @@ func isJSONNull(v any) bool {
 	return ok && dv.Kind() == jsonvalue.Null
 }
 
-// payloadRefTargets maps the final $ref string of every def entry to the
-// entry. It reads the final keys, so it is only meaningful once
-// assignDefNames and [run.finalizeRefs] have run; from then on a payload
-// carries a def reference only in this form, whether a ref node's own, one
-// a hook copied out of a view, or one a hook spelled by hand.
+// payloadRefTargets maps the $ref string of every def entry to the entry:
+// its provisional token, and its final key once assignDefNames has settled
+// one. Before [run.finalizeRefs] a payload carries a def reference as a
+// token, or as the base name a hook that spelled the ref by hand
+// anticipated, which is the key a singleton takes; from then on as the final
+// key, whether a ref node's own, one a hook copied out of a view, or one a
+// hook spelled by hand. A token carries "@", which no final key does, so the
+// two spellings never collide. Before naming, a base name two entries share
+// resolves to the first registered, as the render-time scan resolves a
+// string to one entry.
 func (g *run) payloadRefTargets() map[string]*defEntry {
 	prefix := g.profile.refPrefix()
 
-	targets := make(map[string]*defEntry, len(g.defs))
+	targets := make(map[string]*defEntry, 2*len(g.defs))
 	for _, e := range g.defs {
-		targets[prefix+e.name] = e
+		targets[e.token] = e
+
+		switch {
+		case e.name != "":
+			targets[prefix+e.name] = e
+		default:
+			if _, taken := targets[prefix+e.baseName]; !taken {
+				targets[prefix+e.baseName] = e
+			}
+		}
 	}
 
 	return targets
