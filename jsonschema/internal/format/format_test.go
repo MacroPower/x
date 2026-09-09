@@ -860,3 +860,30 @@ func TestURIReferenceRejectsBareIPv6(t *testing.T) {
 			"%s with a bracketed IPv6 authority should be accepted", format)
 	}
 }
+
+// TestRegexFormatRejectsInvalidUTF8 pins that a pattern holding a byte
+// sequence that is not UTF-8 fails the regex format wherever the byte sits.
+// ECMA 262 reads a pattern as code points, so the byte is no source character
+// at all. The vector rows are JSON strings and cannot carry the byte, so the
+// cases live here.
+func TestRegexFormatRejectsInvalidUTF8(t *testing.T) {
+	t.Parallel()
+
+	validate := validator(t, "regex")
+
+	for name, instance := range map[string]string{
+		"alone":           "\xff",
+		"after an atom":   "a\xff",
+		"inside a class":  "[\xff]",
+		"after a slash":   "\\\xff",
+		"in a group name": "(?<\xff>a)",
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			require.Error(t, validate(instance))
+		})
+	}
+
+	require.NoError(t, validate("ÿ"), "a genuine code point is a source character")
+}

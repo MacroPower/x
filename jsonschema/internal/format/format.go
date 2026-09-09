@@ -1201,6 +1201,14 @@ const (
 // literal. The assertions '^' and '$' are left quantifiable, as RE2 reads
 // them.
 func validateRegex(s string) error {
+	// ECMA 262 reads a pattern as code points, so a byte sequence that is
+	// not UTF-8 holds no source character; every engine refuses it. The
+	// scan below reads bytes, and only this check keeps a stray byte from
+	// passing as an atom or a class member.
+	if !utf8.ValidString(s) {
+		return errors.New("invalid regex: invalid UTF-8")
+	}
+
 	depth := 0
 
 	inClass := false
