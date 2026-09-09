@@ -92,6 +92,10 @@
 //   - [ErrNonFiniteBound] reports a numeric bound a type-level hook or a tag
 //     interpreter declares as NaN or an infinity, which JSON cannot carry
 //     and the bound algebra would otherwise read as no bound at all.
+//   - [ErrCanvasKeyword] reports a keyword a tag interpreter wrote on
+//     [FieldContext.Canvas] that generation never reads (type, required, an
+//     applicator, an Extra entry), which the overlay would otherwise drop
+//     with no trace.
 //
 // Every error carries the path to the offending field, as in
 // "field \"data\": unsupported type".
@@ -488,8 +492,9 @@
 // (const, enum, not, pattern, format, multipleOf, contentEncoding,
 // contentMediaType, contentSchema), the numeric, length, and count bounds,
 // uniqueItems, and allOf. Any other keyword written on the canvas, such as
-// type, required, an applicator, or an Extra entry, is dropped without an
-// error. A required name goes through [FieldContext.Parent] instead.
+// type, required, an applicator, or an Extra entry, is refused with
+// [ErrCanvasKeyword]. A required name goes through [FieldContext.Parent]
+// instead.
 //
 //   - A const or enum the interpreter declares lands on the value branch of a
 //     null-admitting field and keeps null valid.

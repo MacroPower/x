@@ -652,8 +652,9 @@ type FieldContext struct {
 	//
 	// Generation reads only the annotation, value-fact, bound, uniqueItems, and
 	// allOf keywords off the canvas (the Tag Interpreters section of the package
-	// documentation lists them). It drops any other keyword written here, such as
-	// Type, Types, Required, an applicator, or an Extra entry, without an error.
+	// documentation lists them). It refuses any other keyword written here, such
+	// as Type, Types, Required, an applicator, or an Extra entry, with
+	// [ErrCanvasKeyword].
 	Canvas *Schema
 	// Base is the field's type-derived reflected schema, read-only: the pristine
 	// payload carrying the type's own keywords (its numeric bounds, the

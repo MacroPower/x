@@ -6,9 +6,11 @@ import (
 	"reflect"
 	"slices"
 	"strconv"
+	"sync"
 
 	"go.jacobcolvin.com/x/jsonschema/internal/fieldset"
 	"go.jacobcolvin.com/x/jsonschema/internal/jsonvalue"
+	"go.jacobcolvin.com/x/jsonschema/internal/keywordmeta"
 	"go.jacobcolvin.com/x/jsonschema/internal/numkind"
 	"go.jacobcolvin.com/x/jsonschema/internal/schemaclone"
 	"go.jacobcolvin.com/x/jsonschema/internal/schemafield"
@@ -1021,9 +1023,116 @@ func (g *run) checkCanvasLiterals(root *node) error {
 		if reported == nil {
 			reported = emptyEnumReport(n)
 		}
+
+		if reported == nil {
+			reported = canvasKeywordReport(n)
+		}
 	}, nil)
 
 	return reported
+}
+
+// canvasFields is the set of Schema field names a canvas may carry, by Go
+// field name: every field an authored keyword row owns, plus AllOf, which
+// the overlay appends after the authored rows. The overlay reads no other
+// field, so a value in any other field is a write generation would drop.
+var (
+	canvasFields = sync.OnceValue(func() map[string]bool {
+		out := map[string]bool{"AllOf": true}
+
+		for _, kw := range keywordmeta.Authored {
+			for _, name := range kw.Fields {
+				out[name] = true
+			}
+		}
+
+		return out
+	})
+
+	// CanvasKeywordNames maps each Schema field name to the keyword a report
+	// names it by: the keyword row owning the field, or the field name itself
+	// for a field no row owns (Extra, the identifiers, PropertyOrder).
+	canvasKeywordNames = sync.OnceValue(func() map[string]string {
+		out := make(map[string]string, len(schemafield.Fields))
+
+		for i := range schemafield.Fields {
+			out[schemafield.Fields[i].Name] = schemafield.Fields[i].Name
+		}
+
+		for i := range keywordmeta.Keywords {
+			for _, name := range keywordmeta.Keywords[i].Fields {
+				out[name] = keywordmeta.Keywords[i].Name
+			}
+		}
+
+		return out
+	})
+)
+
+// canvasKeywordReport returns the rejection a node's authored canvas earns
+// for a keyword the overlay never reads, or nil when the node carries no
+// origin or every set field is one the overlay reads. The element canvases
+// [allocCanvasTree] wires into a field canvas's sub-schema slots are the
+// tree's own structure and pass; a slot an interpreter replaced does not.
+// The report names the field the keyword sits in and marks an element
+// position, as [nullLiteralReport] does.
+func canvasKeywordReport(n *node) error {
+	if n.origin == nil || n.authored == nil {
+		return nil
+	}
+
+	allowed := canvasFields()
+
+	for i := range schemafield.Fields {
+		f := &schemafield.Fields[i]
+		if allowed[f.Name] || f.IsZero(n.authored) || canvasSlotWired(n, f) {
+			continue
+		}
+
+		keyword := canvasKeywordNames()[f.Name]
+
+		if n.origin.element {
+			return fmt.Errorf("%s field %q: element: authored canvas: keyword %q: %w",
+				n.origin.parent, n.origin.field, keyword, ErrCanvasKeyword)
+		}
+
+		return fmt.Errorf("%s field %q: authored canvas: keyword %q: %w",
+			n.origin.parent, n.origin.field, keyword, ErrCanvasKeyword)
+	}
+
+	return nil
+}
+
+// canvasSlotWired reports whether the sub-schema slot f holds exactly the
+// element canvases [allocCanvasTree] wired into n's canvas: the single
+// element canvas of a list or map, or the per-position canvases of a tuple.
+// A node a type= pair rewrote keeps the canvas wired for the node as
+// reflected, so the slot is read against that copy too.
+func canvasSlotWired(n *node, f *schemafield.Field) bool {
+	if n.overrode != nil && canvasSlotWired(n.overrode, f) {
+		return true
+	}
+
+	switch f.Name {
+	case "Items", "AdditionalProperties":
+		return n.items != nil && f.SingleOf(n.authored) == n.items.authored
+	case "PrefixItems", "ItemsArray":
+		elems := f.SliceOf(n.authored)
+		if len(elems) != len(n.prefix) {
+			return false
+		}
+
+		for i, c := range n.prefix {
+			if elems[i] != c.authored {
+				return false
+			}
+		}
+
+		return true
+
+	default:
+		return false
+	}
 }
 
 // emptyEnumReport returns the rejection a node's authored canvas earns for a

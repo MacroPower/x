@@ -366,6 +366,14 @@ var (
 	// JSON carries neither, and the bound algebra reads a non-finite bound
 	// as no bound, so the value is refused rather than silently dropped.
 	ErrNonFiniteBound = errors.New("non-finite numeric bound")
+
+	// ErrCanvasKeyword is returned by [Generate] for a keyword a tag
+	// interpreter wrote on [FieldContext.Canvas] that generation never reads:
+	// anything outside the annotations, value facts, bounds, uniqueItems, and
+	// allOf the Tag Interpreters section of the package documentation lists,
+	// such as type, required, an applicator, or an Extra entry. The overlay
+	// would otherwise drop the write with no trace.
+	ErrCanvasKeyword = errors.New("keyword is not authorable on a field canvas")
 )
 
 // ValidationError represents a JSON Schema validation failure.

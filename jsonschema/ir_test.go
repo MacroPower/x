@@ -518,6 +518,100 @@ func TestHookCanvasEmptyEnumRefused(t *testing.T) {
 	}
 }
 
+// TestHookCanvasKeywordRefused pins that a keyword written on a canvas that
+// generation never reads fails generation, naming the field and the
+// keyword, while the canvas tree's own wiring and a write the overlay reads
+// pass. The overlay copies the authored rows and allOf alone, so a type,
+// required, or applicator write and an Extra entry would otherwise vanish
+// with no trace.
+func TestHookCanvasKeywordRefused(t *testing.T) {
+	t.Parallel()
+
+	type doc struct {
+		X string         `json:"x" write:"x"`
+		Y []string       `json:"y" write:"y"`
+		M map[string]int `json:"m" write:"m"`
+		T [2]int         `json:"t" write:"t"`
+	}
+
+	tests := map[string]struct {
+		write func(field jsonschema.FieldContext)
+		want  string
+	}{
+		"types": {
+			write: func(field jsonschema.FieldContext) {
+				if field.Name == "x" {
+					field.Canvas.Types = []string{"string", "number"}
+				}
+			},
+			want: `field "x": authored canvas: keyword "type"`,
+		},
+		"extra": {
+			write: func(field jsonschema.FieldContext) {
+				if field.Name == "x" {
+					field.Canvas.Extra = map[string]any{"x-nullable": true}
+				}
+			},
+			want: `field "x": authored canvas: keyword "Extra"`,
+		},
+		"required": {
+			write: func(field jsonschema.FieldContext) {
+				if field.Name == "x" {
+					field.Canvas.Required = []string{"x"}
+				}
+			},
+			want: `field "x": authored canvas: keyword "required"`,
+		},
+		"replaced items slot": {
+			write: func(field jsonschema.FieldContext) {
+				if field.Name == "y" {
+					field.Canvas.Items = &jsonschema.Schema{MinLength: new(1)}
+				}
+			},
+			want: `field "y": authored canvas: keyword "items"`,
+		},
+		"element types": {
+			write: func(field jsonschema.FieldContext) {
+				if field.Name == "y" {
+					field.ElementContexts()[0].Canvas.Types = []string{"string", "null"}
+				}
+			},
+			want: `field "y": element: authored canvas: keyword "type"`,
+		},
+		"wiring alone passes": {
+			write: func(jsonschema.FieldContext) {},
+		},
+		"allOf passes": {
+			write: func(field jsonschema.FieldContext) {
+				field.Canvas.AllOf = []*jsonschema.Schema{{MinLength: new(1)}}
+			},
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := jsonschema.GenerateFor[doc](t.Context(),
+				jsonschema.WithTagInterpreter("write", jsonschema.TagInterpreterFunc(
+					func(_ context.Context, field jsonschema.FieldContext, _ jsonschema.Tag) error {
+						tc.write(field)
+
+						return nil
+					},
+				)))
+			if tc.want == "" {
+				require.NoError(t, err)
+
+				return
+			}
+
+			require.ErrorIs(t, err, jsonschema.ErrCanvasKeyword)
+			assert.Contains(t, err.Error(), tc.want)
+		})
+	}
+}
+
 // TestHookCanvasConstOnUnrestrictedKeepsNull pins that a const an
 // interpreter writes on an unrestricted occurrence (an interface, a pointer
 // to a raw message) rides the value branch beside a null branch. The
