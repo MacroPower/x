@@ -484,6 +484,20 @@ func (g *run) marshalDefaults(rootType reflect.Type) (map[string]jsontext.Value,
 			ErrInvalidDefaultsInstance, instType, err)
 	}
 
+	// A jsontext formatting option (Multiline, WithIndent) is documented as
+	// having no effect, yet a decoded member keeps the whitespace the marshal
+	// wrote. Compact every member so a seeded default is the same bytes
+	// under any formatting option.
+	for key, raw := range values {
+		err := raw.Compact()
+		if err != nil {
+			return nil, fmt.Errorf("%w: instance of type %s member %q does not compact: %w",
+				ErrInvalidDefaultsInstance, instType, key, err)
+		}
+
+		values[key] = raw
+	}
+
 	return values, nil
 }
 

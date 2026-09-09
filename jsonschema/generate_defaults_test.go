@@ -2,6 +2,7 @@ package jsonschema_test
 
 import (
 	"context"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"reflect"
 	"strconv"
@@ -669,4 +670,26 @@ func TestWithDefaultsFromAliasedLiteral(t *testing.T) {
 
 	assert.JSONEq(t, `1`, string(s.Properties["a"].Default))
 	assert.JSONEq(t, `2`, string(s.Properties["b"].Default))
+}
+
+// defaultsFormatted is a root whose map field marshals to an object, the
+// shape a formatting option expands across lines.
+type defaultsFormatted struct {
+	M map[string]int `json:"m"`
+}
+
+// TestWithDefaultsFromIgnoresFormatting pins that a jsontext formatting
+// option passed through [jsonschema.WithJSONOptions] leaves a seeded default
+// as the compact bytes the same instance seeds without the option.
+func TestWithDefaultsFromIgnoresFormatting(t *testing.T) {
+	t.Parallel()
+
+	s, err := jsonschema.GenerateFor[defaultsFormatted](
+		t.Context(),
+		jsonschema.WithJSONOptions(jsontext.Multiline(true), jsontext.WithIndent("\t")),
+		jsonschema.WithDefaultsFrom(defaultsFormatted{M: map[string]int{"a": 1}}),
+	)
+	require.NoError(t, err)
+
+	assert.Equal(t, `{"a":1}`, string(s.Properties["m"].Default))
 }
