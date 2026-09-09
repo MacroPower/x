@@ -242,6 +242,12 @@
 // format, which admits a bare scheme ("http:") that go-playground's url
 // refuses.
 //
+// Two validators in one tag that map to one keyword, such as email and url on
+// format or alpha and numeric on pattern, are refused with
+// [ErrRepeatedKeyword]. A schema carries one value per keyword, and
+// go-playground applies both validators, so keeping either one alone would
+// silently drop a constraint.
+//
 // Pattern tags (mapped to "pattern"):
 //
 //   - alpha: ^[a-zA-Z]+$

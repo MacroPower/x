@@ -3334,3 +3334,61 @@ func TestValidateInterpreterGoPlaygroundParity(t *testing.T) {
 		require.NoError(t, err, "a float kind keeps the decimal spellings strconv reads")
 	})
 }
+
+// TestRepeatedKeywordRefused pins that two validators in one tag mapping to
+// one schema keyword are refused rather than the second dropped. A schema
+// carries one format and one pattern, and go-playground applies both
+// validators, so keeping either alone would silently widen the schema.
+func TestRepeatedKeywordRefused(t *testing.T) {
+	t.Parallel()
+
+	opt := jsonschema.WithTagInterpreter("validate", validate.NewInterpreter())
+
+	t.Run("two formats", func(t *testing.T) {
+		t.Parallel()
+
+		type T struct {
+			F string `json:"f" validate:"email,url"`
+		}
+
+		_, err := jsonschema.GenerateFor[T](t.Context(), opt)
+		require.ErrorIs(t, err, validate.ErrRepeatedKeyword)
+		assert.ErrorContains(t, err, "email and url")
+	})
+
+	t.Run("two patterns", func(t *testing.T) {
+		t.Parallel()
+
+		type T struct {
+			F string `json:"f" validate:"alpha,numeric"`
+		}
+
+		_, err := jsonschema.GenerateFor[T](t.Context(), opt)
+		require.ErrorIs(t, err, validate.ErrRepeatedKeyword)
+	})
+
+	t.Run("a format beside a pattern composes", func(t *testing.T) {
+		t.Parallel()
+
+		type T struct {
+			F string `json:"f" validate:"email,ascii"`
+		}
+
+		s, err := jsonschema.GenerateFor[T](t.Context(), opt)
+		require.NoError(t, err)
+		assert.Equal(t, "email", s.Properties["f"].Format)
+		assert.NotEmpty(t, s.Properties["f"].Pattern)
+	})
+
+	t.Run("each element level keeps its own record", func(t *testing.T) {
+		t.Parallel()
+
+		type T struct {
+			F []string `json:"f" validate:"dive,email"`
+		}
+
+		s, err := jsonschema.GenerateFor[T](t.Context(), opt)
+		require.NoError(t, err)
+		assert.Equal(t, "email", s.Properties["f"].Items.Format)
+	})
+}

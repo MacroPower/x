@@ -38,6 +38,13 @@ var (
 	// anywhere else, so the interpreter refuses it too rather than emitting a
 	// schema for a tag the library cannot load.
 	ErrKeysPlacement = errors.New("validate tag: keys must immediately follow dive")
+	// ErrRepeatedKeyword reports two validators in one tag that both set one
+	// schema keyword (email and url both name format, alpha and numeric both
+	// name pattern). A schema carries one value per keyword, and
+	// go-playground applies both validators, so keeping either one alone
+	// would silently drop a constraint; the tag is refused instead. The
+	// error names both validators.
+	ErrRepeatedKeyword = errors.New("validate tag: two validators set one keyword")
 
 	// ErrOneOfKind reports a oneof on a bool or float kind. Go-playground's
 	// isOneOf formats the value as text and handles only the string and
@@ -95,6 +102,11 @@ func (i *Interpreter) Interpret(_ context.Context, field jsonschema.FieldContext
 // one place a keys block may open.
 func applyParts(parts []string, field jsonschema.FieldContext, afterDive bool) error {
 	var inKeys bool
+
+	// The keyword-setting validators applied so far, keyed by the keyword
+	// each sets, so a second validator naming the same keyword is refused
+	// rather than dropped. An element level starts its own record.
+	applied := map[tagmodel.Op]string{}
 
 	for idx := range parts {
 		part := strings.TrimSpace(parts[idx])
@@ -203,7 +215,7 @@ func applyParts(parts []string, field jsonschema.FieldContext, afterDive bool) e
 			return fmt.Errorf("%w %q", ErrUnrecognizedValidator, part)
 		}
 
-		err := applyValidator(key, value, hasValue, field)
+		err := applyValidator(key, value, hasValue, field, applied)
 		if err != nil {
 			return err
 		}
@@ -222,7 +234,15 @@ func applyParts(parts []string, field jsonschema.FieldContext, afterDive bool) e
 // The one thing that is not a field constraint stays here: required also adds
 // the field to its parent object's required list, which is a write on the
 // enclosing schema rather than on this field.
-func applyValidator(key, value string, hasValue bool, field jsonschema.FieldContext) error {
+//
+// Applied records, per keyword, the validator in this tag that set it. A
+// validator whose operation replaces the keyword's value rather than
+// composing with it (the string keywords and the divisor) is refused with
+// [ErrRepeatedKeyword] when one already set that keyword, since the model
+// would keep the first and drop the second without a word.
+func applyValidator(
+	key, value string, hasValue bool, field jsonschema.FieldContext, applied map[tagmodel.Op]string,
+) error {
 	rule, known := validatorKeys[key]
 	if !known {
 		return fmt.Errorf("%w %q", ErrUnrecognizedValidator, key)
@@ -244,6 +264,14 @@ func applyValidator(key, value string, hasValue bool, field jsonschema.FieldCont
 		}
 
 		return fmt.Errorf("validate tag: %s: %w", reason, err)
+	}
+
+	if bound.Op.Overwrites() {
+		if prev, ok := applied[bound.Op]; ok {
+			return fmt.Errorf("%w: %s and %s", ErrRepeatedKeyword, prev, key)
+		}
+
+		applied[bound.Op] = key
 	}
 
 	if bound.Op == tagmodel.OpOneOf {
