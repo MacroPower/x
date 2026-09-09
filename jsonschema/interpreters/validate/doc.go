@@ -233,6 +233,15 @@
 // beginning with a digit; go-playground's hostname is the RFC 952 grammar,
 // which does not, so "1host" passes the schema and fails go-playground.
 //
+// The uri tag maps to the uri-reference format rather than uri, because
+// go-playground's uri is [net/url.ParseRequestURI], which accepts an absolute
+// path such as "/a" that the uri format rejects, and the mapping widens
+// rather than tightens. The wider format admits the relative references
+// go-playground refuses ("a/b", "?q", "#f", and the empty string), so those
+// pass the schema and fail go-playground. The url tag maps to the uri
+// format, which admits a bare scheme ("http:") that go-playground's url
+// refuses.
+//
 // Pattern tags (mapped to "pattern"):
 //
 //   - alpha: ^[a-zA-Z]+$
