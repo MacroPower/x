@@ -522,20 +522,20 @@ func (s *Session) CheckFallbackDocument(f *schemavet.Frozen, claimant string) er
 // Anchors and the per-run fallback registrations are outside the check, and both
 // exclusions are load-bearing. A substitute is frozen against the base in
 // effect at the failing reference rather than a base of its own, so its
-// anchors land in the containing document's anchor space. No reference
-// reaches them, because the substitute path builds no anchor registry a
-// lookup consults before the shared one. The check skips the fallback
-// registrations because the parent consults a fallback once per referencing
-// node and freezes the substitute afresh each time, so one substitute
-// answering several references would otherwise collide with its own earlier
-// copies.
+// anchors would land in the containing document's anchor space; the merge
+// leaves them out, so no reference reaches them and a dangling anchor
+// reference in the containing document consults the fallback instead of
+// resolving to the substitute. The check skips the fallback registrations
+// because the parent consults a fallback once per referencing node and
+// freezes the substitute afresh each time, so one substitute answering
+// several references would otherwise collide with its own earlier copies.
 func (s *Session) RegisterFallbackDocument(doc schemavet.Doc, claimant string) error {
 	err := s.CheckFallbackDocument(doc.Frozen(), claimant)
 	if err != nil {
 		return err
 	}
 
-	s.mergeFallback(doc.Frozen())
+	s.mergeFallback(doc.Frozen(), false)
 
 	return nil
 }
@@ -553,11 +553,14 @@ func (s *Session) RegisterFallback(node schemavet.Node) {
 	}
 
 	s.fallbackMinted[node.Root()] = node
-	s.mergeFallback(node.Frozen())
+	s.mergeFallback(node.Frozen(), true)
 }
 
 // mergeFallback folds a frozen tree's tables into the per-run fallback
-// registries.
+// registries. The anchors join only when anchors is set: a JSON-pointer
+// target is a fragment of a registered document, so its anchors belong to
+// that document's anchor space, while a substitute is frozen against a base
+// it does not own, so its anchors reach no reference.
 //
 // It deliberately drops $dynamicAnchor registrations from the fallback scope.
 // LookupDynamicAnchor resolves only against the shared registry, so a dynamic
@@ -567,7 +570,7 @@ func (s *Session) RegisterFallback(node schemavet.Node) {
 // The merge is first-write-wins so two schemas registering the same absolute
 // $id/$anchor key resolve deterministically to the earliest-materialized one,
 // matching the frozen tables' own precedence rather than a map-iteration race.
-func (s *Session) mergeFallback(f *schemavet.Frozen) {
+func (s *Session) mergeFallback(f *schemavet.Frozen, anchors bool) {
 	if s.fallbackBaseURIs == nil {
 		s.fallbackURI = map[uriref.DocKey]*jsonschema.Schema{}
 		s.fallbackAnchor = map[uriref.AnchorKey]*jsonschema.Schema{}
@@ -581,9 +584,11 @@ func (s *Session) mergeFallback(f *schemavet.Frozen) {
 		}
 	}
 
-	for k, v := range f.Anchors() {
-		if _, ok := s.fallbackAnchor[k]; !ok {
-			s.fallbackAnchor[k] = v
+	if anchors {
+		for k, v := range f.Anchors() {
+			if _, ok := s.fallbackAnchor[k]; !ok {
+				s.fallbackAnchor[k] = v
+			}
 		}
 	}
 

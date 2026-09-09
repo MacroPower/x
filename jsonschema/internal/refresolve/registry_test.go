@@ -211,8 +211,8 @@ func TestRegisterFetchedTwiceIsNotACollision(t *testing.T) {
 // follows. Its $id is a claim a real document could answer instead, so a $id
 // naming a loaded URI is refused. Its anchors are not, because a substitute
 // is frozen against the base of the reference it answers, so an anchor it
-// carries lands in that document's anchor space by construction and no
-// reference reaches it.
+// carries would land in that document's anchor space; the registration
+// leaves it out, so no reference reaches it.
 func TestRegisterFallbackDocumentChecksOnlyIDs(t *testing.T) {
 	t.Parallel()
 
@@ -235,6 +235,15 @@ func TestRegisterFallbackDocumentChecksOnlyIDs(t *testing.T) {
 		"the substitute",
 	)
 	require.NoError(t, err, "a substitute's anchor is not a claim against the document holding it")
+
+	err = sess.RegisterFallbackDocument(
+		freeze(t, &jsonschema.Schema{Anchor: "s", Type: "string"}, rootURI, schemavet.Profile{}),
+		"the substitute",
+	)
+	require.NoError(t, err)
+
+	_, ok := sess.LookupAnchor(dk(t, rootURI).Anchor("s"))
+	assert.False(t, ok, "a substitute's anchor answers no lookup in the document it was frozen against")
 }
 
 // loadedSession returns a session over a registry holding two documents: a root

@@ -1201,6 +1201,42 @@ func TestInlineRefFailureDocumentForCrossDocExtraKeyword(t *testing.T) {
 		"the path must be rooted in the fetched document")
 }
 
+// TestInlineSubstituteAnchorReachesNoReference pins that a substitute's
+// $anchor answers no reference in the document containing the failing ref.
+// Property "a"'s dangling remote ref draws a substitute carrying $anchor foo;
+// property "b"'s "#foo" names an anchor the root never declares, so it is a
+// failure of its own and consults the fallback rather than resolving to the
+// substitute that happened to be spliced first.
+func TestInlineSubstituteAnchorReachesNoReference(t *testing.T) {
+	t.Parallel()
+
+	var consulted []string
+
+	fallback := jsonschema.RefFallbackFunc(func(_ context.Context, f jsonschema.RefFailure) jsonschema.RefAction {
+		consulted = append(consulted, f.Ref)
+
+		if f.Ref == "#foo" {
+			return jsonschema.DropRef()
+		}
+
+		return jsonschema.SubstituteRef(&jsonschema.Schema{Anchor: "foo", Type: "string"})
+	})
+
+	root, err := jsonschema.ParseSchema([]byte(`{
+		"properties": {
+			"a": {"$ref": "https://nowhere.example/x"},
+			"b": {"$ref": "#foo"}
+		}
+	}`))
+	require.NoError(t, err)
+
+	_, err = jsonschema.Inline(t.Context(), root, jsonschema.WithRefFallback(fallback))
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"https://nowhere.example/x", "#foo"}, consulted,
+		"the dangling anchor reference is a failure of its own")
+}
+
 func TestInlineSubstituteRefFailureDocumentUsesSubstituteID(t *testing.T) {
 	t.Parallel()
 
