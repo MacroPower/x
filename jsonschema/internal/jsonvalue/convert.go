@@ -280,11 +280,11 @@ func intLiteral(v any) (string, bool) {
 	}
 }
 
-// isJSONNumber reports whether s matches the JSON number grammar exactly: an
+// IsJSONNumber reports whether s matches the JSON number grammar exactly: an
 // optional '-', an integer part with no leading zero, an optional fraction,
 // and an optional exponent. It mirrors [encoding/json]'s own check, which
 // refuses every other spelling a [jsonv1.Number] can carry.
-func isJSONNumber(s string) bool {
+func IsJSONNumber(s string) bool {
 	if s == "" {
 		return false
 	}

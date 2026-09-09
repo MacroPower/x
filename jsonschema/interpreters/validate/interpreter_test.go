@@ -11,6 +11,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	jsonv1 "encoding/json"
+
 	"go.jacobcolvin.com/x/jsonschema"
 	"go.jacobcolvin.com/x/jsonschema/interpreters/validate"
 )
@@ -3427,4 +3429,29 @@ func TestRepeatedKeywordRefused(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "email", s.Properties["f"].Items.Format)
 	})
+}
+
+// TestOneOfOnJSONNumberRefusesNonJSONToken pins that a oneof on a bare
+// [json.Number] field refuses a token outside the JSON number grammar, which
+// encoding/json never writes, and keeps every token inside it as the number
+// it spells.
+func TestOneOfOnJSONNumberRefusesNonJSONToken(t *testing.T) {
+	t.Parallel()
+
+	opt := jsonschema.WithTagInterpreter("validate", validate.NewInterpreter())
+
+	type Bad struct {
+		N jsonv1.Number `json:"n" validate:"oneof=+1 01"`
+	}
+
+	_, err := jsonschema.GenerateFor[Bad](t.Context(), opt)
+	require.ErrorContains(t, err, `"+1" is not a JSON number`)
+
+	type Good struct {
+		N jsonv1.Number `json:"n" validate:"oneof=1 2.5"`
+	}
+
+	s, err := jsonschema.GenerateFor[Good](t.Context(), opt)
+	require.NoError(t, err)
+	assert.Len(t, s.Properties["n"].Enum, 2)
 }

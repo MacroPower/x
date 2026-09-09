@@ -102,7 +102,7 @@ func NewNumber(literal string) Value {
 	// The decimal parser accepts a few spellings outside the JSON grammar (a
 	// leading '+', a leading zero, a bare '.5' or '5.'), so the grammar gates
 	// the parse: a literal outside it carries no value.
-	if !isJSONNumber(literal) {
+	if !IsJSONNumber(literal) {
 		return v
 	}
 

@@ -168,7 +168,12 @@
 //
 // An [encoding/json.Number] is the one Go string kind exempt from that rule.
 // [encoding/json] writes it as the number it holds, so a quoted one emits its
-// literal once-quoted and follows the coerced-numeric rules above instead.
+// literal once-quoted and follows the coerced-numeric rules above instead. A
+// bare one takes the numeric rules on the number's value, while go-playground
+// validates it as the string kind it is (rune length for the bounds, text
+// equality for eq, ne, and oneof), so the two sides disagree on such a field.
+// A oneof token outside the JSON number grammar is refused, since
+// [encoding/json] writes no such literal and no marshaled value equals it.
 //
 // Length and size bounds (minLength/maxLength, minItems/maxItems,
 // minProperties/maxProperties) from several rules in one tag intersect

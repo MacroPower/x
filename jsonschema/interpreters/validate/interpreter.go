@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"go.jacobcolvin.com/x/jsonschema"
+	"go.jacobcolvin.com/x/jsonschema/internal/jsonvalue"
 	"go.jacobcolvin.com/x/jsonschema/internal/numkind"
 	"go.jacobcolvin.com/x/jsonschema/internal/tagmodel"
 )
@@ -321,6 +322,14 @@ func checkOneOf(field jsonschema.FieldContext, shape tagmodel.Shape, tokens []st
 	}
 
 	if shape.Form == tagmodel.FormNumber {
+		// An encoding/json.Number is the one string kind with a number form.
+		// Go-playground compares its text against the raw tokens, and
+		// encoding/json writes only literals inside the JSON grammar, so a
+		// token outside it can equal no marshaled value.
+		if shape.Kind == reflect.String {
+			return checkJSONNumberOneOf(tokens)
+		}
+
 		return checkCanonicalOneOfKind(shape.Kind, tokens)
 	}
 
@@ -375,6 +384,19 @@ func checkCanonicalOneOfKind(kind reflect.Kind, tokens []string) error {
 
 		if canonical != tok {
 			return fmt.Errorf("%q is not the canonical spelling %q go-playground compares against", tok, canonical)
+		}
+	}
+
+	return nil
+}
+
+// checkJSONNumberOneOf rejects a oneof token on an [encoding/json.Number]
+// field that the JSON number grammar refuses. Such a literal never marshals,
+// so the enum this dialect would emit admits a number no value spells.
+func checkJSONNumberOneOf(tokens []string) error {
+	for _, tok := range tokens {
+		if !jsonvalue.IsJSONNumber(tok) {
+			return fmt.Errorf("%q is not a JSON number, so no marshaled value equals it", tok)
 		}
 	}
 
