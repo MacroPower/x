@@ -1773,27 +1773,53 @@ func TestEqOnBoolProducesBooleanConst(t *testing.T) {
 		"eq=true on bool produces a boolean const")
 }
 
-func TestOneOfOnBoolProducesBooleanEnum(t *testing.T) {
+// onOff is a bool that marshals as text, so its schema is a string while its
+// Go kind stays Bool.
+type onOff bool
+
+// MarshalText writes the flag as on or off.
+func (o onOff) MarshalText() ([]byte, error) {
+	if o {
+		return []byte("on"), nil
+	}
+
+	return []byte("off"), nil
+}
+
+// TestOneOfOnBoolIsRefused pins that oneof on a bool kind is an error rather
+// than a boolean enum: go-playground panics on the tag, so an enum would
+// describe a constraint the library cannot load. The refusal keys on the Go
+// kind, so a text-marshaling bool is refused too.
+func TestOneOfOnBoolIsRefused(t *testing.T) {
 	t.Parallel()
 
-	// Oneof on a bool field parses each value into a boolean, so the enum holds
-	// [true, false] rather than the string forms.
-	type MyType struct {
+	type plain struct {
 		Active bool `json:"active" validate:"oneof=true false"`
 	}
 
-	s, err := jsonschema.GenerateFor[MyType](t.Context(),
-		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
-	)
-	require.NoError(t, err)
+	type textual struct {
+		Active onOff `json:"active" validate:"oneof=on off"`
+	}
 
-	prop := s.Properties["active"]
-	require.NotNil(t, prop)
-	require.NotNil(t, prop.Enum)
+	tests := map[string]func() (*jsonschema.Schema, error){
+		"plain bool": func() (*jsonschema.Schema, error) {
+			return jsonschema.GenerateFor[plain](t.Context(),
+				jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()))
+		},
+		"text-marshaling bool": func() (*jsonschema.Schema, error) {
+			return jsonschema.GenerateFor[textual](t.Context(),
+				jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()))
+		},
+	}
 
-	for _, v := range prop.Enum {
-		assert.IsType(t, true, v,
-			"oneof on bool produces boolean enum values")
+	for name, gen := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := gen()
+			require.ErrorIs(t, err, validate.ErrOneOfKind)
+			assert.Contains(t, err.Error(), "validate tag: oneof:")
+		})
 	}
 }
 
@@ -2734,10 +2760,6 @@ func TestValidateInterpreter_NumericValueOverflowErrors(t *testing.T) {
 		Value float32 `json:"value" validate:"eq=1e300"`
 	}
 
-	type oneofFloat32 struct {
-		Value float32 `json:"value" validate:"oneof=1 1e300"`
-	}
-
 	type inRangeFloat32 struct {
 		Value float32 `json:"value" validate:"eq=1e30"`
 	}
@@ -2793,14 +2815,6 @@ func TestValidateInterpreter_NumericValueOverflowErrors(t *testing.T) {
 		"eq overflow on float32": {
 			gen: func() (*jsonschema.Schema, error) {
 				return jsonschema.GenerateFor[eqFloat32](t.Context(),
-					jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
-				)
-			},
-			err: true,
-		},
-		"oneof overflow on float32": {
-			gen: func() (*jsonschema.Schema, error) {
-				return jsonschema.GenerateFor[oneofFloat32](t.Context(),
 					jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 				)
 			},
@@ -2937,46 +2951,76 @@ func TestValidateInterpreterGoPlaygroundParity(t *testing.T) {
 		require.NoError(t, err)
 		assert.Len(t, s.Properties["f"].Enum, 2, "a repeated token enumerates once")
 
-		// A oneof on a sequence reaches the numeric elements, so it refuses
+		// A oneof on a sequence reaches the integer elements, so it refuses
 		// the token the dive spelling refuses, however deep the elements sit.
 		type S struct {
-			F []float64 `json:"f" validate:"oneof=1.0 2"`
+			F []int `json:"f" validate:"oneof=01 2"`
 		}
 
 		_, err = jsonschema.GenerateFor[S](t.Context(), opt)
-		require.ErrorContains(t, err, `"1.0" is not the canonical spelling "1"`)
+		require.ErrorContains(t, err, `"01" is not the canonical spelling "1"`)
 
 		type SS struct {
-			F [][]float64 `json:"f" validate:"oneof=1.0 2"`
+			F [][]int `json:"f" validate:"oneof=01 2"`
 		}
 
 		_, err = jsonschema.GenerateFor[SS](t.Context(), opt)
-		require.ErrorContains(t, err, `"1.0" is not the canonical spelling "1"`)
+		require.ErrorContains(t, err, `"01" is not the canonical spelling "1"`)
 
 		type SD struct {
-			F []float64 `json:"f" validate:"dive,oneof=1.0 2"`
+			F []int `json:"f" validate:"dive,oneof=01 2"`
 		}
 
 		_, err = jsonschema.GenerateFor[SD](t.Context(), opt)
-		require.ErrorContains(t, err, `"1.0" is not the canonical spelling "1"`)
+		require.ErrorContains(t, err, `"01" is not the canonical spelling "1"`)
+	})
 
-		// A float token is canonical at the field's width, the text eq=0.1
-		// already pins on a float32, rather than at 64 bits where no
-		// float32 fraction spells itself back.
+	t.Run("oneof on a float kind is refused", func(t *testing.T) {
+		t.Parallel()
+
+		// Go-playground panics on oneof against a float, so there is no
+		// spelling to canonicalize: every float width, the coerced form, and
+		// a float leaf under a sequence refuse with ErrOneOfKind, under both
+		// the sequence-wide and the dive spelling.
+		type F64 struct {
+			F float64 `json:"f" validate:"oneof=1 2"`
+		}
+
 		type F32 struct {
 			F float32 `json:"f" validate:"oneof=0.1 2"`
 		}
 
-		s, err = jsonschema.GenerateFor[F32](t.Context(), opt)
-		require.NoError(t, err)
-		assert.Equal(t, []any{0.1, 2.0}, s.Properties["f"].Enum)
-
-		type F32Long struct {
-			F float32 `json:"f" validate:"oneof=0.10000000149011612 2"`
+		type Coerced struct {
+			F float64 `json:"f,string" validate:"oneof=1 2"`
 		}
 
-		_, err = jsonschema.GenerateFor[F32Long](t.Context(), opt)
-		require.ErrorContains(t, err, `is not the canonical spelling "0.1"`)
+		type S struct {
+			F []float64 `json:"f" validate:"oneof=1.5 2"`
+		}
+
+		type SS struct {
+			F [][]float64 `json:"f" validate:"oneof=1.5 2"`
+		}
+
+		type SD struct {
+			F []float64 `json:"f" validate:"dive,oneof=1.5 2"`
+		}
+
+		for name, gen := range map[string]func() (*jsonschema.Schema, error){
+			"float64":               func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[F64](t.Context(), opt) },
+			"float32":               func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[F32](t.Context(), opt) },
+			"coerced float":         func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[Coerced](t.Context(), opt) },
+			"slice of float":        func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[S](t.Context(), opt) },
+			"nested slice of float": func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[SS](t.Context(), opt) },
+			"dive onto float":       func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[SD](t.Context(), opt) },
+		} {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				_, err := gen()
+				require.ErrorIs(t, err, validate.ErrOneOfKind)
+			})
+		}
 	})
 
 	t.Run("empty eq pins the empty string", func(t *testing.T) {

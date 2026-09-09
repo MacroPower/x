@@ -404,6 +404,12 @@ type crossShape struct {
 	// an inert keyword. The equivalence pairing skips it; each dialect's own
 	// tests pin its half.
 	uniqueDiverges bool
+	// The enumDiverges flag marks a shape where the enumeration splits on the
+	// reference library rather than the model: go-playground panics on oneof
+	// against a bool or a float, so the validate dialect refuses the tag
+	// (validate.ErrOneOfKind) while the jsonschema tag's enum= lists the
+	// values. The equivalence pairing pins the split instead of the schema.
+	enumDiverges bool
 }
 
 func crossShapes() []crossShape {
@@ -437,11 +443,19 @@ func crossShapes() []crossShape {
 	byteShape := with(str, "byte slice", reflect.TypeFor[[]byte](), "v")
 	byteShape.sized = true
 
+	// Go-playground panics on oneof against a bool or a float, so the
+	// validate dialect refuses what the jsonschema tag's enum= accepts.
+	floatShape := with(num, "float64", reflect.TypeFor[float64](), "v")
+	floatShape.enumDiverges = true
+
+	boolShape := with(bl, "bool", reflect.TypeFor[bool](), "v")
+	boolShape.enumDiverges = true
+
 	return []crossShape{
 		with(str, "string", reflect.TypeFor[string](), "v"),
 		with(num, "int8", reflect.TypeFor[int8](), "v"),
-		with(num, "float64", reflect.TypeFor[float64](), "v"),
-		with(bl, "bool", reflect.TypeFor[bool](), "v"),
+		floatShape,
+		boolShape,
 		with(num, "pointer to int", reflect.TypeFor[*int](), "v"),
 		sized(num, "slice of int8", reflect.TypeFor[[]int8]()),
 		sized(str, "nested string slice", reflect.TypeFor[[][]string]()),
@@ -519,8 +533,24 @@ func TestCrossDialectEquivalence(t *testing.T) {
 			// Pairing them here would assert an equivalence neither dialect
 			// claims. The matrix golden pins which shapes carry a bound at all,
 			// and each dialect's own tests pin its literal domain.
-			pairs := map[string][2]string{
-				"enumeration": {"enum=" + sh.pipeList, "oneof=" + sh.spaceLis},
+			pairs := map[string][2]string{}
+
+			// Both dialects reach the same enumeration cell, except on the
+			// two kinds go-playground panics on, where the validate dialect
+			// refuses the tag the jsonschema tag accepts (see
+			// crossShape.enumDiverges); that split is pinned as such.
+			if sh.enumDiverges {
+				t.Run("enumeration diverges by kind", func(t *testing.T) {
+					t.Parallel()
+
+					_, err := generateWithTag(t, sh, "jsonschema", "enum="+sh.pipeList)
+					require.NoError(t, err, "the jsonschema tag lists the values")
+
+					_, err = generateWithTag(t, sh, "validate", "oneof="+sh.spaceLis)
+					require.ErrorIs(t, err, validate.ErrOneOfKind, "the validate dialect refuses the kind")
+				})
+			} else {
+				pairs["enumeration"] = [2]string{"enum=" + sh.pipeList, "oneof=" + sh.spaceLis}
 			}
 
 			// Both dialects reach the same uniqueness cell, so every shape

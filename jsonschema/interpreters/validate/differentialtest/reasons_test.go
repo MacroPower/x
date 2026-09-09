@@ -40,8 +40,10 @@ const (
 	reasonRequiredPointerNilCollection = "a nil collection behind a non-nil pointer marshals identically to the allocated empty go-playground accepts"
 	// Go-playground's oneof formats the field as text and handles only the
 	// string and integer kinds, panicking with "Bad field type" on anything
-	// else, so it cannot be the reference for oneof on a bool or a float.
-	reasonOneOfKindPanic = "go-playground panics on oneof against any kind but a string or an integer"
+	// else, and the interpreter refuses the same pair with ErrOneOfKind. The
+	// shape pools omit the pair, since there is no verdict to compare; the
+	// spelling rig spells it and compares the two refusals.
+	reasonOneOfKindPanic = "both sides refuse oneof on a bool or a float; the spelling rig compares the refusal"
 	// Go-playground's unique on a map means its values are distinct, which has
 	// no object-side counterpart to uniqueItems, so the interpreter emits
 	// nothing and the two cannot agree on a duplicate-valued map.

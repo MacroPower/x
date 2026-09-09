@@ -92,10 +92,12 @@
 //   - max=N / lte=N: maximum
 //   - gt=N: exclusiveMinimum
 //   - lt=N: exclusiveMaximum
-//   - oneof=1 2 3: enum (space-separated, parsed as numbers). Each token
+//   - oneof=1 2 3: enum (space-separated, parsed as integers). Each token
 //     must be the canonical spelling go-playground compares the value's
-//     text against, so +1, 01, and 1.0 are errors rather than an enum that
-//     admits a value go-playground rejects.
+//     text against, so +1 and 01 are errors rather than an enum that
+//     admits a value go-playground rejects. On a float kind oneof is an
+//     error ([ErrOneOfKind]), since go-playground panics on it; the
+//     jsonschema tag's enum= lists float values.
 //   - eq=N: const
 //   - ne=N: forbids the value via not (not.const for a single value, composed
 //     into not.enum or allOf when several values are forbidden, e.g. required+ne)
@@ -126,7 +128,7 @@
 // Scalar values (eq, ne, oneof, and len on a numeric field) are instead
 // range-checked against the field's Go type, and a value the type cannot hold
 // is an error, mirroring the jsonschema tag's const/enum behavior. A float
-// value takes the same width rule as a bound.
+// eq or ne value takes the same width rule as a bound.
 //
 // Some fields serialize a scalar Go value as a quoted string, so the generated
 // schema has type string: a json:",string" numeric or bool field, and equally a
@@ -178,7 +180,9 @@
 //
 //   - eq=true / eq=false: const
 //   - ne=true / ne=false: not (forbids the value)
-//   - oneof=true false: enum
+//
+// A oneof on a bool is an error ([ErrOneOfKind]), since go-playground panics
+// on it; eq pins one value, and the jsonschema tag's enum= lists both.
 //
 // Combining required with eq=false on a bool is an error
 // ([ErrConflictingConstraints]): required on a bool pins the value to true,

@@ -183,9 +183,6 @@ func spellingExclusions() []spellingExclusion {
 
 			return false
 		}},
-		{reason: reasonOneOfKindPanic, catches: func(tag string, kind spellingKind, _ string, _ error) bool {
-			return spells(tag, "oneof") && (kind.typ.Kind() == reflect.Bool || isFloatKind(kind.typ))
-		}},
 		{reason: reasonOneOfSequenceRetarget, catches: func(tag string, kind spellingKind, _ string, _ error) bool {
 			return spells(tag, "oneof") && isCollectionKind(kind.typ) && !spellsAfterDive(tag, "oneof")
 		}},
@@ -712,14 +709,17 @@ func spellingSeeds() []spellingSeed {
 		}
 	}
 
-	str, integer, unsigned, float, boolean, sequence := index[reflect.TypeFor[string]()],
+	str, integer, unsigned, float, narrow, boolean, sequence := index[reflect.TypeFor[string]()],
 		index[reflect.TypeFor[int]()], index[reflect.TypeFor[uint8]()],
-		index[reflect.TypeFor[float64]()], index[reflect.TypeFor[bool]()],
-		index[reflect.TypeFor[[]string]()]
+		index[reflect.TypeFor[float64]()], index[reflect.TypeFor[float32]()],
+		index[reflect.TypeFor[bool]()], index[reflect.TypeFor[[]string]()]
 
 	return append(seeds,
 		spellingSeed{tag: "isdefault", kind: str},
 		spellingSeed{tag: "oneof=+1 01 2", kind: integer},
+		spellingSeed{tag: "oneof=true false", kind: boolean},
+		spellingSeed{tag: "oneof=1 2", kind: float},
+		spellingSeed{tag: "oneof=0.1 2", kind: narrow},
 		spellingSeed{tag: "eq=", kind: str},
 		spellingSeed{tag: "eq", kind: str},
 		spellingSeed{tag: "unique=", kind: sequence},
@@ -850,8 +850,8 @@ func TestSpellingExclusionsAreReasoned(t *testing.T) {
 		"trailing comma":               {tag: "min=3,", kind: "int", want: reasonPartLenient},
 		"space after comma":            {tag: "required, min=3", kind: "int", want: reasonPartLenient},
 		"dash part":                    {tag: "-,min=3", kind: "int", want: reasonPartLenient},
-		"oneof on bool":                {tag: "oneof=true false", kind: "bool", want: reasonOneOfKindPanic},
-		"oneof on float":               {tag: "oneof=1 2", kind: "float64", want: reasonOneOfKindPanic},
+		"oneof on bool":                {tag: "oneof=true false", kind: "bool", want: ""},
+		"oneof on float":               {tag: "oneof=1 2", kind: "float64", want: ""},
 		"oneof on a sequence":          {tag: "oneof=a b", kind: "[]string", want: reasonOneOfSequenceRetarget},
 		"oneof after dive is compared": {tag: "dive,oneof=a b", kind: "[]string", want: ""},
 		"dive on a byte slice":         {tag: "dive,min=1", kind: "[]byte", want: reasonByteSliceElements},

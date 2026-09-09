@@ -39,6 +39,15 @@ var (
 	// schema for a tag the library cannot load.
 	ErrKeysPlacement = errors.New("validate tag: keys must immediately follow dive")
 
+	// ErrOneOfKind reports a oneof on a bool or float kind. Go-playground's
+	// isOneOf formats the value as text and handles only the string and
+	// integer kinds, panicking on any other, so the interpreter refuses the
+	// tag rather than emitting an enum for a tag the library cannot load.
+	// The refusal keys on the Go kind behind the field, so a json:",string"
+	// float and a text-marshaling bool are refused too. On a bool, eq pins
+	// one value; on either kind the jsonschema tag's enum= lists the values.
+	ErrOneOfKind = errors.New("go-playground loads oneof only on a string or integer kind")
+
 	// The oneOfSplitRegexp pattern matches one oneof token, mirroring
 	// go-playground/validator's own splitter (`'[^']*'|\S+`): a single-quoted
 	// run (one value even with spaces) or an unquoted whitespace-delimited run.
@@ -238,7 +247,7 @@ func applyValidator(key, value string, hasValue bool, field jsonschema.FieldCont
 	}
 
 	if bound.Op == tagmodel.OpOneOf {
-		err = checkCanonicalOneOf(field, shape, bound.Params.Values())
+		err = checkOneOf(field, shape, bound.Params.Values())
 		if err != nil {
 			return fmt.Errorf("validate tag: %s: %w", key, err)
 		}
@@ -252,14 +261,22 @@ func applyValidator(key, value string, hasValue bool, field jsonschema.FieldCont
 	return nil
 }
 
-// checkCanonicalOneOf rejects a oneof token that go-playground could never
-// match on the number the rule reaches. On a sequence the rule retargets onto
-// the elements, so the check descends through the element contexts the same
-// way and runs on every numeric leaf; a oneof written on a []float64 and one
-// written under a dive then refuse the same tokens. A coerced number is
-// exempt: its scalars are canonicalized against the serialized text by design
+// checkOneOf rejects a oneof go-playground could never run or match on the
+// value the rule reaches. A bool or float kind is refused outright, since
+// go-playground panics on it; the check reads the Go kind, not the JSON form,
+// so a json:",string" float and a text-marshaling bool are refused alike. On
+// a number every token must be the canonical spelling. On a sequence the rule
+// retargets onto the elements, so the check descends through the element
+// contexts the same way and runs on every leaf; a oneof written on a []int
+// and one written under a dive then refuse the same tokens, and a []float64
+// refuses under both spellings. A coerced integer is exempt from the spelling
+// check: its scalars are canonicalized against the serialized text by design
 // (see the package doc).
-func checkCanonicalOneOf(field jsonschema.FieldContext, shape tagmodel.Shape, tokens []string) error {
+func checkOneOf(field jsonschema.FieldContext, shape tagmodel.Shape, tokens []string) error {
+	if shape.Elem != nil && (numkind.IsFloat(shape.Kind) || shape.Kind == reflect.Bool) {
+		return fmt.Errorf("%w: %s", ErrOneOfKind, shape.Elem)
+	}
+
 	if shape.Form == tagmodel.FormNumber {
 		return checkCanonicalOneOfKind(shape.Kind, tokens)
 	}
@@ -270,7 +287,7 @@ func checkCanonicalOneOf(field jsonschema.FieldContext, shape tagmodel.Shape, to
 
 	elems := field.ElementContexts()
 	for i := range elems {
-		err := checkCanonicalOneOf(elems[i], shapeOf(elems[i]), tokens)
+		err := checkOneOf(elems[i], shapeOf(elems[i]), tokens)
 		if err != nil {
 			return err
 		}
@@ -279,12 +296,13 @@ func checkCanonicalOneOf(field jsonschema.FieldContext, shape tagmodel.Shape, to
 	return nil
 }
 
-// checkCanonicalOneOfKind rejects a oneof token on a numeric kind whose
+// checkCanonicalOneOfKind rejects a oneof token on an integer kind whose
 // spelling go-playground could never match. Its isOneOf compares the field's
-// value formatted with strconv against the raw tokens, so a token such as +1,
-// 01, or 1.0 matches no value at all, while the enum this dialect emits would
+// value formatted with strconv against the raw tokens, so a token such as +1
+// or 01 matches no value at all, while the enum this dialect emits would
 // admit the number it parses to. A token that does not parse at the kind's
-// width is left to the model, which reports the parse or range fault.
+// width is left to the model, which reports the parse or range fault. A
+// float kind never reaches here, since checkOneOf refuses it first.
 func checkCanonicalOneOfKind(kind reflect.Kind, tokens []string) error {
 	bits := kindBits(kind)
 
@@ -307,17 +325,6 @@ func checkCanonicalOneOfKind(kind reflect.Kind, tokens []string) error {
 			}
 
 			canonical = strconv.FormatInt(n, 10)
-
-		case numkind.IsFloat(kind):
-			f, err := strconv.ParseFloat(tok, bits)
-			if err != nil {
-				continue
-			}
-
-			// The shortest decimal at the kind's width, as the package doc
-			// promises for every float literal; formatting a float32 at 64
-			// bits would refuse every token the width cannot hold exactly.
-			canonical = strconv.FormatFloat(f, 'f', -1, bits)
 
 		default:
 			return nil

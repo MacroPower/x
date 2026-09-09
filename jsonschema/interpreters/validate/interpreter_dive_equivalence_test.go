@@ -68,21 +68,13 @@ func TestDiveEquivalenceOnSequences(t *testing.T) {
 		"fixed array of int8":              reflect.TypeFor[[2]int8](),
 		"slice of pointer to string":       reflect.TypeFor[[]*string](),
 		"slice of text-marshaling numeric": reflect.TypeFor[[]diveLevel](),
-		"slice of float64":                 reflect.TypeFor[[]float64](),
-		"slice of slice of float64":        reflect.TypeFor[[][]float64](),
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			// The float values carry a fraction so the canonical-spelling
-			// check, which both paths must run, has a token to accept.
 			values := "1 2"
-
-			switch leaf := leafType(typ); {
-			case leaf.Kind() == reflect.String:
+			if leafType(typ).Kind() == reflect.String {
 				values = "a b"
-			case leaf.Kind() == reflect.Float32 || leaf.Kind() == reflect.Float64:
-				values = "1.5 2"
 			}
 
 			direct, directErr := generateDiveShape(t, typ, "oneof="+values)
@@ -105,9 +97,23 @@ func TestDiveEquivalenceOnSequences(t *testing.T) {
 
 // TestDiveEquivalenceExceptions pins the two shapes where the sequence-wide and
 // dive spellings deliberately differ, so the asymmetry stays a decision rather
-// than drifting back into an accident.
+// than drifting back into an accident, and the one leaf kind both spellings
+// refuse alike.
 func TestDiveEquivalenceExceptions(t *testing.T) {
 	t.Parallel()
+
+	t.Run("a float leaf refuses both spellings", func(t *testing.T) {
+		t.Parallel()
+
+		// Go-playground panics on oneof against a float, so the element path
+		// refuses the leaf under either spelling and however deep it sits.
+		for _, typ := range []reflect.Type{reflect.TypeFor[[]float64](), reflect.TypeFor[[][]float32]()} {
+			for _, tag := range []string{"oneof=1.5 2", "dive,oneof=1.5 2"} {
+				_, err := generateDiveShape(t, typ, tag)
+				require.ErrorIs(t, err, validate.ErrOneOfKind, "validate:%q on a %s", tag, typ)
+			}
+		}
+	})
 
 	t.Run("a map descends only under an explicit dive", func(t *testing.T) {
 		t.Parallel()
