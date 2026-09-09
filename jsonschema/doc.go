@@ -1624,7 +1624,10 @@
 //     form {"not": {}} (the shape the upstream produces when unmarshaling the
 //     JSON boolean false), which marshals to JSON false and rejects every
 //     instance. Any sibling field next to the not, including annotations,
-//     defeats the form.
+//     defeats the form. Because the type equates the two spellings, a JSON
+//     Pointer addresses a boolean false schema through its {"not": {}}
+//     form, so "#/properties/a/not" resolves inside a property written as
+//     false.
 //
 // # Vocabularies
 //
