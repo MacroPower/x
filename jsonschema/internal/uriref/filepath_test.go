@@ -27,6 +27,8 @@ func TestFilePathFromURI(t *testing.T) {
 		"leading slash fallback":     {uri: "/abs/schema.json", want: "abs/schema.json"},
 		"relative path with query":   {uri: "a/b.json?v=1", want: "a/b.json"},
 		"file scheme with query":     {uri: "file:///a/b.json?v=1", want: "a/b.json"},
+		"drive path":                 {uri: "file:///C:/schemas/x.json", want: "C:/schemas/x.json"},
+		"drive path encoded space":   {uri: "file:///C:/a%20b.json", want: "C:/a b.json"},
 	}
 
 	for name, tc := range tests {

@@ -365,6 +365,27 @@ func TestCompileRejectsInvalidBaseURI(t *testing.T) {
 	require.ErrorIs(t, err, jsonschema.ErrInvalidBaseURI)
 }
 
+// TestCompileDrivePathBase pins that Compile reads a Windows drive path base
+// as the file URI of its drive, so a relative ref in the root resolves under
+// the drive and StripPrefix over that base serves it from an fs.
+func TestCompileDrivePathBase(t *testing.T) {
+	t.Parallel()
+
+	schema, err := jsonschema.ParseSchema([]byte(`{"$ref": "sub.json"}`))
+	require.NoError(t, err)
+
+	resolver := jsonschema.StripPrefix("file:///C:/schemas/",
+		jsonschema.NewFileResolver(mapFS(map[string]string{"sub.json": `{"type": "integer"}`})))
+
+	opts := []jsonschema.ValidateOption{
+		jsonschema.WithRefResolver(resolver),
+		jsonschema.WithBaseURI(`C:\schemas\main.json`),
+	}
+
+	require.NoError(t, validateValue(t.Context(), schema, 1, opts...))
+	require.Error(t, validateValue(t.Context(), schema, "s", opts...))
+}
+
 // TestCompileChecksVocabularyPlacement locks in the $vocabulary placement
 // check: a node carrying $vocabulary needs a $schema that establishes the
 // Draft 2020-12 dialect. The match is exact, so the trailing-"#" spelling of

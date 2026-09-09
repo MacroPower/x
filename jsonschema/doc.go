@@ -1761,12 +1761,14 @@
 // against its base: the scheme and host lower-cased, every percent-encoding
 // hex digit upper-cased, an unreserved octet decoded rather than escaped, and
 // the path free of dot segments. A schemeless base is a file path resolved
-// against file:///, so "main.json" is served as "file:///main.json". Two
-// distinctions the normalization keeps: "%2F" stays encoded, since only
-// unreserved octets decode, and "http://x" and "http://x/" stay separate,
-// since RFC 3986 leaves an empty path and "/" scheme-specific. So every
-// spelling that names one document folds to one key, and the resolver is
-// called once for it however many references reach it.
+// against file:///, so "main.json" is served as "file:///main.json", and a
+// Windows drive path is the file URI of its drive, so "C:\schemas\main.json"
+// is served as "file:///C:/schemas/main.json". Two distinctions the
+// normalization keeps: "%2F" stays encoded, since only unreserved octets
+// decode, and "http://x" and "http://x/" stay separate, since RFC 3986
+// leaves an empty path and "/" scheme-specific. So every spelling that names
+// one document folds to one key, and the resolver is called once for it
+// however many references reach it.
 //
 // The resolver receives a context with every resolution call: the [Compile]
 // context for refs resolved while compiling, and the [Validator.Validate] (or
@@ -1803,11 +1805,13 @@
 //     the document through the [RefResolver] given via [WithRefResolver] and
 //     evaluates any fragment against the fetched document.
 //   - A schemeless base is normalized against file:///, so a back-reference
-//     to the root document finds the in-memory copy. With no base at all a
-//     relative ref is a bare path, and a relative ref inside a document
-//     fetched by one merges into that path per RFC 3986, so a document
-//     reached by "dir/a.json" from the root and by "a.json" from
-//     "dir/b.json" is one document under one key.
+//     to the root document finds the in-memory copy. A Windows drive path
+//     base ("C:\schemas\main.json") is normalized to the file URI of its
+//     drive ("file:///C:/schemas/main.json"), so a relative ref joins under
+//     the drive. With no base at all a relative ref is a bare path, and a
+//     relative ref inside a document fetched by one merges into that path
+//     per RFC 3986, so a document reached by "dir/a.json" from the root and
+//     by "a.json" from "dir/b.json" is one document under one key.
 //   - Inline expands fetched documents recursively under their own base URIs,
 //     so a relative ref inside a fetched document resolves against that
 //     document's URI and files can reference each other by relative path.
@@ -1821,7 +1825,10 @@
 //     file-path and relative refs during validation via [WithRefResolver].
 //   - [StripPrefix] wraps any resolver to strip a published remote base from
 //     each URI first, so refs absolutizing against an https $id can be served
-//     from the fs.
+//     from the fs. A drive path base calls for the same pairing, since the
+//     path [FileResolver] derives from "file:///C:/schemas/sub.json" starts
+//     with the drive, which no [os.DirFS] serves: strip
+//     "file:///C:/schemas/" and serve the rest from the directory.
 //   - Inline passes its context to the resolver with every document fetch, so
 //     a resolver that fetches over the network can honor cancellation and
 //     deadlines.

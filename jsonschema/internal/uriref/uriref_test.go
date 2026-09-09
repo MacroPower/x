@@ -223,8 +223,9 @@ func TestResolveRefusesAnUnparsableRef(t *testing.T) {
 }
 
 // TestParseBase pins the key a configured base mints: a schemeless base is a
-// file path under file:///, an absolute base canonicalizes, a fragment is
-// dropped, and a base that is not a URI reference is refused.
+// file path under file:///, a Windows drive path is a file URI under its
+// drive, an absolute base canonicalizes, a fragment is dropped, and a base
+// that is not a URI reference is refused.
 func TestParseBase(t *testing.T) {
 	t.Parallel()
 
@@ -242,6 +243,16 @@ func TestParseBase(t *testing.T) {
 		"dot segments collapse":       {base: "https://ex.test/x/../a.json", want: "https://ex.test/a.json"},
 		"opaque passes through":       {base: "urn:x:y", want: "urn:x:y"},
 		"unparsable is refused":       {base: "http://[::1", err: true},
+
+		// A Windows drive path is the file URI of RFC 8089 appendix E.2. The
+		// drive letter keeps its case, a two-letter scheme stays a scheme, and
+		// the fragment rule applies as to any other base.
+		"drive path":                  {base: "C:/schemas/main.json", want: "file:///C:/schemas/main.json"},
+		"drive path with backslashes": {base: `C:\schemas\main.json`, want: "file:///C:/schemas/main.json"},
+		"drive path fragment dropped": {base: "C:/schemas/main.json#x", want: "file:///C:/schemas/main.json"},
+		"drive root":                  {base: `C:\`, want: "file:///C:/"},
+		"lowercase drive keeps case":  {base: "c:/schemas/main.json", want: "file:///c:/schemas/main.json"},
+		"two-letter scheme stays":     {base: "ab:x/y.json", want: "ab:x/y.json"},
 	}
 
 	for name, tc := range tests {
@@ -258,6 +269,37 @@ func TestParseBase(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, tc.want, got.String())
 			assert.Equal(t, tc.want == "", got.IsZero())
+		})
+	}
+}
+
+// TestParseBaseDrivePathResolves pins that a reference joins under the drive
+// of a drive-path base: a sibling name, a parent-relative path, and a
+// fragment all resolve as against any other file URI.
+func TestParseBaseDrivePathResolves(t *testing.T) {
+	t.Parallel()
+
+	base, err := uriref.ParseBase(`C:\schemas\main.json`)
+	require.NoError(t, err)
+
+	tests := map[string]struct {
+		ref     string
+		want    string
+		pointer string
+	}{
+		"sibling":         {ref: "sub.json", want: "file:///C:/schemas/sub.json"},
+		"parent relative": {ref: "../other/x.json", want: "file:///C:/other/x.json"},
+		"fragment only":   {ref: "#/a", want: "file:///C:/schemas/main.json", pointer: "/a"},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got, frag, err := uriref.Resolve(base, tc.ref)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got.String())
+			assert.Equal(t, tc.pointer, frag.Name())
 		})
 	}
 }

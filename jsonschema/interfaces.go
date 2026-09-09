@@ -598,6 +598,14 @@ func (o baseURIOption) applyInline(in *inliner) { in.baseURI = o.base }
 // re-fetching it. [FileResolver] strips the file:// scheme and the leading
 // "/", so [io/fs] paths keep working; a custom resolver paired with a
 // schemeless base receives the normalized file:/// form.
+//
+// A Windows drive path ("C:\schemas\main.json" or "C:/schemas/main.json")
+// is the file URI RFC 8089 gives it, "file:///C:/schemas/main.json", with
+// the drive letter's case kept, so a relative ref joins under the drive
+// ("sub.json" resolves to "file:///C:/schemas/sub.json"). The path a
+// [FileResolver] derives from such a URI starts with the drive, which no
+// [os.DirFS] serves, so pair the resolver with [StripPrefix] over the
+// directory's file URI ("file:///C:/schemas/").
 func WithBaseURI(base string) RefOption {
 	return baseURIOption{base: base}
 }

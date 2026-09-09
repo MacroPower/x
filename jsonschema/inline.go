@@ -1295,7 +1295,10 @@ func (in *inliner) fetchDoc(baseURI uriref.DocKey) (*Schema, error) {
 // document; a referenced file that does not contain one is an error.
 // Construct it with [NewFileResolver]; pair [os.DirFS] with
 // [WithBaseURI] to inline schemas that reference each other by
-// relative file path.
+// relative file path. A Windows drive path base yields URIs whose derived
+// path starts with the drive ("C:/schemas/sub.json"), which no [os.DirFS]
+// serves, so wrap the resolver in [StripPrefix] over the directory's file
+// URI as [WithBaseURI] describes.
 //
 // A "file://" scheme, any authority, and leading slashes are dropped, so URIs
 // are resolved relative to the fs root: relative refs absolutize against the

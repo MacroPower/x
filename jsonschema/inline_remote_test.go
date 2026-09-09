@@ -848,6 +848,33 @@ func (r *fetchCountingResolver) ResolveRef(ctx context.Context, uri string) (*js
 	return r.inner.ResolveRef(ctx, uri)
 }
 
+// TestInlineDrivePathBase pins that a Windows drive path given to WithBaseURI
+// is the file URI of its drive: the resolver is asked for
+// file:///C:/schemas/sub.json, and StripPrefix over that base serves the
+// document from an fs rooted at the directory.
+func TestInlineDrivePathBase(t *testing.T) {
+	t.Parallel()
+
+	root, err := jsonschema.ParseSchema([]byte(`{"$ref": "sub.json"}`))
+	require.NoError(t, err)
+
+	files := mapFS(map[string]string{"sub.json": `{"type": "integer"}`})
+
+	r := &fetchCountingResolver{
+		inner: jsonschema.StripPrefix("file:///C:/schemas/", jsonschema.NewFileResolver(files)),
+		calls: map[string]int{},
+	}
+
+	inlined, err := jsonschema.Inline(t.Context(), root,
+		jsonschema.WithRefResolver(r),
+		jsonschema.WithBaseURI(`C:\schemas\main.json`),
+	)
+	require.NoError(t, err)
+
+	assert.Equal(t, map[string]int{"file:///C:/schemas/sub.json": 1}, r.calls)
+	assert.Equal(t, "integer", inlined.Type)
+}
+
 // TestRefEnginesFetchOnceWithoutBase pins that a document reached by relative
 // path from the root and by a sibling-relative path from another file is one
 // document when no WithBaseURI is set. The root's refs used to pass through

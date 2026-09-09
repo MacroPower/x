@@ -337,6 +337,20 @@ inlined, err := jsonschema.Inline(ctx, schema,
 )
 ```
 
+A Windows drive path base (`C:\schemas\main.json`) becomes the file URI of
+its drive (`file:///C:/schemas/main.json`), so relative refs join under the
+drive. The path derived from such a URI starts with the drive, which
+`os.DirFS` does not serve, so wrap the resolver in `StripPrefix` over the
+directory's file URI:
+
+```go
+inlined, err := jsonschema.Inline(ctx, schema,
+	jsonschema.WithRefResolver(jsonschema.StripPrefix("file:///C:/schemas/",
+		jsonschema.NewFileResolver(os.DirFS(`C:\schemas`)))),
+	jsonschema.WithBaseURI(`C:\schemas\main.json`),
+)
+```
+
 See
 [Inlining](https://pkg.go.dev/go.jacobcolvin.com/x/jsonschema#hdr-Inlining).
 

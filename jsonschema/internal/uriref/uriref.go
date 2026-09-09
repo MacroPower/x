@@ -168,12 +168,19 @@ func Resolve(base DocKey, ref string) (DocKey, Fragment, error) {
 // ParseBase mints the key of a configured base: a base with no scheme is a
 // file path and resolves against file:///, so RFC 3986 joining is
 // well-defined and a reference absolutizing back to the root reproduces the
-// key exactly; an absolute base is canonicalized; and a fragment on either
-// is dropped. The empty base is the zero key. A base that is not a URI
-// reference is an error, so it cannot corrupt every key derived from it.
+// key exactly; a Windows drive path ("C:\schemas\main.json" or
+// "C:/schemas/main.json") is the file URI RFC 8089 appendix E.2 gives it,
+// "file:///C:/schemas/main.json", with the drive letter's case kept; an
+// absolute base is canonicalized; and a fragment on any of them is dropped.
+// The empty base is the zero key. A base that is not a URI reference is an
+// error, so it cannot corrupt every key derived from it.
 func ParseBase(base string) (DocKey, error) {
 	if base == "" {
 		return DocKey{}, nil
+	}
+
+	if isDrivePath(base) {
+		base = "file:///" + strings.ReplaceAll(base, "\\", "/")
 	}
 
 	parsed, err := url.Parse(base)
@@ -191,6 +198,20 @@ func ParseBase(base string) (DocKey, error) {
 	}
 
 	return canonical(parsed), nil
+}
+
+// isDrivePath reports whether base starts with a Windows drive letter and a
+// colon. The net/url parser reads "C:/x" as the scheme "c" and "C:\x" as an
+// opaque URI, so the check runs on the raw text before parsing. No registered
+// URI scheme is one letter long, so a one-letter scheme can only be a drive.
+func isDrivePath(base string) bool {
+	if len(base) < 2 || base[1] != ':' {
+		return false
+	}
+
+	c := base[0]
+
+	return ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z')
 }
 
 // canonical applies the RFC 3986 section 6.2.2 syntax-based normalization
@@ -529,7 +550,10 @@ func removeDotSegments(path string) string {
 // and file:////x all map to the path "x"; TrimPrefix alone mishandled an
 // authority and extra leading slashes. Non-file and relative inputs fall back to
 // the prior strip so they address the fs as before. It is the inverse of the
-// file:/// base registration that [ParseBase] performs.
+// file:/// base registration that [ParseBase] performs. A drive path
+// ("file:///C:/schemas/x.json") maps to "C:/schemas/x.json", which is
+// absolute and not a name an [os.DirFS] serves, so a caller serving such a
+// base from a directory strips the "file:///C:/schemas/" prefix first.
 func FilePathFromURI(uri string) string {
 	u, err := url.Parse(uri)
 	if err == nil && u.Scheme == "file" {
