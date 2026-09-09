@@ -731,3 +731,65 @@ func TestWithDefaultsFromNullDefaultTypedLiteral(t *testing.T) {
 
 	assert.Empty(t, string(s.Properties["p"].Default), "a null no keyword of the literal admits seeds nothing")
 }
+
+// defaultsComposedEmbed is an embedded type a WithTypeSchema override
+// intercepts, so its composition rides an allOf branch and promotes X as a
+// ghost-won name rather than a property of its own.
+type defaultsComposedEmbed struct {
+	X int `json:"X"`
+}
+
+// defaultsComposedOuter embeds defaultsComposedEmbed beside a field of its
+// own.
+type defaultsComposedOuter struct {
+	defaultsComposedEmbed //nolint:unused // Embedded only; exercised via reflection.
+
+	Y int `json:"Y"`
+}
+
+// TestWithDefaultsFromComposedEmbedPlaceholder pins where a name a composed
+// embed promotes takes its seeded default under Draft 2020-12. An object
+// closing with unevaluatedProperties carries a placeholder property beside
+// allOf, which takes the default; an object left open by
+// WithAdditionalProperties carries none, so the key seeds nothing and the
+// name keeps whatever the embed's branch carries.
+func TestWithDefaultsFromComposedEmbedPlaceholder(t *testing.T) {
+	t.Parallel()
+
+	provided := jsonschema.TypeSchema{Value: &jsonschema.Schema{
+		Type:       "object",
+		Properties: map[string]*jsonschema.Schema{"X": {Type: "integer"}},
+	}}
+
+	generate := func(t *testing.T, open bool) *jsonschema.Schema {
+		t.Helper()
+
+		s, err := jsonschema.GenerateFor[defaultsComposedOuter](t.Context(),
+			jsonschema.WithTypeSchema(reflect.TypeFor[defaultsComposedEmbed](), provided),
+			jsonschema.WithAdditionalProperties(open),
+			jsonschema.WithDefaultsFrom(defaultsComposedOuter{
+				defaultsComposedEmbed: defaultsComposedEmbed{X: 7},
+				Y:                     1,
+			}),
+		)
+		require.NoError(t, err)
+		assert.JSONEq(t, `1`, string(s.Properties["Y"].Default), "the parent's own field seeds either way")
+
+		return s
+	}
+
+	t.Run("closed with unevaluatedProperties", func(t *testing.T) {
+		t.Parallel()
+
+		s := generate(t, false)
+		require.Contains(t, s.Properties, "X", "the promoted name has its placeholder")
+		assert.JSONEq(t, `7`, string(s.Properties["X"].Default))
+	})
+
+	t.Run("open", func(t *testing.T) {
+		t.Parallel()
+
+		s := generate(t, true)
+		assert.NotContains(t, s.Properties, "X", "an open object carries no placeholder")
+	})
+}
