@@ -227,6 +227,12 @@ type refGraphSpec struct {
 	// directly, in which case chooseWithheld withholds nothing and the
 	// substitute pipeline never runs on the graph.
 	malformedTransitive bool
+
+	// True when the graph draws a malformed leaf and some served document
+	// takes part in an $id collision, in which case chooseWithheld withholds
+	// nothing and the substitute pipeline never runs on the graph. See
+	// reasonSubstituteCollisionBesideMalformed.
+	collisionBesideMalformed bool
 }
 
 // synthRefGraph turns an entropy blob into a reference graph. It never fails:
@@ -326,8 +332,12 @@ func synthRefGraph(blob []byte) refGraphSpec {
 		gen.malformedDoc != refGraphNoMalformed &&
 		!directlyReferenced[gen.malformedDoc]
 
+	spec.collisionBesideMalformed = gen.malformedDoc != refGraphNoMalformed &&
+		anyCollision(served, ids)
+
 	spec.withheld = chooseWithheld(
-		served, docs, ids, gen.malformedDoc, spec.malformedTransitive, directlyReferenced,
+		served, docs, ids, gen.malformedDoc, spec.malformedTransitive,
+		spec.collisionBesideMalformed, directlyReferenced,
 	)
 
 	return spec
@@ -354,7 +364,11 @@ func synthRefGraph(blob []byte) refGraphSpec {
 // reference reaches directly (reasonSubstituteTransitiveMalformed). The
 // substitute pipeline configures a fallback, which suspends the walk's
 // refusals for a structural violation, so the graph would compare a Compile
-// refusal against an Inline that accepts.
+// refusal against an Inline that accepts. Nor does any qualify when the
+// graph pairs a malformed leaf, wherever it sits, with an $id collision
+// (reasonSubstituteCollisionBesideMalformed): the suspended walk still
+// refuses the collision, so the pipeline names it whatever the walk order,
+// while Compile names the fault the walk reaches first.
 //
 // The document must also be referenced from the root, or withholding it changes
 // nothing. The first qualifying URI in retrieval order wins, so the choice stays
@@ -365,19 +379,19 @@ func chooseWithheld(
 	ids []string,
 	malformedDoc string,
 	malformedTransitive bool,
+	collisionBesideMalformed bool,
 	directlyReferenced map[string]bool,
 ) string {
 	// The substitute pipeline runs with a fallback configured, under which
-	// Inline reports nothing for a document only the closure walk reaches. See
-	// reasonSubstituteTransitiveMalformed.
-	if malformedTransitive {
+	// Inline reports nothing for a document only the closure walk reaches, and
+	// names a collision ahead of a malformed leaf the walk met first. See
+	// reasonSubstituteTransitiveMalformed and
+	// reasonSubstituteCollisionBesideMalformed.
+	if malformedTransitive || collisionBesideMalformed {
 		return ""
 	}
 
-	claims := map[string]int{}
-	for _, id := range ids {
-		claims[id]++
-	}
+	claims := idClaims(ids)
 
 	for i, uri := range served {
 		doc := docs[uri]
@@ -567,10 +581,13 @@ const refGraphNoMalformed = "\x00none"
 // Every slot is drawable on every graph, colliding $ids included. Each engine
 // vets a JSON-pointer fallback target where its own session materializes it, so
 // both meet the unknown-keyword slot at the same point in the shared closure
-// walk. In a graph pairing a colliding document with a malformed target, both
-// engines name the fault the walk reaches first, which is what makes the slot
-// comparable. TestRefEnginesAgreeOnCollisionBesideMalformedTarget pins that
-// pairing deterministically.
+// walk. In a graph pairing a colliding document with a malformed target,
+// Compile and Inline name the fault the walk reaches first, which is what
+// makes the slot comparable between them.
+// TestRefEnginesAgreeOnCollisionBesideMalformedTarget pins that pairing
+// deterministically. The substitute pipeline names the collision regardless
+// of order, so chooseWithheld withholds nothing on such a graph
+// (reasonSubstituteCollisionBesideMalformed).
 func (g *refGraphGen) planMalformed(served []string) {
 	g.malformedDoc = refGraphNoMalformed
 
@@ -582,6 +599,32 @@ func (g *refGraphGen) planMalformed(served []string) {
 	doc := candidates[g.cursor.Intn(len(candidates))]
 
 	g.malformedDoc, g.malformedSlot = doc, g.cursor.Intn(refGraphLeavesPerDoc)
+}
+
+// idClaims counts how many served documents claim each $id.
+func idClaims(ids []string) map[string]int {
+	claims := map[string]int{}
+	for _, id := range ids {
+		claims[id]++
+	}
+
+	return claims
+}
+
+// anyCollision reports whether any served document takes part in an $id
+// collision, in either direction, or shares its $id with another served
+// document: the graph then refuses with ErrIDCollision on every pipeline that
+// serves the colliding pair.
+func anyCollision(served, ids []string) bool {
+	claims := idClaims(ids)
+
+	for i := range served {
+		if inCollision(claims, served, ids, i) || (ids[i] != "" && claims[ids[i]] > 1) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // inCollision reports whether the document served at index i takes part in an
@@ -764,6 +807,9 @@ func substitutePipeline(
 	require.Falsef(t, spec.malformedTransitive,
 		"withheld a document on a transitively malformed graph: %s",
 		reasonSubstituteTransitiveMalformed)
+	require.Falsef(t, spec.collisionBesideMalformed,
+		"withheld a document on a graph pairing a collision with a malformed leaf: %s",
+		reasonSubstituteCollisionBesideMalformed)
 
 	partial := mapResolver{}
 
@@ -1053,6 +1099,66 @@ func TestSubstituteDoesNotRebaseNestedRefs(t *testing.T) {
 	require.ErrorIs(t, err, jsonschema.ErrRefResolve, reasonSubstituteBaseURI)
 }
 
+// TestSubstituteNamesCollisionBesideMalformedTarget pins the carve-out behind
+// reasonSubstituteCollisionBesideMalformed, which is why synthRefGraph
+// withholds nothing on a graph pairing a malformed leaf with an $id collision.
+//
+// The root's first property reaches a malformed JSON-pointer target and its
+// second a document claiming the root's URI. Compile names the malformed
+// target, the fault the walk reaches first. Inline with a fallback configured
+// suspends that refusal until expansion, but a collision is the one refusal a
+// fallback does not suspend, so the walk names it although a later reference
+// carried it. Were Inline to refuse a rejected target under a fallback the
+// way it refuses a collision, this test would fail and the generator could
+// withhold a document on such a graph.
+func TestSubstituteNamesCollisionBesideMalformedTarget(t *testing.T) {
+	t.Parallel()
+
+	const (
+		rootURI      = "https://ex.test/root.json"
+		collidingURI = "https://ex.test/b.json"
+		withheldURI  = "https://ex.test/c.json"
+	)
+
+	root, resolver := parseRefGraph(t,
+		`{"$schema": "`+draft7SchemaURI+`", "$id": "`+rootURI+`",`+
+			` "x-custom": {"sub": {"type": "strnig"}},`+
+			` "properties": {"a": {"$ref": "#/x-custom/sub"},`+
+			` "b": {"$ref": "`+collidingURI+`"}, "c": {"$ref": "`+withheldURI+`"}}}`,
+		map[string]string{
+			collidingURI: `{"$id": "` + rootURI + `", "type": "array"}`,
+			withheldURI:  `{"type": "integer"}`,
+		})
+
+	_, compileErr := jsonschema.Compile(t.Context(), root, jsonschema.WithRefResolver(resolver))
+	require.ErrorIs(t, compileErr, jsonschema.ErrInvalidType,
+		"Compile names the malformed target, the fault the walk reaches first")
+	require.NotErrorIs(t, compileErr, jsonschema.ErrIDCollision)
+
+	withheld, err := jsonschema.ParseSchema([]byte(`{"type": "integer"}`))
+	require.NoError(t, err)
+
+	partial := mapResolver{collidingURI: resolver[collidingURI]}
+
+	_, inlineErr := jsonschema.Inline(t.Context(), root,
+		jsonschema.WithRefResolver(partial),
+		jsonschema.WithRefFallback(jsonschema.RefFallbackFunc(
+			func(_ context.Context, failure jsonschema.RefFailure) jsonschema.RefAction {
+				if failure.Ref != withheldURI {
+					return jsonschema.PropagateRef()
+				}
+
+				return jsonschema.SubstituteRef(withheld)
+			},
+		)))
+	require.ErrorIs(t, inlineErr, jsonschema.ErrIDCollision,
+		"Inline with a fallback names the collision, the one refusal a fallback does not suspend")
+	require.NotErrorIs(t, inlineErr, jsonschema.ErrInvalidType)
+
+	assert.NotEqual(t, refErrSignature(compileErr), refErrSignature(inlineErr),
+		reasonSubstituteCollisionBesideMalformed)
+}
+
 // TestSubstitutePipelineBuilds pins that the third pipeline runs on every
 // synthesized graph that qualifies for it. The builder declines only when a
 // graph withholds nothing or draws an unresolvable reference, and the loop
@@ -1185,6 +1291,13 @@ const reasonSubstituteBaseURI = "a WithRefFallback substitute's own references r
 // directly. It is not a skip reason; the generator applies it when choosing
 // which document to withhold.
 const reasonSubstituteTransitiveMalformed = "a WithRefFallback substitute answers one failing reference at a time, so Inline suspends the walk's structural refusals whenever a fallback is configured, and Compile refuses the graph regardless; the substitute pipeline therefore compares nothing on a graph whose violation only the closure walk reaches"
+
+// reasonSubstituteCollisionBesideMalformed is why the substitute pipeline
+// stands down on a graph that pairs a malformed leaf with an $id collision. It
+// is not a skip reason; the generator applies it when choosing which document
+// to withhold, and TestSubstituteNamesCollisionBesideMalformedTarget pins the
+// behavior it describes.
+const reasonSubstituteCollisionBesideMalformed = "with a fallback configured Inline suspends the walk's structural refusals but not a collision, so on a graph carrying both faults it names the collision wherever the walk meets it, while Compile names whichever fault the walk reaches first; the two refuse the same graph for causes that agree only by walk order"
 
 // reasonSubstituteNoAnchors is why the substitute pipeline withholds only a
 // document nothing reaches by anchor. It is not a skip reason; the generator
