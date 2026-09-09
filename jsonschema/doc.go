@@ -1911,10 +1911,12 @@
 //
 // A spliced copy never carries a $schema keyword, and the returned root keeps
 // the input's $schema. A spliced copy also carries no $id, $anchor, or
-// $dynamicAnchor anywhere in its subtree. The names identify the target at
-// its original position, and duplicating them at each splice would declare
-// the same identifier several times in one document. The copy is
-// self-contained, so the names have nothing left to resolve.
+// $dynamicAnchor in any typed sub-schema position of its subtree. The names
+// identify the target at its original position, and duplicating them at each
+// splice would declare the same identifier several times in one document.
+// The copy is self-contained, so the names have nothing left to resolve. Raw
+// JSON inside an unknown keyword is copied unchanged, so an identifier
+// keyword written there survives the splice.
 //
 // Inline expands refs only in typed sub-schema positions (those
 // [SubschemaEntries] covers). It leaves a $ref carried as raw JSON inside an
