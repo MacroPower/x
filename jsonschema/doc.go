@@ -1550,6 +1550,11 @@
 //     idn-email follows hostname here, because RFC 6531 widens the RFC 5321
 //     domain grammar by admitting U-labels rather than importing IDNA's label
 //     rules.
+//   - idn-hostname, and hostname on an A-label, hold every code point of a
+//     U-label to the RFC 5892 PVALID and CONTEXT categories, read off the
+//     Unicode general categories, so a symbol or emoji label ("xn--ls8h", a
+//     snowman before ".com") is refused although a UTS 46 lookup would
+//     convert it.
 //
 // # Traversal
 //

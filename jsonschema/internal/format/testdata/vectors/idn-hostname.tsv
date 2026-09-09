@@ -96,3 +96,15 @@
 # is deliberately not asserted.
 #
 "ab--cd.com"	false	reserved-LDH, which the hostname format accepts
+#
+# RFC 5892 DISALLOWED by general category. idna.Lookup admits every code point
+# UTS 46 marks NV8 (valid there, not under IDNA2008), so the validator holds
+# each code point of a U-label to the PVALID and CONTEXT categories itself,
+# read off the Unicode general categories.
+#
+"\U0001F4A9"	false	U+1F4A9 PILE OF POO is a symbol (So), DISALLOWED under RFC 5892
+"\u2603.com"	false	U+2603 SNOWMAN is a symbol (So), DISALLOWED under RFC 5892
+"xn--ls8h"	false	an A-label decoding to U+1F4A9, DISALLOWED under RFC 5892
+"xn--n3h.com"	false	an A-label decoding to U+2603, DISALLOWED under RFC 5892
+"\u00df.example"	true	U+00DF LATIN SMALL LETTER SHARP S is a section 2.6 PVALID exception
+"\u03b1\u03b2.example"	true	a lowercase letter (Ll) is PVALID

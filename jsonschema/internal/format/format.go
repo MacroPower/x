@@ -2202,6 +2202,16 @@ func splitIDNADots(s string) []string {
 func checkContextualRules(label string) error {
 	runes := []rune(label)
 
+	// RFC 5891 section 5.4 requires every code point of a U-label to be
+	// PVALID or CONTEXT under RFC 5892. The idna package answers UTS 46
+	// lookup, which admits every code point UTS 46 marks NV8 (valid there,
+	// not under IDNA2008), so the category gate runs here.
+	for _, r := range runes {
+		if !isIDNA2008Permitted(r) {
+			return errors.New("invalid hostname: disallowed character")
+		}
+	}
+
 	// Track whether the label contains any Hiragana, Katakana, or Han
 	// characters (needed for KATAKANA MIDDLE DOT rule).
 	hasCJK := false
@@ -2256,6 +2266,30 @@ func checkContextualRules(label string) error {
 	}
 
 	return nil
+}
+
+// isIDNA2008Permitted reports whether r may appear in a U-label under RFC
+// 5892: an ASCII letter, digit, or hyphen; a code point whose general
+// category the derived property admits (a lowercase, other, or modifier
+// letter, a nonspacing or spacing mark, or a decimal digit); one of the
+// section 2.6 PVALID exceptions; or a CONTEXTJ or CONTEXTO code point, whose
+// rules run beside this check. An uppercase letter never reaches here, since
+// the UTS 46 mapping folds case first. The general categories approximate
+// the derived table: a mark in a block the table ignores (U+20D0 to U+20FF,
+// say) passes here.
+func isIDNA2008Permitted(r rune) bool {
+	if r < utf8.RuneSelf {
+		return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-'
+	}
+
+	switch r {
+	case '\u00DF', '\u03C2', '\u06FD', '\u06FE', '\u0F0B', '\u3007', // RFC 5892 section 2.6 PVALID exceptions
+		'\u200C', '\u200D', // CONTEXTJ
+		'\u00B7', '\u0375', '\u05F3', '\u05F4', '\u30FB': // CONTEXTO
+		return true
+	}
+
+	return unicode.In(r, unicode.Ll, unicode.Lo, unicode.Lm, unicode.Mn, unicode.Mc, unicode.Nd)
 }
 
 // validateIDNEmail validates an internationalized email address per RFC 6531.

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
@@ -493,6 +494,14 @@ func idnaAcceptsHostname(s string) bool {
 			return false
 		}
 
+		// The RFC 5892 category gate, which refuses the UTS 46 NV8 code
+		// points idna.Lookup admits (a symbol or emoji label, say).
+		for _, r := range mapped {
+			if !idna2008Permitted(r) {
+				return false
+			}
+		}
+
 		// The 63-octet A-label cap.
 		if len(ascii) > 63 {
 			return false
@@ -533,6 +542,25 @@ func idnaAcceptsHostname(s string) bool {
 // golang.org/x/net/idna does not itself reject.
 const contextualRunes = "ـߺ〮〯〱〲〳〴〵〻" +
 	"·͵׳״・"
+
+// idna2008Permitted mirrors the validator's RFC 5892 category gate: ASCII
+// letters, digits, and the hyphen, the letter, mark, and decimal-digit
+// general categories, the section 2.6 PVALID exceptions, and the CONTEXTJ
+// and CONTEXTO code points.
+func idna2008Permitted(r rune) bool {
+	if r < utf8.RuneSelf {
+		return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-'
+	}
+
+	switch r {
+	case '\u00DF', '\u03C2', '\u06FD', '\u06FE', '\u0F0B', '\u3007',
+		'\u200C', '\u200D',
+		'\u00B7', '\u0375', '\u05F3', '\u05F4', '\u30FB':
+		return true
+	}
+
+	return unicode.In(r, unicode.Ll, unicode.Lo, unicode.Lm, unicode.Mn, unicode.Mc, unicode.Nd)
+}
 
 // splitIDNALabels splits s on the four IDNA dot separators, mirroring
 // splitIDNADots. It keeps empty labels, which are what the empty-label and
