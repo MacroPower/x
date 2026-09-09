@@ -2,8 +2,9 @@
 #
 # Source: curated from RFC 5890/5891 (IDNA2008) example text and the UTS-46
 # lookup profile as implemented by golang.org/x/net/idna (idna.Lookup), which
-# the idn-hostname validator delegates to. Pinned to golang.org/x/net v0.56.0
-# (jsonschema/go.mod), the same module the validator compiles against.
+# the idn-hostname validator delegates to. Pinned to the golang.org/x/net
+# version jsonschema/go.mod pins, the same module the validator compiles
+# against.
 #
 # The official suite's optional/format/idn-hostname.json carries 71 string
 # cases under draft 2020-12 and 70 under draft 7, only three of them A-labels
