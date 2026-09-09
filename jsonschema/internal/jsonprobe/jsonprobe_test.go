@@ -179,6 +179,12 @@ func TestField(t *testing.T) {
 		"zero panicker omitzero": {
 			typ: reflect.TypeFor[zeroPanicker](), tag: `json:"a,omitzero"`, err: ErrValue,
 		},
+		"always zero under string and omitzero": {
+			typ: reflect.TypeFor[alwaysZero](), tag: `json:",string,omitzero"`, stringified: true,
+		},
+		"always zero under omitzero": {
+			typ: reflect.TypeFor[alwaysZero](), tag: `json:"a,omitzero"`,
+		},
 	}
 
 	for name, tc := range tests {
@@ -198,6 +204,12 @@ func TestField(t *testing.T) {
 		})
 	}
 }
+
+// alwaysZero is an integer kind whose IsZero reads every value as zero, so
+// an omit option drops the filled member the probe would otherwise read.
+type alwaysZero int
+
+func (alwaysZero) IsZero() bool { return true }
 
 // textAlways is an integer kind whose text marshaler always writes a
 // non-empty string; under the probe it writes a null instead.

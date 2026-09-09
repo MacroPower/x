@@ -35,6 +35,7 @@ import (
 	"fmt"
 	"reflect"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -250,17 +251,31 @@ func (p *Probe) declaration(v reflect.Value) error {
 // and a [jsontext.Value] writes its own bytes either way.
 func (p *Probe) Field(sf reflect.StructField) (bool, error) {
 	tagged := oneField(sf)
-	res := p.fields.get(tagged, func() fieldResult { return p.probeField(tagged, sf.Type) })
+	res := p.fields.get(tagged, func() fieldResult { return p.probeField(sf, tagged) })
 
 	return res.stringified, res.err
 }
 
-// probeField answers [Probe.Field] for the one-field struct tagged, whose
-// field has type typ.
-func (p *Probe) probeField(tagged, typ reflect.Type) fieldResult {
+// probeField answers [Probe.Field] for the one-field struct tagged, built
+// from sf.
+func (p *Probe) probeField(sf reflect.StructField, tagged reflect.Type) fieldResult {
 	out, err := p.encode(p.filled(tagged))
 	if err != nil {
 		return fieldResult{err: fmt.Errorf("%w: %w", ErrValue, cause(err))}
+	}
+
+	// An omit option drops the member when the type's own IsZero reads the
+	// filled value as zero, and an omitted member says nothing about how a
+	// written one is spelled. Whether the value is stringified is
+	// independent of whether it is omitted, so the field is written again
+	// with the omit options stripped; a fault the stripped tag no longer
+	// hides reads as not stringified, the way the untagged marshal's does
+	// below.
+	if memberOmitted(out) {
+		out, err = p.encode(p.filled(oneField(withoutOmit(sf))))
+		if err != nil {
+			return fieldResult{}
+		}
 	}
 
 	if !firstMemberIsString(out) {
@@ -271,7 +286,7 @@ func (p *Probe) probeField(tagged, typ reflect.Type) fieldResult {
 	// value. A tag option can hide a fault the untagged marshal raises
 	// (omitzero on a func), and the tagged verdict rules, so that fault only
 	// reads as not stringified.
-	untagged := oneField(reflect.StructField{Type: typ})
+	untagged := oneField(reflect.StructField{Type: sf.Type})
 
 	bare, err := p.encode(p.filled(untagged))
 	if err != nil {
@@ -317,6 +332,39 @@ func (p *Probe) probeOmitsZero(tagged reflect.Type) omitResult {
 // the embedded flag cleared.
 func oneField(sf reflect.StructField) reflect.Type {
 	return reflect.StructOf([]reflect.StructField{{Name: "F", Type: sf.Type, Tag: sf.Tag}})
+}
+
+// withoutOmit returns sf with the omitempty and omitzero options removed
+// from its json tag, so the field is written whatever value it holds. The
+// name and every other option stay as written. A comma inside a quoted
+// format value splits and rejoins unchanged, since only the two omit tokens
+// are dropped.
+func withoutOmit(sf reflect.StructField) reflect.StructField {
+	raw, ok := sf.Tag.Lookup("json")
+	if !ok {
+		return sf
+	}
+
+	parts := strings.Split(raw, ",")
+	kept := parts[:1]
+
+	for _, opt := range parts[1:] {
+		if opt != "omitempty" && opt != "omitzero" {
+			kept = append(kept, opt)
+		}
+	}
+
+	sf.Tag = reflect.StructTag("json:" + strconv.Quote(strings.Join(kept, ",")))
+
+	return sf
+}
+
+// memberOmitted reports whether the object in doc holds no member, which is
+// the field omitted under an omit option.
+func memberOmitted(doc []byte) bool {
+	_, hasMember := openObject(doc)
+
+	return !hasMember
 }
 
 // firstMemberIsString reports whether the first member of the object in doc

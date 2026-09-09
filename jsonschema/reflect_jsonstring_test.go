@@ -337,3 +337,27 @@ func TestGenerateFor_JSONStringMarshalerKeepsKindSchema(t *testing.T) {
 	require.NoError(t, validateJSON(t.Context(), s, data),
 		"generated schema rejected the struct's own serialization: %s", data)
 }
+
+// zeroAlways is an integer kind whose IsZero reads every value as zero, so
+// omitzero drops the member the probe fills.
+type zeroAlways int
+
+func (zeroAlways) IsZero() bool { return true }
+
+// TestGenerateFor_JSONStringSurvivesOmitzero pins that a json:",string"
+// field keeps its string schema when an omit option hides the probe's
+// filled value. Whether the value is stringified is independent of whether
+// it is omitted, so the schema must accept the quoted number v2 writes for
+// a value the type does not omit.
+func TestGenerateFor_JSONStringSurvivesOmitzero(t *testing.T) {
+	t.Parallel()
+
+	type doc struct {
+		A zeroAlways `json:",string,omitzero"`
+	}
+
+	s, err := jsonschema.GenerateFor[doc](t.Context())
+	require.NoError(t, err)
+
+	assert.Equal(t, "string", s.Properties["A"].Type)
+}
