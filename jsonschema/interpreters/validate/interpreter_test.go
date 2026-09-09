@@ -3297,6 +3297,42 @@ func TestValidateInterpreterGoPlaygroundParity(t *testing.T) {
 		assert.Equal(t, new(3), s.Properties["f"].AdditionalProperties.MaxLength)
 	})
 
+	t.Run("endkeys with no block open is refused", func(t *testing.T) {
+		t.Parallel()
+
+		// Go-playground refuses an endkeys that closes nothing. The
+		// interpreter used to accept it and apply the later parts, emitting
+		// minItems 1 for a tag the library cannot load.
+		type Bare struct {
+			F []string `json:"f" validate:"endkeys,min=1"`
+		}
+
+		_, err := jsonschema.GenerateFor[Bare](t.Context(), opt)
+		require.ErrorIs(t, err, validate.ErrEndkeysPlacement)
+	})
+
+	t.Run("a structural key with a parameter inside a block is refused", func(t *testing.T) {
+		t.Parallel()
+
+		// Go-playground looks a keys=1 or an endkeys|x up as validators
+		// wherever they stand. The interpreter used to skip them as key-side
+		// grammar, and an endkeys written as an OR alternative left the block
+		// open, so every later constraint was dropped.
+		type Param struct {
+			F map[string]string `json:"f" validate:"dive,keys,keys=1,endkeys,required"`
+		}
+
+		_, err := jsonschema.GenerateFor[Param](t.Context(), opt)
+		require.ErrorIs(t, err, validate.ErrUnrecognizedValidator)
+
+		type Alternative struct {
+			F map[string]string `json:"f" validate:"dive,keys,endkeys|x,required"`
+		}
+
+		_, err = jsonschema.GenerateFor[Alternative](t.Context(), opt)
+		require.ErrorIs(t, err, validate.ErrUnrecognizedValidator)
+	})
+
 	t.Run("an integer literal outside the JSON grammar is refused", func(t *testing.T) {
 		t.Parallel()
 

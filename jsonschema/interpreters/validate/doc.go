@@ -303,7 +303,8 @@
 // modeled). A keys with no endkeys runs to the end of the tag, as it does in
 // go-playground, so every later constraint is a key constraint and is
 // skipped. A keys not immediately following a dive is an error
-// ([ErrKeysPlacement]), as go-playground refuses it. A control tag, dive,
+// ([ErrKeysPlacement]), as go-playground refuses it, and so is an endkeys
+// with no keys block open ([ErrEndkeysPlacement]). A control tag, dive,
 // keys, and endkeys are each matched as a whole
 // part, as go-playground matches them, so one carrying a parameter
 // (omitempty=) is an unrecognized validator rather than the tag it starts

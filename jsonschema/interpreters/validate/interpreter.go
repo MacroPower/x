@@ -38,6 +38,10 @@ var (
 	// anywhere else, so the interpreter refuses it too rather than emitting a
 	// schema for a tag the library cannot load.
 	ErrKeysPlacement = errors.New("validate tag: keys must immediately follow dive")
+	// ErrEndkeysPlacement reports an endkeys tag with no keys block open.
+	// Go-playground refuses the tag, so the interpreter refuses it too
+	// rather than emitting a schema for a tag the library cannot load.
+	ErrEndkeysPlacement = errors.New("validate tag: endkeys closes no keys block")
 	// ErrRepeatedKeyword reports two validators in one tag that both set one
 	// schema keyword (email and url both name format, alpha and numeric both
 	// name pattern). A schema carries one value per keyword, and
@@ -101,7 +105,10 @@ func (i *Interpreter) Interpret(_ context.Context, field jsonschema.FieldContext
 // afterDive flag says whether parts starts right after a dive, which is the
 // one place a keys block may open.
 func applyParts(parts []string, field jsonschema.FieldContext, afterDive bool) error {
-	var inKeys bool
+	// The open keys blocks. A keys inside a block opens a nested one, and
+	// each endkeys closes the innermost, so the depth says whether a part
+	// is key-side grammar and whether an endkeys has a block to close.
+	keysDepth := 0
 
 	// The keyword-setting validators applied so far, keyed by the keyword
 	// each sets, so a second validator naming the same keyword is refused
@@ -119,9 +126,9 @@ func applyParts(parts []string, field jsonschema.FieldContext, afterDive bool) e
 		// the default branch splits on the pipe. A dive inside a
 		// keys...endkeys block is a key-side dive (e.g. dive,keys,dive,endkeys
 		// for collection-typed map keys), which is not modeled; it must be
-		// skipped by the inKeys guard below rather than treated as a
+		// skipped by the keys-depth guard below rather than treated as a
 		// value-element dive. Only handle dive outside the block.
-		if part == diveTag && !inKeys {
+		if part == diveTag && keysDepth == 0 {
 			// Descend into the element type. A trailing dive applies nothing
 			// to the elements, a no-op as in go-playground, but the descent
 			// itself still needs elements to reach: go-playground panics on a
@@ -140,17 +147,24 @@ func applyParts(parts []string, field jsonschema.FieldContext, afterDive bool) e
 		// error rather than a schema for a tag it cannot load; a keys inside
 		// a block belongs to the key-side grammar, which is skipped whole.
 		if part == keysTag {
-			if !inKeys && (!afterDive || idx != 0) {
+			if keysDepth == 0 && (!afterDive || idx != 0) {
 				return ErrKeysPlacement
 			}
 
-			inKeys = true
+			keysDepth++
 
 			continue
 		}
 
+		// An endkeys closes the innermost open block; with none open,
+		// go-playground refuses the tag.
 		if part == endkeysTag {
-			inKeys = false
+			if keysDepth == 0 {
+				return ErrEndkeysPlacement
+			}
+
+			keysDepth--
+
 			continue
 		}
 
@@ -203,16 +217,17 @@ func applyParts(parts []string, field jsonschema.FieldContext, afterDive bool) e
 			continue
 		}
 
-		if inKeys {
-			continue
-		}
-
 		// A structural key carrying a parameter or standing as an OR
 		// alternative names no validator on either side: go-playground looks
-		// it up as a validator there and refuses the tag. The error carries
-		// the whole part, as go-playground's does.
+		// it up as a validator there and refuses the tag, inside a keys block
+		// as much as outside it. The error carries the whole part, as
+		// go-playground's does.
 		if isStructuralKey(key) && (hasValue || orGroup) {
 			return fmt.Errorf("%w %q", ErrUnrecognizedValidator, part)
+		}
+
+		if keysDepth > 0 {
+			continue
 		}
 
 		err := applyValidator(key, value, hasValue, field, applied)
