@@ -254,6 +254,13 @@ type shadowedUntagged struct {
 	X int
 }
 
+// shadowedProvidedFallback carries a fallback beside its field, so a
+// shallower fallback on an enclosing type wins the dominance over it.
+type shadowedProvidedFallback struct {
+	X     int            `json:"X"`
+	Extra map[string]int `json:",embed"`
+}
+
 // shadowedProvidedNested composes shadowedProvided inside itself, so the
 // name X reaches an enclosing struct through two composed levels and only
 // the outer branch carries it there.
@@ -452,6 +459,56 @@ func TestGenerateShadowedComposedEmbed(t *testing.T) {
 
 		require.NoError(t, v.ValidateJSON(t.Context(), data),
 			"neither branch may stay unconditionally required")
+	})
+
+	// The shadow marking once ignored a composed embed's fallback, so a
+	// provider schema constraining the embed's extra members stayed an
+	// unconditional branch while encoding/json spliced the enclosing type's
+	// own fallback into the object instead.
+	t.Run("kept fallback shadows the embed's own", func(t *testing.T) {
+		t.Parallel()
+
+		type outer struct {
+			shadowedProvidedFallback //nolint:unused // Embedded only; exercised via reflection.
+
+			M map[string]string `json:",embed"`
+		}
+
+		// The provider deliberately constrains the extra members the embed's
+		// fallback would carry, which the kept string-valued fallback breaks.
+		providedFallback := jsonschema.TypeSchema{Value: &jsonschema.Schema{
+			Type: "object",
+			Properties: map[string]*jsonschema.Schema{
+				"X": {Type: "integer"},
+			},
+			Required:             []string{"X"},
+			AdditionalProperties: &jsonschema.Schema{Type: "integer"},
+		}}
+
+		s, err := jsonschema.GenerateFor[outer](t.Context(),
+			jsonschema.WithTypeSchema(reflect.TypeFor[shadowedProvidedFallback](), providedFallback))
+		require.NoError(t, err)
+
+		require.Len(t, s.AllOf, 1)
+		require.Len(t, s.AllOf[0].AnyOf, 2, "the shadowed branch is conditional")
+		assert.NotEmpty(t, s.AllOf[0].AnyOf[0].Ref)
+		assert.Equal(t, &jsonschema.Schema{}, s.AllOf[0].AnyOf[1], "the escape arm is the true schema")
+		assert.Nil(t, s.AdditionalProperties, "the embed still promotes X, so the parent stays open")
+		assert.Nil(t, s.UnevaluatedProperties, "the embed still promotes X, so the parent stays open")
+
+		v, err := jsonschema.Compile(t.Context(), s)
+		require.NoError(t, err)
+
+		data, err := json.Marshal(outer{
+			shadowedProvidedFallback: shadowedProvidedFallback{X: 1, Extra: map[string]int{"n": 2}},
+			M:                        map[string]string{"k": "v"},
+		})
+		require.NoError(t, err)
+		require.JSONEq(t, `{"X":1,"k":"v"}`, string(data),
+			"encoding/json splices the shallower fallback and drops the embed's")
+
+		require.NoError(t, v.ValidateJSON(t.Context(), data),
+			"the branch's extra-member constraint must not judge the kept fallback's members")
 	})
 
 	// The shadow marking once treated a composition nested inside a composed

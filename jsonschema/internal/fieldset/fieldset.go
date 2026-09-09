@@ -191,7 +191,11 @@ type Field struct {
 	// JSON names loses [encoding/json]'s field resolution to a real field. The
 	// marshaled object then carries the winner's value under that name, or
 	// drops the name on an ambiguity tie. Either way the composed schema's
-	// claim on it does not hold, so the branch must not be unconditional.
+	// claim on it does not hold, so the branch must not be unconditional. An
+	// embed whose own fallback loses the fallback dominance, to a shallower
+	// one or to a same-depth tie, is shadowed the same way: the marshaled
+	// object's extra members come from the kept fallback, or from none, not
+	// from the members the branch describes.
 	Shadowed bool
 	// ShadowPartial marks a shadowed composed embed that still promotes at
 	// least one unshadowed name. Only the (now conditional) branch evaluates
@@ -851,7 +855,7 @@ func Classify(res Resolution, promoted map[reflect.Type]Result) Result {
 		return slices.Compare(a.StructField.Index, b.StructField.Index)
 	})
 
-	markShadowedCompositions(out.Fields, outcomes, promoted)
+	markShadowedCompositions(out.Fields, outcomes, promoted, res.Fallback)
 
 	return out
 }
@@ -872,10 +876,18 @@ func Classify(res Resolution, promoted map[reflect.Type]Result) Result {
 // each name the embed's marshaled object takes from one, and a name a nested
 // composition lost inside the embed (to a field of the embed, or to a tie) is
 // absent from both lists and asserts nothing here.
+//
+// An embed's own fallback competes in the enclosing fallback dominance the
+// same way, since the ghost walk sights it. The kept fallback is the one the
+// enclosing resolution settled on, nil when none or a tie dropped them all;
+// an embed whose fallback is not the kept one is shadowed, because the
+// marshaled object's extra members do not come from the members its branch
+// describes.
 func markShadowedCompositions(
 	fields []Field,
 	outcomes map[string]outcome,
 	promoted map[reflect.Type]Result,
+	kept *Fallback,
 ) {
 	for i := range fields {
 		fi := &fields[i]
@@ -929,9 +941,29 @@ func markShadowedCompositions(
 			mark(shadows(outcomes, name, ft, -1))
 		}
 
+		// A shadowed fallback alone leaves the embed fully shadowed: the
+		// branch becomes conditional, and the parent's own fallback slot
+		// carries the kept value schema, so nothing of the embed survives to
+		// keep the parent open. Names beside a shadowed fallback are partial.
+		if embed.Fallback != nil && !keepsOwnFallback(kept, fi.StructField.Index, embed.Fallback) {
+			shadowedAny = true
+		}
+
 		fi.Shadowed = shadowedAny
 		fi.ShadowPartial = shadowedAny && unshadowedAny
 	}
+}
+
+// keepsOwnFallback reports whether the enclosing resolution kept the composed
+// embed's own fallback. The embed's Result.Fallback carries an index path
+// relative to the embed, so its path from the enclosing root is the embed's
+// path followed by that one, which the kept fallback's path names exactly
+// when it is the same field. An in-flight skip can differ between the
+// enclosing walk and the embed's own resolution on a composed cycle, so the
+// two paths can name different fields for one embed; the comparison then
+// errs toward marking, the conservative wrap.
+func keepsOwnFallback(kept *Fallback, embedIndex []int, own *Fallback) bool {
+	return kept != nil && slices.Equal(kept.StructField.Index, slices.Concat(embedIndex, own.StructField.Index))
 }
 
 // shadows reports whether the enclosing resolution took name away from the

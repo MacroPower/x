@@ -300,6 +300,20 @@ type FallbackCarrierB struct {
 	S    int             `json:"s"`
 }
 
+// FallbackOnly is an embeddable struct carrying a fallback and no name, so
+// composing it leaves the fallback as its whole contribution.
+type FallbackOnly struct {
+	Extra map[string]int `json:",embed"`
+}
+
+// fallbackOnlyShadowed declares its own fallback beside the one FallbackOnly
+// promotes, so depth 0 wins and the composed embed contributes nothing.
+type fallbackOnlyShadowed struct {
+	FallbackOnly
+
+	Own map[string]string `json:",embed"`
+}
+
 // FallbackWrapA and FallbackWrapB each embed FallbackCarrier, so a type
 // embedding both reaches its fallback twice at one depth.
 type FallbackWrapA struct{ FallbackCarrier }
@@ -451,6 +465,7 @@ var (
 		"promoted fallback":       reflect.TypeFor[fallbackPromoted](),
 		"shallow fallback wins":   reflect.TypeFor[fallbackShallowWins](),
 		"fallback same-depth tie": reflect.TypeFor[fallbackSameDepthTie](),
+		"fallback-only shadowed":  reflect.TypeFor[fallbackOnlyShadowed](),
 		"fallback repeated":       fallbackRepeated,
 		"two fallbacks":           reflect.TypeFor[twoFallbacks](),
 		"fallback bad key":        reflect.TypeFor[fallbackBadKey](),
@@ -470,6 +485,7 @@ var (
 		"WrapA":           reflect.TypeFor[WrapA](),
 		"NonStructOwner":  reflect.TypeFor[NonStructOwner](),
 		"FallbackCarrier": reflect.TypeFor[FallbackCarrier](),
+		"FallbackOnly":    reflect.TypeFor[FallbackOnly](),
 		"Inner":           reflect.TypeFor[Inner](),
 		"Wrapper":         reflect.TypeFor[Wrapper](),
 		"WrapperShadows":  reflect.TypeFor[WrapperShadows](),
@@ -494,10 +510,11 @@ var (
 		"alpha+beta":       {"Alpha", "Beta"},
 		"non-struct owner": {"NonStructOwner"},
 		"fallback carrier": {"FallbackCarrier"},
+		"fallback only":    {"FallbackOnly"},
 		"wrappers":         {"Inner", "Wrapper", "WrapperShadows"},
 		"all embeds": {
 			"Base", "Other", "Deep", "TaggedShared", "WrapA", "NonStructOwner",
-			"FallbackCarrier", "Alpha", "Beta", "Inner", "Wrapper", "WrapperShadows",
+			"FallbackCarrier", "FallbackOnly", "Alpha", "Beta", "Inner", "Wrapper", "WrapperShadows",
 		},
 	}
 )
@@ -1214,6 +1231,59 @@ func TestClassificationPins(t *testing.T) {
 				{name: "zeta", index: []int{1}},
 			},
 			ghostWon: []string{"alpha", "beta"},
+		},
+		"composed embed keeps its own fallback": {
+			typ:      reflect.TypeFor[fallbackPromoted](),
+			composed: []string{"FallbackCarrier"},
+			want: []wantField{
+				{index: []int{0}, compose: true},
+				{name: "r", index: []int{1}},
+			},
+			// The kept fallback is the embed's own, reached through the
+			// embed's path, so the branch stays unconditional.
+			ghostWon: []string{"q"},
+			fallback: &wantFallback{
+				index: []int{0, 0}, typ: reflect.TypeFor[map[string]int](), depth: 1,
+			},
+		},
+		"shallower fallback shadows a composed embed": {
+			typ:      reflect.TypeFor[fallbackShallowWins](),
+			composed: []string{"FallbackCarrier"},
+			want: []wantField{
+				{index: []int{0}, compose: true, shadowed: true, shadowPartial: true},
+				{name: "r", index: []int{2}},
+			},
+			// The depth-0 fallback wins the dominance, so the extra members
+			// the branch describes are not the ones the object carries; the
+			// name the embed still promotes keeps the parent open.
+			ghostWon: []string{"q"},
+			fallback: &wantFallback{
+				index: []int{1}, typ: reflect.TypeFor[map[string]string](),
+			},
+		},
+		"same-depth fallback tie shadows a composed embed": {
+			typ:      reflect.TypeFor[fallbackSameDepthTie](),
+			composed: []string{"FallbackCarrier"},
+			want: []wantField{
+				{index: []int{0}, compose: true, shadowed: true, shadowPartial: true},
+				{name: "s", index: []int{1, 1}},
+				{name: "r", index: []int{2}},
+			},
+			// The tie drops both fallbacks, so the object carries no extra
+			// members and the branch's claim on them does not hold.
+			ghostWon: []string{"q"},
+		},
+		"fallback-only composed embed fully shadowed": {
+			typ:      reflect.TypeFor[fallbackOnlyShadowed](),
+			composed: []string{"FallbackOnly"},
+			want: []wantField{
+				{index: []int{0}, compose: true, shadowed: true},
+			},
+			// The fallback is the embed's whole contribution, so losing it
+			// leaves nothing to keep the parent open.
+			fallback: &wantFallback{
+				index: []int{1}, typ: reflect.TypeFor[map[string]string](),
+			},
 		},
 	}
 

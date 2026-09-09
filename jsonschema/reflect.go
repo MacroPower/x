@@ -1783,10 +1783,10 @@ func (g *run) wrapRefForDraft7(s *Schema) {
 // semantics); accepting those is the price of not rejecting valid documents.
 //
 // A shadowed embed (fi.Shadowed) takes the same wrap for the same reason: a
-// real field wins one of the embed's promoted names, so the marshaled object
-// carries the winner's value where the branch asserts the embed's
-// constraints, and an unconditional branch would reject the type's own
-// marshaled JSON.
+// real field wins one of the embed's promoted names, or a kept fallback wins
+// the dominance over the embed's own, so the marshaled object carries the
+// winner's value where the branch asserts the embed's constraints, and an
+// unconditional branch would reject the type's own marshaled JSON.
 func (g *run) processAllOfField(fi fieldset.Field, parent *node) error {
 	// Collect composes only a struct or an unnamed pointer to one, so
 	// IndirectType names the embed's type exactly as Collect recorded it.

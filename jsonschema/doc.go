@@ -763,7 +763,14 @@
 //     exactly as [encoding/json] resolves them (shadowing deeper fields,
 //     annihilating on same-depth ties with ties inside the embed included,
 //     and applying the tag tie-break), even though they never become
-//     properties. The embed's allOf branch carries their assertions.
+//     properties. The embed's allOf branch carries their assertions. A
+//     composed embed's own fallback (an embedded map or jsontext.Value)
+//     takes part in the fallback dominance the same way, so an embed whose
+//     fallback loses to a shallower one, or to a same-depth tie, is
+//     shadowed and its branch becomes conditional. The parent's
+//     extra-member constraint follows the kept fallback, and opens where
+//     the shadowed embed still promotes a name, as under any partial
+//     shadowing.
 //
 // Under allOf composition, [Draft2020] puts unevaluatedProperties: false on
 // the parent in place of additionalProperties: false, and each promoted name
