@@ -667,7 +667,10 @@ func (g *run) refTypeOverride(t reflect.Type, ts TypeSchema, pointer bool) (*nod
 	g.refAliasing[t] = true
 	defer delete(g.refAliasing, t)
 
-	ref, err := g.schemaForType(ts.Ref, pointer)
+	// The alias names a type, so a pointer level on the Ref is not an
+	// occurrence fact: only the occurrence's own pointer-ness and the stances
+	// decide null, and the target resolves by its element type.
+	ref, err := g.schemaForType(numkind.DerefType(ts.Ref), pointer)
 	if err != nil {
 		return nil, err
 	}

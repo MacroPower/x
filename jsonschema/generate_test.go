@@ -7884,3 +7884,34 @@ func TestGenerateFor_NonFiniteBoundRefused(t *testing.T) {
 		require.ErrorContains(t, err, "multipleOf")
 	})
 }
+
+// TestGenerateFor_RefAliasPointerTargetNamesElement pins that a
+// [jsonschema.TypeSchema.Ref] naming a pointer type resolves to the element
+// type's definition without adding a null branch. The alias names a type,
+// and only the occurrence's pointer-ness and the stances decide null, so a
+// plain value field of the alias renders the bare reference.
+func TestGenerateFor_RefAliasPointerTargetNamesElement(t *testing.T) {
+	t.Parallel()
+
+	type target struct {
+		Name string `json:"name"`
+	}
+
+	type alias struct{}
+
+	type doc struct {
+		X alias  `json:"x"`
+		P *alias `json:"p"`
+	}
+
+	s, err := jsonschema.GenerateFor[doc](t.Context(),
+		jsonschema.WithTypeSchemaFor[alias](jsonschema.TypeSchema{Ref: reflect.TypeFor[*target]()}),
+	)
+	require.NoError(t, err)
+
+	assert.Equal(t, "#/$defs/target", s.Properties["x"].Ref, "a value occurrence is the bare reference")
+	assert.Nil(t, s.Properties["x"].AnyOf)
+
+	require.Len(t, s.Properties["p"].AnyOf, 2, "a pointer occurrence keeps its own null branch")
+	assert.Equal(t, "#/$defs/target", s.Properties["p"].AnyOf[0].Ref)
+}

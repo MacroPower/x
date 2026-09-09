@@ -111,10 +111,12 @@ type TypeSchema struct {
 	// non-extractable Ref is [ErrConflictingTypeSchema], as is an alias chain
 	// that cycles back to its own type (a self-Ref, or a mutual A -> B -> A
 	// chain). With [WithDefinitions] disabled the alias inlines its target
-	// as every other reference does. A Ref alias may itself name an aliased
-	// type; along such a chain
-	// the target type's stance applies first, then the stance of the
-	// outermost alias that declares one.
+	// as every other reference does. A pointer type names its element type:
+	// the pointer level is no occurrence fact, so only the occurrence's own
+	// pointer-ness and the stances decide whether the alias admits null. A
+	// Ref alias may itself name an aliased type; along such a chain the
+	// target type's stance applies first, then the stance of the outermost
+	// alias that declares one.
 	Ref reflect.Type
 	// Nullability is the type's null-admission stance (see [Nullability]). It
 	// decorates Value (and Ref); it is ignored for Verbatim.
