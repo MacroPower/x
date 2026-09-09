@@ -482,7 +482,14 @@
 //     type already set, so a tag never overrides one of them.
 //
 // Generation merges the keywords on Canvas into the field's schema, so the
-// interpreter never edits the type-derived schema itself:
+// interpreter never edits the type-derived schema itself. It reads a fixed
+// set of canvas keywords: the annotations (title, description, default,
+// deprecated, readOnly, writeOnly, examples, $comment), the value facts
+// (const, enum, not, pattern, format, multipleOf, contentEncoding,
+// contentMediaType, contentSchema), the numeric, length, and count bounds,
+// uniqueItems, and allOf. Any other keyword written on the canvas, such as
+// type, required, an applicator, or an Extra entry, is dropped without an
+// error. A required name goes through [FieldContext.Parent] instead.
 //
 //   - A const or enum the interpreter declares lands on the value branch of a
 //     null-admitting field and keeps null valid.

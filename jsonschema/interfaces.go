@@ -649,6 +649,11 @@ type FieldContext struct {
 	// only tighten the type's own value. A nil bound field on the canvas means
 	// unauthored, not cleared: the kind-derived bound from Base stands, and there
 	// is no way to widen or remove it from here.
+	//
+	// Generation reads only the annotation, value-fact, bound, uniqueItems, and
+	// allOf keywords off the canvas (the Tag Interpreters section of the package
+	// documentation lists them). It drops any other keyword written here, such as
+	// Type, Types, Required, an applicator, or an Extra entry, without an error.
 	Canvas *Schema
 	// Base is the field's type-derived reflected schema, read-only: the pristine
 	// payload carrying the type's own keywords (its numeric bounds, the
