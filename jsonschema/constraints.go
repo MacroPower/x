@@ -255,7 +255,7 @@ func (c *Constraints) SetMultipleOf(value float64) error {
 // interpreter can run its own conflict check with its own wording before pinning
 // a value of its own.
 func (c *Constraints) Const() (any, bool) {
-	if c.target.Canvas == nil || c.target.Canvas.Const == nil {
+	if c == nil || c.target.Canvas == nil || c.target.Canvas.Const == nil {
 		return nil, false
 	}
 
@@ -265,7 +265,7 @@ func (c *Constraints) Const() (any, bool) {
 // Enum returns the field's enum members and whether an enum is set, the analog of
 // [Constraints.Const] for the enumerated-value case.
 func (c *Constraints) Enum() ([]any, bool) {
-	if c.target.Canvas == nil || c.target.Canvas.Enum == nil {
+	if c == nil || c.target.Canvas == nil || c.target.Canvas.Enum == nil {
 		return nil, false
 	}
 

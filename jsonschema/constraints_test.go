@@ -693,9 +693,10 @@ func TestConstraintsForbidSchemaSparesNull(t *testing.T) {
 }
 
 // TestConstraintsFacadeNilCanvasWrites pins the facade's write boundary:
-// every write on a facade with no canvas, the zero Constraints or one a
-// caller-built context handed out without a Canvas, is ErrNilCanvas and
-// leaves nothing behind, while the reads answer as nothing set.
+// every write on a facade with no canvas, a nil *Constraints, the zero
+// Constraints, or one a caller-built context handed out without a Canvas, is
+// ErrNilCanvas and leaves nothing behind, while the reads answer as nothing
+// set.
 func TestConstraintsFacadeNilCanvasWrites(t *testing.T) {
 	t.Parallel()
 
@@ -715,6 +716,7 @@ func TestConstraintsFacadeNilCanvasWrites(t *testing.T) {
 		"every write on the facade takes a row here; only Const and Enum are reads")
 
 	facades := map[string]*jsonschema.Constraints{
+		"nil facade":        nil,
 		"zero facade":       {},
 		"canvas-less field": jsonschema.FieldContext{Type: reflect.TypeFor[string]()}.Constraints(),
 	}
