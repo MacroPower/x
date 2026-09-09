@@ -14,6 +14,16 @@
 "(foo)\\1"	true	a backreference, which ECMA-262 has and RE2 does not
 "foo(?=bar)"	true	lookahead, which ECMA-262 has and RE2 does not
 "[abc]"	true	ClassContents holding three ClassAtoms
+"[a-z]"	true	a class range running upward
+"[z-a]"	false	a class range running backward, the 22.2.1.1 early error every engine keeps
+"[^-!]"	true	a negating '^' is no class atom, so the '-' after it is literal
+"[a-]"	true	a '-' before the closing bracket is literal
+"[-a]"	true	a '-' opening the class is literal
+"[\\d-z]"	true	Annex B lets a class escape stand beside a literal '-'
+"[a-\\d]"	true	Annex B lets a class escape close what looks like a range
+"[a-c-e]"	true	a '-' after a range is literal
+"[\u00e9-\u00ff]"	true	a range over non-ASCII code points
+"[\u00ff-\u00e9]"	false	a backward range over non-ASCII code points
 "a{2,3}"	true	QuantifierPrefix in its two-bound brace form
 "("	false	an unbalanced parenthesis
 "["	false	an unterminated class

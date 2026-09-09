@@ -1201,6 +1201,9 @@ const (
 // literal. The assertions '^' and '$' are left quantifiable, as RE2 reads
 // them, and so is a lookahead, which Annex B's QuantifiableAssertion covers;
 // a lookbehind is not, since no Term production lets a Quantifier follow it.
+// A class range whose two ends are literal code points must run upward, the
+// early error 22.2.1.1 keeps; a range with an escape on either side is left
+// alone, since Annex B lets a class escape stand beside a literal '-'.
 func validateRegex(s string) error {
 	// ECMA 262 reads a pattern as code points, so a byte sequence that is
 	// not UTF-8 holds no source character; every engine refuses it. The
@@ -1215,6 +1218,12 @@ func validateRegex(s string) error {
 	var groups []bool
 
 	inClass := false
+
+	// The last literal class atom (-1 for none) and whether a '-' has
+	// opened a range from it, so the closing atom can be checked against
+	// it.
+	classPrev := rune(-1)
+	classDash := false
 
 	state := regexNothing
 
@@ -1236,6 +1245,10 @@ func validateRegex(s string) error {
 			i += 1 + size
 			state = regexAtom
 
+			// An escape's value is not read, so a range it bounds goes
+			// unchecked.
+			classPrev, classDash = -1, false
+
 			continue
 
 		case inClass:
@@ -1244,16 +1257,43 @@ func validateRegex(s string) error {
 			// "[^]" (matches any character) are valid, and an unescaped ']' is
 			// never a class member (ClassAtomNoDash excludes it; a literal ']'
 			// must be escaped). "[]]" is therefore an empty class followed by a
-			// literal ']', which Annex B permits outside a class. A leading '^'
-			// needs no special casing: it negates, and the class it negates may
-			// be empty.
+			// literal ']', which Annex B permits outside a class.
 			if c == ']' {
 				inClass = false
 				state = regexAtom
+
+				break
 			}
+
+			r, size := utf8.DecodeRuneInString(s[i:])
+
+			switch {
+			case c == '-' && classPrev >= 0 && !classDash && i+1 < len(s) && s[i+1] != ']':
+				classDash = true
+			case classDash:
+				if r < classPrev {
+					return errors.New("invalid regex: class range out of order")
+				}
+
+				classPrev, classDash = -1, false
+
+			default:
+				classPrev = r
+			}
+
+			i += size
+
+			continue
 
 		case c == '[':
 			inClass = true
+			classPrev, classDash = -1, false
+
+			// A leading '^' negates the class and is no class atom, so it
+			// bounds no range.
+			if i+1 < len(s) && s[i+1] == '^' {
+				i++
+			}
 
 		case c == '(':
 			state = regexNothing
