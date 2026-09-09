@@ -156,6 +156,7 @@ const (
 	reasonScalarOutOfRange        = "a scalar the field's kind cannot hold is refused where go-playground compares it at the field's width and matches nothing, everything, or the rounded value"
 	reasonBoundNotRepresentable   = "a bound the schema cannot ship exactly is refused under the exact-representability policy where go-playground compares it at the field's width"
 	reasonStrayParameter          = "a parameter on a validator that takes none is refused where go-playground ignores it"
+	reasonRepeatedKeyword         = "two validators setting one schema keyword are refused where go-playground applies both, since a schema carries one value per keyword"
 )
 
 // spellingExclusions is the record of everything this rig leaves out, in the
@@ -342,6 +343,9 @@ func spellingExclusions() []spellingExclusion {
 		}},
 		{reason: reasonStrayParameter, catches: func(_ string, _ spellingKind, _ string, err error) bool {
 			return err != nil && strings.Contains(err.Error(), "takes no parameter")
+		}},
+		{reason: reasonRepeatedKeyword, catches: func(_ string, _ spellingKind, _ string, err error) bool {
+			return errors.Is(err, validate.ErrRepeatedKeyword)
 		}},
 		{reason: reasonStringRuleOnOtherKind, catches: func(_ string, kind spellingKind, _ string, err error) bool {
 			if kind.typ.Kind() == reflect.String || !errors.Is(err, tagmodel.ErrUnsupported) {
@@ -716,6 +720,7 @@ func spellingSeeds() []spellingSeed {
 
 	return append(seeds,
 		spellingSeed{tag: "isdefault", kind: str},
+		spellingSeed{tag: "email,url", kind: str},
 		spellingSeed{tag: "oneof=+1 01 2", kind: integer},
 		spellingSeed{tag: "oneof=true false", kind: boolean},
 		spellingSeed{tag: "oneof=1 2", kind: float},
@@ -821,6 +826,14 @@ func TestSpellingExclusionsAreReasoned(t *testing.T) {
 			tag: "email=0", kind: "bool",
 			err:  errors.New("validate tag: email: takes no parameter, got \"0\""),
 			want: reasonStrayParameter,
+		},
+		"repeated keyword": {
+			tag: "email,url", kind: "string",
+			err:  fmt.Errorf("%w: email and url", validate.ErrRepeatedKeyword),
+			want: reasonRepeatedKeyword,
+		},
+		"one keyword-setting validator is compared": {
+			tag: "email", kind: "string",
 		},
 		"parameter on a control tag is compared": {
 			tag: "omitempty=", kind: "uint64",
