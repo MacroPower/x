@@ -666,10 +666,17 @@ func walkNodes(root *node, seen map[*defEntry]bool, visit func(*node)) {
 // of the payload, with each node-backed child slot holding the child's own
 // view and a ref child as its $ref (the provisional token before
 // [run.finalizeRefs] runs, the final key after). The tuple form follows the
-// draft. A hook may mutate the copy freely; the generator reads a declaration
-// back from it only where it chooses to ([node.absorbView]).
+// draft. A nilable container's payload leaves its type for render to restore
+// beside the null decision, so the view restores it the same way: a hook
+// reads the type the rendered schema carries. A hook may mutate the copy
+// freely; the generator reads a declaration back from it only where it
+// chooses to ([node.absorbView]).
 func (n *node) view(draft Draft) *Schema {
 	v := schemaclone.Clone(n.payload)
+
+	if n.typeListEncoded() {
+		bareContainerType(v, n.containerType())
+	}
 
 	switch n.kind {
 	case kindObject:
@@ -781,6 +788,14 @@ func (n *node) overrideType(typeName string) {
 // terminate on a cycle, so no comparison runs over one), stays in the base as
 // the literal the hook authored and the child is dropped.
 func (n *node) absorbView(edited, pristine *Schema, draft Draft) {
+	// The view restored a container's type for the hook to read; the payload
+	// leaves that slot for render, so the restored value comes back out
+	// unless the hook wrote the slot itself. A hook that authored a Types
+	// list beside it would otherwise leave the pair no schema may carry.
+	if n.typeListEncoded() && edited.Type == pristine.Type && edited.Type == n.containerType() {
+		edited.Type = ""
+	}
+
 	n.payload = edited
 
 	switch n.kind {

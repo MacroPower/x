@@ -548,3 +548,43 @@ func TestFieldHookSeesFinalRefUnderCollision(t *testing.T) {
 	assert.Equal(t, want["a"], s.Properties["a"].Ref)
 	assert.Equal(t, want["b"], s.Properties["b"].Ref)
 }
+
+// typeReader is a tag interpreter that records the type keyword each field's
+// Base carries, keyed by the tag value.
+type typeReader struct{ seen map[string]string }
+
+func (r typeReader) Interpret(_ context.Context, field jsonschema.FieldContext, tag jsonschema.Tag) error {
+	r.seen[tag.Value] = field.Base.Type
+
+	return nil
+}
+
+// TestHookViewCarriesContainerType pins that a hook reads a nilable
+// container's type off FieldContext.Base. The node's payload leaves the type
+// for render to place beside the null decision, and the view restores it the
+// same way, so a hook dispatching on Base.Type sees the type the rendered
+// schema carries.
+func TestHookViewCarriesContainerType(t *testing.T) {
+	t.Parallel()
+
+	type doc struct {
+		L []int          `json:"l" see:"list"`
+		M map[string]int `json:"m" see:"map"`
+		B []byte         `json:"b" see:"bytes"`
+		P *[]int         `json:"p" see:"pointer"`
+		S string         `json:"s" see:"string"`
+	}
+
+	reader := typeReader{seen: map[string]string{}}
+
+	_, err := jsonschema.GenerateFor[doc](t.Context(), jsonschema.WithTagInterpreter("see", reader))
+	require.NoError(t, err)
+
+	assert.Equal(t, map[string]string{
+		"list":    "array",
+		"map":     "object",
+		"bytes":   "string",
+		"pointer": "array",
+		"string":  "string",
+	}, reader.seen)
+}

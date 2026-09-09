@@ -3,6 +3,7 @@ package jsonschema_test
 import (
 	"context"
 	"encoding/json/v2"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -250,4 +251,37 @@ func TestGenerateFor_ExtenderNullTypeUnderFormatNull(t *testing.T) {
 			assert.Equal(t, tc.want, s.Properties["tags"])
 		})
 	}
+}
+
+// typedList is a named slice whose extender reads the reflected type.
+type typedList []int
+
+// JSONSchemaExtend records the type keyword the reflected schema carries and
+// changes nothing.
+func (typedList) JSONSchemaExtend(_ context.Context, _ jsonschema.TypeContext, ts *jsonschema.TypeSchema) error {
+	if ts.Value.Type != "array" {
+		return fmt.Errorf("extender saw type %q, want array", ts.Value.Type)
+	}
+
+	return nil
+}
+
+// TestGenerateFor_ExtenderSeesContainerType pins that an extender on a named
+// slice receives the reflected schema with its type keyword, the schema the
+// docs describe, rather than the bare payload render fills in later.
+func TestGenerateFor_ExtenderSeesContainerType(t *testing.T) {
+	t.Parallel()
+
+	type doc struct {
+		L typedList `json:"l"`
+	}
+
+	// Inline definitions keep the property on the field, so the assertion
+	// reads the extended schema where it renders.
+	s, err := jsonschema.GenerateFor[doc](t.Context(), jsonschema.WithDefinitions(false))
+	require.NoError(t, err)
+
+	got, err := json.Marshal(s.Properties["l"])
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"type":"array","items":{"type":"integer"}}`, string(got))
 }
