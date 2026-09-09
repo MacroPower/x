@@ -106,15 +106,20 @@ func (vs ValueSet) WriteForbidden(s *jsonschema.Schema) {
 // ConjoinNot composes an authored not with a type-derived one so both hold: a
 // bare const or enum forbid folds into the type's not through the shared
 // not.const -> not.enum -> allOf escalation, and any other authored not moves
-// under allOf beside the type's. The type not is copied before mutation, so
-// the pristine payload it came from never changes. It returns the composed not
-// (nil when the escalation moved everything under allOf) and the allOf
-// conjuncts to append.
+// under allOf beside the type's. A nil type not seeds nothing, so a bare
+// forbid takes the slot and a subschema still moves under allOf, the
+// placement [ValueSet.ForbidSchema] gives every forbidden subschema. The type
+// not is copied before mutation, so the pristine payload it came from never
+// changes. It returns the composed not (nil when the escalation moved
+// everything under allOf) and the allOf conjuncts to append.
 func ConjoinNot(typeNot, authored *jsonschema.Schema) (*jsonschema.Schema, []*jsonschema.Schema) {
-	seed := *typeNot
-	seed.Enum = slices.Clone(seed.Enum)
+	var vs ValueSet
 
-	vs := ValueSet{not: &seed}
+	if typeNot != nil {
+		seed := *typeNot
+		seed.Enum = slices.Clone(seed.Enum)
+		vs.not = &seed
+	}
 
 	switch {
 	case authored.Const != nil && constrainsConstOnly(authored):

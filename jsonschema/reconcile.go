@@ -262,8 +262,11 @@ func overlayAuthored(merged, canvas, base *Schema) {
 	// both, so pointer-ness flipped the semantics). The shared escalation folds
 	// a bare const/enum forbid into the type's not and moves anything else under
 	// allOf, so both always hold, for every writer (the facade, an interpreter
-	// authoring the canvas not directly).
-	if canvas.Not != nil && base.Not != nil && canvas.Not != base.Not {
+	// authoring the canvas not directly). It runs with no type not too, since
+	// the not slot is wrapper-scoped: a forbidden subschema left there would
+	// judge a nullable field's null, which a subschema naming no type rejects
+	// vacuously, so it moves under allOf as the facade places it.
+	if canvas.Not != nil && canvas.Not != base.Not {
 		not, conjuncts := constraint.ConjoinNot(base.Not, canvas.Not)
 		merged.Not = not
 

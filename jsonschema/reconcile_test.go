@@ -584,3 +584,69 @@ func TestReconcileExamplesAuthoredByContent(t *testing.T) {
 		})
 	}
 }
+
+// notWriter is a tag interpreter that writes a forbidden subschema straight
+// to the canvas not slot rather than through the facade.
+type notWriter struct{}
+
+func (notWriter) Interpret(_ context.Context, field jsonschema.FieldContext, _ jsonschema.Tag) error {
+	field.Canvas.Not = &jsonschema.Schema{MinLength: new(5)}
+
+	return nil
+}
+
+// TestReconcileCanvasNotSubschemaRidesValueBranch pins where a subschema an
+// interpreter writes to the canvas not lands. The not slot is wrapper-scoped
+// so a bare value forbid can reject a null, but a subschema naming no type
+// matches null vacuously, so from the wrapper it would reject the null a
+// pointer field admits. It moves under allOf on the value branch, the
+// placement the facade's ForbidSchema gives it, so T and *T agree on every
+// non-null instance and *T still admits null.
+func TestReconcileCanvasNotSubschemaRidesValueBranch(t *testing.T) {
+	t.Parallel()
+
+	type doc struct {
+		P *string `forbid:"long" json:"p"`
+		S string  `forbid:"long" json:"s"`
+	}
+
+	s, err := jsonschema.GenerateFor[doc](t.Context(), jsonschema.WithTagInterpreter("forbid", notWriter{}))
+	require.NoError(t, err)
+
+	// The pointer field's value branch sits inside its null wrapper; the
+	// plain field is its own value branch.
+	branches := map[string]*jsonschema.Schema{
+		"p": s.Properties["p"].AnyOf[0],
+		"s": s.Properties["s"],
+	}
+
+	for name, branch := range branches {
+		assert.Nil(t, s.Properties[name].Not, "property %q keeps the wrapper's not slot free", name)
+		assert.Nil(t, branch.Not, "property %q keeps the value branch's not slot free", name)
+		require.Len(t, branch.AllOf, 1, "property %q carries the forbid under allOf", name)
+		assert.Equal(t, 5, *branch.AllOf[0].Not.MinLength)
+	}
+
+	tests := map[string]struct {
+		instance map[string]any
+		valid    bool
+	}{
+		"null pointer":     {instance: map[string]any{"p": nil, "s": "ab"}, valid: true},
+		"short values":     {instance: map[string]any{"p": "ab", "s": "ab"}, valid: true},
+		"long pointer":     {instance: map[string]any{"p": "abcdef", "s": "ab"}, valid: false},
+		"long non-pointer": {instance: map[string]any{"p": "ab", "s": "abcdef"}, valid: false},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := jsonschema.Validate(t.Context(), s, tc.instance)
+			if tc.valid {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+			}
+		})
+	}
+}
