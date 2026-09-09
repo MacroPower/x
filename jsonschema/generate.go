@@ -520,6 +520,11 @@ func (g *run) marshalDefaults(rootType reflect.Type) (map[string]jsontext.Value,
 // base admits it, since a hook can put the null in the shared def body rather
 // than on the reference.
 //
+// The schema's own type, const, and enum apply beside every applicator, so a
+// schema whose type names no null, whose const is not null, or whose enum
+// holds none answers no before any branch or $ref is read: a null no keyword
+// of its own admits fails whatever a branch would accept.
+//
 // A not goes unread, since it inverts its subschema's answer.
 func (g *run) declaredAdmitsNull(s *Schema, seen map[*Schema]bool) bool {
 	if s == nil || seen[s] {
@@ -532,12 +537,16 @@ func (g *run) declaredAdmitsNull(s *Schema, seen map[*Schema]bool) bool {
 		return true
 	}
 
-	if s.Const != nil && isJSONNull(*s.Const) {
-		return true
+	if s.Const != nil {
+		return isJSONNull(*s.Const)
 	}
 
-	if slices.ContainsFunc(s.Enum, isJSONNull) {
-		return true
+	if s.Enum != nil {
+		return slices.ContainsFunc(s.Enum, isJSONNull)
+	}
+
+	if s.Type != "" || len(s.Types) > 0 {
+		return false
 	}
 
 	branch := func(b *Schema) bool { return g.declaredAdmitsNull(b, seen) }

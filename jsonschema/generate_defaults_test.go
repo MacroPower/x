@@ -693,3 +693,41 @@ func TestWithDefaultsFromIgnoresFormatting(t *testing.T) {
 
 	assert.Equal(t, `{"a":1}`, string(s.Properties["m"].Default))
 }
+
+// defaultsNullTypedUnion is a root whose extender replaces a property with a
+// literal that names a non-null type beside a union admitting null.
+type defaultsNullTypedUnion struct {
+	P *int `json:"p"`
+}
+
+// typedUnionExtender declares p as {type: string, anyOf: [{format: email}, {}]}:
+// the second branch admits anything, but the type keyword beside it admits
+// no null.
+func typedUnionExtender() jsonschema.GenerateOption {
+	return jsonschema.WithTypeSchemaExtenderFor[defaultsNullTypedUnion](
+		func(_ context.Context, _ jsonschema.TypeContext, ts *jsonschema.TypeSchema) error {
+			ts.Value.Properties["p"] = &jsonschema.Schema{
+				Type:  "string",
+				AnyOf: []*jsonschema.Schema{{Format: "email"}, {}},
+			}
+
+			return nil
+		},
+	)
+}
+
+// TestWithDefaultsFromNullDefaultTypedLiteral pins that a hook literal's own
+// type keyword gates a seeded null: a branch admitting null cannot admit it
+// past a type naming none, so the null default is skipped.
+func TestWithDefaultsFromNullDefaultTypedLiteral(t *testing.T) {
+	t.Parallel()
+
+	s, err := jsonschema.GenerateFor[defaultsNullTypedUnion](
+		t.Context(),
+		typedUnionExtender(),
+		jsonschema.WithDefaultsFrom(defaultsNullTypedUnion{}),
+	)
+	require.NoError(t, err)
+
+	assert.Empty(t, string(s.Properties["p"].Default), "a null no keyword of the literal admits seeds nothing")
+}
