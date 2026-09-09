@@ -2,6 +2,7 @@ package jsonschema_test
 
 import (
 	"context"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
 	"testing"
@@ -514,6 +515,38 @@ func TestHookCanvasEmptyEnumRefused(t *testing.T) {
 			require.ErrorIs(t, err, tagmodel.ErrNoValues)
 			assert.Contains(t, err.Error(), tc.want)
 		})
+	}
+}
+
+// TestHookCanvasConstOnUnrestrictedKeepsNull pins that a const an
+// interpreter writes on an unrestricted occurrence (an interface, a pointer
+// to a raw message) rides the value branch beside a null branch. The
+// occurrence admits null on its own, and a nil interface or pointer marshals
+// as null, so the const must not swallow it.
+func TestHookCanvasConstOnUnrestrictedKeepsNull(t *testing.T) {
+	t.Parallel()
+
+	type doc struct {
+		A any             `const:"x" json:"a"`
+		P *jsontext.Value `const:"x" json:"p"`
+	}
+
+	s, err := jsonschema.GenerateFor[doc](t.Context(),
+		jsonschema.WithTagInterpreter("const", jsonschema.TagInterpreterFunc(
+			func(_ context.Context, field jsonschema.FieldContext, _ jsonschema.Tag) error {
+				var value any = 1
+
+				field.Canvas.Const = &value
+
+				return nil
+			},
+		)))
+	require.NoError(t, err)
+
+	for _, name := range []string{"a", "p"} {
+		raw, err := json.Marshal(s.Properties[name])
+		require.NoError(t, err)
+		assert.JSONEq(t, `{"anyOf":[{"const":1},{"type":"null"}]}`, string(raw), name)
 	}
 }
 

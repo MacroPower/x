@@ -502,6 +502,11 @@ type nullFacts struct {
 	// null type or is an unrestricted leaf, so the target admits null
 	// without a wrapper.
 	targetNull bool
+	// Unrestricted reports an occurrence that is an unrestricted leaf: a
+	// kindValue node with an empty payload and no verbatim mark, whose {}
+	// admits null as it stands. A body or reference never carries it; the
+	// reference reads the same shape off its body as targetNull.
+	unrestricted bool
 	// NilSliceNull and nilMapNull are the run's format flags: whether the
 	// marshal writes null for a nil slice (or byte slice) and a nil map.
 	nilSliceNull bool
@@ -557,15 +562,22 @@ func (g *run) factsOf(n *node, bodyOf *defEntry) nullFacts {
 
 		if body := n.def.body; body != nil {
 			f.targetNull = schemashape.DeclaresType(body.payload, typename.Null) ||
-				(body.kind == kindValue && !body.verbatim && schemashape.IsEmpty(body.payload))
+				unrestrictedLeaf(body)
 		}
 
 		return f
 	}
 
 	f.declaresNull = schemashape.DeclaresType(n.payload, typename.Null)
+	f.unrestricted = f.role == roleOccurrence && unrestrictedLeaf(n)
 
 	return f
+}
+
+// unrestrictedLeaf reports whether n is a kindValue leaf with an empty
+// payload and no verbatim mark, the shape that renders as the bare {}.
+func unrestrictedLeaf(n *node) bool {
+	return n.kind == kindValue && !n.verbatim && schemashape.IsEmpty(n.payload)
 }
 
 // admitNull decides whether a node admits a JSON null.
@@ -575,13 +587,16 @@ func (g *run) factsOf(n *node, bodyOf *defEntry) nullFacts {
 // the occurrence that built it and a stance's grant, since each reference
 // carries those, and keeps only the entry's veto over the container null a
 // format option adds; a body whose payload names null admits it outright. An
-// occurrence admits null when its payload names it, or when it is a
+// occurrence admits null when its payload names it, when it is a
 // reference to a body that admits null on its own (a payload naming null or
 // an unrestricted leaf), since the rendered $ref admits whatever its target
-// does; otherwise it admits null when the def entry's stance, then its own
-// stance, then the position itself say so: a stance of NullAllowed grants
-// and NullForbidden vetoes, and NullFromReflection defers to a pointer
-// position or a container whose nil the marshal writes as null.
+// does, or when it is itself an unrestricted leaf, since the {} it renders
+// admits null and the marshal writes null for a nil value of it (a nil
+// [encoding/json/jsontext.Value], a nil interface); otherwise it admits null
+// when the def entry's stance, then its own stance, then the position itself
+// say so: a stance of NullAllowed grants and NullForbidden vetoes, and
+// NullFromReflection defers to a pointer position or a container whose nil
+// the marshal writes as null.
 func admitNull(f nullFacts) bool {
 	switch {
 	case f.role == roleComposed || f.verbatim:
@@ -591,6 +606,8 @@ func admitNull(f nullFacts) bool {
 	case f.declaresNull:
 		return true
 	case f.ref && f.targetNull:
+		return true
+	case f.unrestricted:
 		return true
 	default:
 		return f.defStance.apply(f.stance.apply(f.pointer || f.containerNull()))

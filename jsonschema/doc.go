@@ -877,9 +877,10 @@
 //     Slices and Maps entries under Type Mapping describe.
 //   - A pointer to a container takes the literal, since the pointer's own
 //     null branch admits it.
-//   - A type the package maps to a built-in leaf schema refuses the literal,
-//     so [encoding/json.RawMessage] refuses it even though the {} it produces
-//     admits null.
+//   - An unrestricted leaf ([encoding/json.RawMessage], a zero [TypeSchema]
+//     a provider or override declares) takes the literal, inline or behind a
+//     $ref. The {} it produces admits null, and a nil value marshals as
+//     null.
 //   - A [Nullability] stance moves the decision either way. A value field of
 //     a [NullAllowed] type takes the literal, and a pointer to a
 //     [NullForbidden] one does not.

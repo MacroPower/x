@@ -793,3 +793,46 @@ func TestWithDefaultsFromComposedEmbedPlaceholder(t *testing.T) {
 		assert.NotContains(t, s.Properties, "X", "an open object carries no placeholder")
 	})
 }
+
+// defaultsUnrestricted is a named struct a zero TypeSchema override marks
+// unrestricted, so it renders as {} behind a $ref by default and inline
+// under WithDefinitions(false).
+type defaultsUnrestricted struct{}
+
+// defaultsUnrestrictedRoot carries a bare raw message the instance seeds
+// with null and an unrestricted struct whose tag declares the same literal.
+// The struct's own value marshals as {}, so the instance seeds the raw
+// message alone and the tag speaks for the struct.
+type defaultsUnrestrictedRoot struct {
+	R jsontext.Value       `json:"r"`
+	U defaultsUnrestricted `json:"u" jsonschema:"default=null"`
+}
+
+// TestWithDefaultsFromUnrestrictedLeafNull pins that a null literal lands on
+// an unrestricted leaf whether the leaf renders inline or behind a $ref. The
+// {} either form renders admits null, and a nil raw message marshals as
+// null, so the decision does not depend on WithDefinitions.
+func TestWithDefaultsFromUnrestrictedLeafNull(t *testing.T) {
+	t.Parallel()
+
+	for name, definitions := range map[string]bool{"extracted": true, "inline": false} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			s, err := jsonschema.GenerateFor[defaultsUnrestrictedRoot](t.Context(),
+				jsonschema.WithTypeSchemaFor[defaultsUnrestricted](jsonschema.TypeSchema{}),
+				jsonschema.WithDefinitions(definitions),
+			)
+			require.NoError(t, err)
+			assert.JSONEq(t, `null`, string(s.Properties["u"].Default), "an unrestricted override takes the tag's null")
+
+			s, err = jsonschema.GenerateFor[defaultsUnrestrictedRoot](t.Context(),
+				jsonschema.WithTypeSchemaFor[defaultsUnrestricted](jsonschema.TypeSchema{}),
+				jsonschema.WithDefinitions(definitions),
+				jsonschema.WithDefaultsFrom(defaultsUnrestrictedRoot{R: jsontext.Value("null")}),
+			)
+			require.NoError(t, err)
+			assert.JSONEq(t, `null`, string(s.Properties["r"].Default), "a bare raw message takes the seeded null")
+		})
+	}
+}

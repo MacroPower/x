@@ -292,6 +292,10 @@ func admitRules() []nullRule {
 			when: func(f nullFacts) bool { return f.ref && f.targetNull },
 		},
 		{
+			name: "an unrestricted occurrence admits null", verdict: true,
+			when: func(f nullFacts) bool { return f.unrestricted },
+		},
+		{
 			name: "a NullAllowed entry stance grants null to a reference", verdict: true,
 			when: func(f nullFacts) bool { return f.defStance == NullAllowed },
 		},
@@ -394,6 +398,7 @@ func nullFactAxes() map[string][]func(*nullFacts) {
 		"verbatim":     bools(func(f *nullFacts, b bool) { f.verbatim = b }),
 		"declaresNull": bools(func(f *nullFacts, b bool) { f.declaresNull = b }),
 		"targetNull":   bools(func(f *nullFacts, b bool) { f.targetNull = b }),
+		"unrestricted": bools(func(f *nullFacts, b bool) { f.unrestricted = b }),
 		"nilSliceNull": bools(func(f *nullFacts, b bool) { f.nilSliceNull = b }),
 		"nilMapNull":   bools(func(f *nullFacts, b bool) { f.nilMapNull = b }),
 	}

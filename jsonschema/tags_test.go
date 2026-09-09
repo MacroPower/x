@@ -2178,9 +2178,8 @@ func TestTagNullLiteralFollowsTheNullDecision(t *testing.T) {
 			want: `{"default":null}`,
 		},
 		// A jsontext.Value renders as the same unrestricted schema an interface
-		// does, and answers the opposite way. Its schema comes from the built-in
-		// leaf table rather than from reflection over a container, so no node
-		// records a null decision for the tag to read.
+		// does and answers the same way. The {} admits null, and a nil value
+		// marshals as null.
 		"null default on a raw message": {
 			generate: func() (*jsonschema.Schema, error) {
 				type T struct {
@@ -2189,7 +2188,8 @@ func TestTagNullLiteralFollowsTheNullDecision(t *testing.T) {
 
 				return jsonschema.GenerateFor[T](t.Context())
 			},
-			err: "cannot assign null",
+			prop: "v",
+			want: `{"default":null}`,
 		},
 		"null examples member on a bare slice": {
 			generate: func() (*jsonschema.Schema, error) {
