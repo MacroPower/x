@@ -1199,7 +1199,8 @@ const (
 // "{m,n}" must not exceed the second. A '{' that opens no braced quantifier
 // form is an Annex B ExtendedPatternCharacter, so "a{,5}" and "a{2,1" stay
 // literal. The assertions '^' and '$' are left quantifiable, as RE2 reads
-// them.
+// them, and so is a lookahead, which Annex B's QuantifiableAssertion covers;
+// a lookbehind is not, since no Term production lets a Quantifier follow it.
 func validateRegex(s string) error {
 	// ECMA 262 reads a pattern as code points, so a byte sequence that is
 	// not UTF-8 holds no source character; every engine refuses it. The
@@ -1209,7 +1210,9 @@ func validateRegex(s string) error {
 		return errors.New("invalid regex: invalid UTF-8")
 	}
 
-	depth := 0
+	// One entry per open group, recording whether it is a lookbehind, so the
+	// closing parenthesis knows whether a quantifier may follow it.
+	var groups []bool
 
 	inClass := false
 
@@ -1253,23 +1256,31 @@ func validateRegex(s string) error {
 			inClass = true
 
 		case c == '(':
-			depth++
 			state = regexNothing
+			lookbehind := false
 
 			// A "(?" opens a non-capturing, lookaround, named, or (in RE2)
 			// flagged group; its modifier is consumed here so no byte of it
 			// counts as an atom for a quantifier to repeat.
 			if i+1 < len(s) && s[i+1] == '?' {
-				i += 1 + regexGroupModifierLen(s[i+2:])
+				mod := s[i+2:]
+				lookbehind = len(mod) > 1 && mod[0] == '<' && (mod[1] == '=' || mod[1] == '!')
+				i += 1 + regexGroupModifierLen(mod)
 			}
 
+			groups = append(groups, lookbehind)
+
 		case c == ')':
-			if depth == 0 {
+			if len(groups) == 0 {
 				return errRegexUnbalancedParenthesis
 			}
 
-			depth--
 			state = regexAtom
+			if groups[len(groups)-1] {
+				state = regexNothing
+			}
+
+			groups = groups[:len(groups)-1]
 
 		case c == '|':
 			state = regexNothing
@@ -1319,7 +1330,7 @@ func validateRegex(s string) error {
 		i++
 	}
 
-	if depth != 0 {
+	if len(groups) != 0 {
 		return errRegexUnbalancedParenthesis
 	}
 

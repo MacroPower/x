@@ -55,5 +55,9 @@
 "a{2,}"	true	an open upper bound
 "(?<name>a)*"	true	a named group is quantifiable
 "(?=a)*"	true	Annex B QuantifiableAssertion lets a lookahead be repeated
+"(?<=a)"	true	a lookbehind assertion
+"(?<=a)*"	false	no Term production lets a quantifier follow a lookbehind
+"(?<!a)+"	false	no Term production lets a quantifier follow a negative lookbehind
+"(?<=a){1}"	false	a braced quantifier after a lookbehind has nothing to repeat either
 "[ab]{2}"	true	a class is quantifiable
 "\\d+"	true	an escape is quantifiable
