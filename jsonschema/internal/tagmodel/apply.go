@@ -501,9 +501,12 @@ func nonZeroNullOnly(t Target) bool {
 // which go-playground's required rejects and the floor never reaches, since a
 // null instance carries no size to measure. The floor is an ordinary
 // intersect-only bound, so it never lowers a bound another rule already set.
+// A fixed array gets no floor: its schema pins the size already, so a floor
+// of one is inert at N > 0 and unsatisfiable at N = 0, and go-playground's
+// required on an array, "not the zero array", has no schema form.
 func nonZeroFloor(axis Axis) func(Target, Rule, Policy) error {
 	return func(t Target, _ Rule, pol Policy) error {
-		if nonZeroNullOnly(t) {
+		if nonZeroNullOnly(t) || t.Shape.isFixedArray() {
 			return nil
 		}
 

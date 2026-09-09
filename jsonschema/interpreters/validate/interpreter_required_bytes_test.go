@@ -46,6 +46,41 @@ func TestValidateInterpreter_RequiredOnRawMessage(t *testing.T) {
 		"the field itself stays required")
 }
 
+// TestValidateInterpreter_RequiredOnByteArray pins that required on a [N]byte
+// field adds no length floor. The field marshals to a base64 string whose
+// length the schema pins to the padded encoding of N bytes, so a floor of
+// one is inert at N > 0 and unsatisfiable at N = 0.
+func TestValidateInterpreter_RequiredOnByteArray(t *testing.T) {
+	t.Parallel()
+
+	type Four struct {
+		Data [4]byte `json:"data" validate:"required"`
+	}
+
+	type Zero struct {
+		Data [0]byte `json:"data" validate:"required"`
+	}
+
+	opt := jsonschema.WithTagInterpreter("validate", validate.NewInterpreter())
+
+	s, err := jsonschema.GenerateFor[Four](t.Context(), opt)
+	require.NoError(t, err)
+	assert.Contains(t, s.Required, "data")
+	assert.Equal(t, new(8), s.Properties["data"].MinLength, "the padded base64 length of four bytes")
+	assert.Equal(t, new(8), s.Properties["data"].MaxLength)
+
+	s, err = jsonschema.GenerateFor[Zero](t.Context(), opt)
+	require.NoError(t, err)
+	assert.Contains(t, s.Required, "data")
+	assert.Equal(t, new(0), s.Properties["data"].MinLength)
+	assert.Equal(t, new(0), s.Properties["data"].MaxLength)
+
+	v, err := jsonschema.Compile(t.Context(), s)
+	require.NoError(t, err)
+	require.NoError(t, v.ValidateJSON(t.Context(), []byte(`{"data": ""}`)),
+		"the only instance a [0]byte marshals to stays valid")
+}
+
 // TestValidateInterpreter_RequiredOnByteSliceNoMinItems pins that required on
 // a []byte field does not stamp minItems: the field marshals to a base64
 // string, so an array size floor is inert against every instance the field

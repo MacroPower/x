@@ -169,6 +169,13 @@ func (sh Shape) isPointer() bool {
 	return sh.Type != nil && sh.Type.Kind() == reflect.Pointer
 }
 
+// isFixedArray reports whether the occurrence is a Go array, behind a pointer
+// or bare, whose schema already pins its size: minItems and maxItems both N,
+// or the base64 length for a [N]byte.
+func (sh Shape) isFixedArray() bool {
+	return sh.Elem != nil && sh.Elem.Kind() == reflect.Array
+}
+
 // FormForTypeName returns the form an instance of the named JSON type takes. It
 // is the classification for a dialect that names the JSON type outright rather
 // than describing a Go value -- the jsonschema tag's type= pair -- and it is

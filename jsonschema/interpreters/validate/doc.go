@@ -46,13 +46,16 @@
 //     instance on its own.
 //
 //     A non-pointer field also gets a type-specific non-zero constraint:
-//     minLength: 1 for strings, minItems: 1 for slices/arrays,
+//     minLength: 1 for strings, minItems: 1 for slices,
 //     minProperties: 1 for maps, const: true for bools, and a not forbidding 0
 //     for numbers. On a bare container that constraint measures a size, which a
 //     null instance does not carry, so the field needs the forbidden null
-//     beside it. A pointer field gets the forbidden null and no such
-//     constraint, since go-playground reads required on a pointer as "must be
-//     non-nil" and says nothing about the pointed-to value, which may be zero.
+//     beside it. A fixed array gets no size constraint: its schema pins the
+//     length already, and go-playground's required on an array, which rejects
+//     the zero array, has no schema form. A pointer field gets the forbidden
+//     null and no such constraint, since go-playground reads required on a
+//     pointer as "must be non-nil" and says nothing about the pointed-to
+//     value, which may be zero.
 //
 //     A shape with no non-zero form the schema can express gets the required
 //     entry and nothing else, not even the forbidden null: a struct, a

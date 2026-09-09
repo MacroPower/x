@@ -1149,6 +1149,86 @@ func TestValidateInterpreter_RequiredOnNonPointerSlice(t *testing.T) {
 	assert.Nil(t, s.Properties["tags"].Not)
 }
 
+// TestValidateInterpreter_RequiredOnFixedArray pins that required on a fixed
+// array adds no size floor. The array's schema pins minItems and maxItems to
+// its length, so a floor of one is inert at any positive length and
+// unsatisfiable at length zero, and go-playground's required on an array
+// ("not the zero array") has no schema form. A pointer to one forbids null
+// as any pointer does, and a required under a dive leaves the element
+// arrays pinned while the slice keeps its own floor.
+func TestValidateInterpreter_RequiredOnFixedArray(t *testing.T) {
+	t.Parallel()
+
+	type Three struct {
+		V [3]string `json:"v" validate:"required"`
+	}
+
+	type Zero struct {
+		V [0]string `json:"v" validate:"required"`
+	}
+
+	type Pointer struct {
+		V *[3]string `json:"v" validate:"required"`
+	}
+
+	type Dived struct {
+		V [][2]int `json:"v" validate:"required,dive,required"`
+	}
+
+	opt := jsonschema.WithTagInterpreter("validate", validate.NewInterpreter())
+
+	t.Run("positive length keeps its pinned size", func(t *testing.T) {
+		t.Parallel()
+
+		s, err := jsonschema.GenerateFor[Three](t.Context(), opt)
+		require.NoError(t, err)
+
+		assert.Contains(t, s.Required, "v")
+		assert.Equal(t, new(3), s.Properties["v"].MinItems)
+		assert.Equal(t, new(3), s.Properties["v"].MaxItems)
+		assert.Nil(t, s.Properties["v"].Not)
+	})
+
+	t.Run("zero length stays satisfiable", func(t *testing.T) {
+		t.Parallel()
+
+		s, err := jsonschema.GenerateFor[Zero](t.Context(), opt)
+		require.NoError(t, err)
+
+		assert.Contains(t, s.Required, "v")
+		assert.Equal(t, new(0), s.Properties["v"].MinItems)
+		assert.Equal(t, new(0), s.Properties["v"].MaxItems)
+
+		v, err := jsonschema.Compile(t.Context(), s)
+		require.NoError(t, err)
+		require.NoError(t, v.ValidateJSON(t.Context(), []byte(`{"v": []}`)),
+			"the only instance a [0]T marshals to stays valid")
+	})
+
+	t.Run("pointer forbids null and adds no floor", func(t *testing.T) {
+		t.Parallel()
+
+		s, err := jsonschema.GenerateFor[Pointer](t.Context(), opt)
+		require.NoError(t, err)
+
+		assert.Contains(t, s.Required, "v")
+		assertForbidsNull(t, s.Properties["v"])
+	})
+
+	t.Run("dive leaves the element arrays pinned", func(t *testing.T) {
+		t.Parallel()
+
+		s, err := jsonschema.GenerateFor[Dived](t.Context(), opt)
+		require.NoError(t, err)
+
+		outer := s.Properties["v"]
+		assert.Equal(t, new(1), outer.MinItems, "the slice keeps required's floor")
+		require.NotNil(t, outer.Items)
+		assert.Equal(t, new(2), outer.Items.MinItems)
+		assert.Equal(t, new(2), outer.Items.MaxItems)
+	})
+}
+
 func TestValidateInterpreter_RequiredOnNonPointerMap(t *testing.T) {
 	t.Parallel()
 

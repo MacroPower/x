@@ -38,6 +38,12 @@ const (
 	// byte-identical to the allocated empty go-playground accepts, so no
 	// schema can state the distinction and the target skips the value.
 	reasonRequiredPointerNilCollection = "a nil collection behind a non-nil pointer marshals identically to the allocated empty go-playground accepts"
+	// Go-playground's required on an array rejects the zero array, a value
+	// whose marshaled form no schema keyword distinguishes from any other
+	// array of the pinned length, so the interpreter adds no floor and the
+	// two disagree on a zero-valued array. The draw pools spell no fixed
+	// array, so the entry is a record rather than a checkable rule.
+	reasonRequiredFixedArrayZero = "required on a fixed array rejects the zero array, which no keyword over the pinned length can express"
 	// Go-playground's oneof formats the field as text and handles only the
 	// string and integer kinds, panicking with "Bad field type" on anything
 	// else, and the interpreter refuses the same pair with ErrOneOfKind. The
@@ -154,6 +160,10 @@ func rigExclusions() []rigExclusion {
 		{
 			what:   "required on a nil collection behind a non-nil pointer",
 			reason: reasonRequiredPointerNilCollection,
+		},
+		{
+			what:   "required on a fixed array holding the zero array",
+			reason: reasonRequiredFixedArrayZero,
 		},
 		{
 			what:   "required paired with omitempty on one field",
