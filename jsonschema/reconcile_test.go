@@ -48,6 +48,10 @@ type splitCase struct {
 	// The canvas hook authors a keyword the jsonschema tag cannot spell, by
 	// writing the field's authored canvas from a tag interpreter.
 	canvas func(*jsonschema.Schema)
+	// The constrain hook authors through the constraints facade instead, for
+	// a keyword whose authored form is a facade placement rather than a
+	// canvas write, such as the not branch ForbidSchema lands under allOf.
+	constrain func(*jsonschema.Constraints) error
 	// The ok value satisfies both occurrences, so a probe on one field can hold
 	// the other field valid.
 	ok any
@@ -73,7 +77,7 @@ func (c splitCase) generate(t *testing.T) *jsonschema.Schema {
 			tag += ` jsonschema:"` + c.tag + `"`
 		}
 
-		if c.canvas != nil {
+		if c.canvas != nil || c.constrain != nil {
 			tag += ` probe:"canvas"`
 		}
 
@@ -84,10 +88,16 @@ func (c splitCase) generate(t *testing.T) *jsonschema.Schema {
 		jsonschema.WithTypeSchema(c.elem, jsonschema.TypeSchema{Value: c.typeValue}),
 	}
 
-	if c.canvas != nil {
+	if c.canvas != nil || c.constrain != nil {
 		opts = append(opts, jsonschema.WithTagInterpreter("probe", jsonschema.TagInterpreterFunc(
 			func(_ context.Context, fc jsonschema.FieldContext, _ jsonschema.Tag) error {
-				c.canvas(fc.Canvas)
+				if c.canvas != nil {
+					c.canvas(fc.Canvas)
+				}
+
+				if c.constrain != nil {
+					return c.constrain(fc.Constraints())
+				}
 
 				return nil
 			},
@@ -314,7 +324,29 @@ var (
 			},
 			validate: []jsonschema.ValidateOption{jsonschema.WithContent(true)},
 		},
+		keyword.Not: {
+			// The type-level not forbids one value and the facade forbids a
+			// length; ForbidSchema lands the latter as allOf:[{not: ...}] on
+			// the value branch, beside the type's own not, for both
+			// occurrences.
+			elem:      reflect.TypeFor[splitString](),
+			typeValue: &jsonschema.Schema{Type: "string", Not: &jsonschema.Schema{Const: &splitReserved}},
+			constrain: func(c *jsonschema.Constraints) error {
+				return c.ForbidSchema(&jsonschema.Schema{MinLength: new(3), MaxLength: new(3)})
+			},
+			ok: "ab",
+			probes: []splitProbe{
+				{value: "ab", valid: true},
+				{value: "abcd", valid: true},
+				{value: "abc", valid: false},
+				{value: "reserved", valid: false},
+			},
+		},
 	}
+
+	// The splitReserved value is the const the not case's type-level not
+	// forbids.
+	splitReserved any = "reserved"
 
 	// The splitSkips map holds the authorable keywords the differential table
 	// deliberately omits, each with the reason no differential case can be
@@ -330,7 +362,6 @@ var (
 		keyword.Examples:      "annotation: carries no assertion, so agreement is vacuous",
 		keyword.Comment:       "annotation: carries no assertion, so agreement is vacuous",
 		keyword.ContentSchema: "annotation: recorded but never evaluated, so agreement is vacuous",
-		keyword.Not:           "no expressible pair of identical authored values over one type",
 	}
 )
 
