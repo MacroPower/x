@@ -73,6 +73,81 @@ func TestHasRefSiblings(t *testing.T) {
 			schema: withRef(func(s *jsonschema.Schema) { s.PropertyOrder = []string{} }),
 			want:   false,
 		},
+		"empty $defs": {
+			schema: withRef(func(s *jsonschema.Schema) { s.Defs = map[string]*jsonschema.Schema{} }),
+			want:   false,
+		},
+		"empty definitions": {
+			schema: withRef(func(s *jsonschema.Schema) { s.Definitions = map[string]*jsonschema.Schema{} }),
+			want:   false,
+		},
+		"empty dependencies schemas": {
+			schema: withRef(func(s *jsonschema.Schema) { s.DependencySchemas = map[string]*jsonschema.Schema{} }),
+			want:   false,
+		},
+		"empty dependencies strings": {
+			schema: withRef(func(s *jsonschema.Schema) { s.DependencyStrings = map[string][]string{} }),
+			want:   false,
+		},
+		"empty $vocabulary": {
+			schema: withRef(func(s *jsonschema.Schema) { s.Vocabulary = map[string]bool{} }),
+			want:   false,
+		},
+		"empty default": {
+			schema: withRef(func(s *jsonschema.Schema) { s.Default = json.RawMessage{} }),
+			want:   false,
+		},
+		"empty required": {
+			schema: withRef(func(s *jsonschema.Schema) { s.Required = []string{} }),
+			want:   false,
+		},
+		"empty dependentRequired": {
+			schema: withRef(func(s *jsonschema.Schema) { s.DependentRequired = map[string][]string{} }),
+			want:   false,
+		},
+		"empty prefixItems": {
+			schema: withRef(func(s *jsonschema.Schema) { s.PrefixItems = []*jsonschema.Schema{} }),
+			want:   false,
+		},
+		"empty allOf": {
+			schema: withRef(func(s *jsonschema.Schema) { s.AllOf = []*jsonschema.Schema{} }),
+			want:   false,
+		},
+		"empty anyOf": {
+			schema: withRef(func(s *jsonschema.Schema) { s.AnyOf = []*jsonschema.Schema{} }),
+			want:   false,
+		},
+		"empty oneOf": {
+			schema: withRef(func(s *jsonschema.Schema) { s.OneOf = []*jsonschema.Schema{} }),
+			want:   false,
+		},
+		"empty patternProperties": {
+			schema: withRef(func(s *jsonschema.Schema) { s.PatternProperties = map[string]*jsonschema.Schema{} }),
+			want:   false,
+		},
+		"empty dependentSchemas": {
+			schema: withRef(func(s *jsonschema.Schema) { s.DependentSchemas = map[string]*jsonschema.Schema{} }),
+			want:   false,
+		},
+
+		// Non-nil empty containers that stay siblings: an empty enum admits no
+		// value, and upstream writes the other three even when empty.
+		"empty enum": {
+			schema: withRef(func(s *jsonschema.Schema) { s.Enum = []any{} }),
+			want:   true,
+		},
+		"empty types": {
+			schema: withRef(func(s *jsonschema.Schema) { s.Types = []string{} }),
+			want:   true,
+		},
+		"empty items array": {
+			schema: withRef(func(s *jsonschema.Schema) { s.ItemsArray = []*jsonschema.Schema{} }),
+			want:   true,
+		},
+		"empty properties": {
+			schema: withRef(func(s *jsonschema.Schema) { s.Properties = map[string]*jsonschema.Schema{} }),
+			want:   true,
+		},
 
 		// Constraint keywords: detected via IsEmpty after clearing $ref.
 		"type constraint":     {schema: withRef(func(s *jsonschema.Schema) { s.Type = "string" }), want: true},

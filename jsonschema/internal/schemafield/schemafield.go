@@ -99,14 +99,21 @@ type Field struct {
 	IsZero func(s *Schema) bool
 
 	// IsZeroInOutput reports whether the field leaves no trace in the schema's
-	// marshaled output even though IsZero reports it set. It is non-nil only
-	// for the containers upstream omits when empty and whose emptiness never
-	// constrains validation: Examples and Extra (omitted by omitempty and the
-	// Extra inlining), and the render-only PropertyOrder, whose empty value
-	// cannot affect property ordering. HasSiblingsBesides prefers it over
-	// IsZero so a bare $ref is not allOf-wrapped to preserve state no reader
-	// of the output can see; IsTrue and IsEmpty keep the strict nil-based
-	// semantics.
+	// marshaled output even though IsZero reports it set. It is non-nil for
+	// every container upstream omits from the output when empty, provided the
+	// empty container constrains nothing: the omitempty-tagged slices and
+	// maps, the two dependencies halves (MarshalJSON writes "dependencies"
+	// only when one is non-empty), Extra (inlined only when non-empty), and
+	// the render-only PropertyOrder. Four containers stay nil here on purpose.
+	// Enum is omitted when empty but constrains: an empty enum admits no
+	// value, so the wrap preserves a constraint. Types and ItemsArray are
+	// written whenever non-nil, as "type": [] and "items": []. Properties is
+	// tagged omitempty, but MarshalJSON writes "properties": {} for a non-nil
+	// empty map. TestFieldTableMatchesUpstream derives the set from the
+	// upstream tags and a marshal probe. HasSiblingsBesides prefers this
+	// predicate over IsZero so a bare $ref is not allOf-wrapped to preserve
+	// state no reader of the output can see; IsTrue and IsEmpty keep the
+	// strict nil-based semantics.
 	IsZeroInOutput func(s *Schema) bool
 
 	// SingleOf, SliceOf, and MapOf extract the field's sub-schemas. Exactly one
@@ -286,6 +293,16 @@ func mapField(name, kw string, get func(*Schema) map[string]*Schema, set func(*S
 	}
 }
 
+// omittedWhenEmpty marks a sub-schema container field that upstream omits from
+// the marshaled output when it is empty, so an empty one is no $ref sibling.
+// The constructors leave it unset because ItemsArray and Properties share
+// them and are written even when empty.
+func omittedWhenEmpty(f Field, length func(*Schema) int) Field {
+	f.IsZeroInOutput = func(s *Schema) bool { return length(s) == 0 }
+
+	return f
+}
+
 var (
 	// Fields is the canonical metadata for every exported [Schema] field, in
 	// upstream struct order. TestFieldTableMatchesUpstream guards that it lists
@@ -297,28 +314,29 @@ var (
 		strField("Schema", Identifier, func(s *Schema) string { return s.Schema }),
 		strField("Ref", Applicator, func(s *Schema) string { return s.Ref }),
 		strField("Comment", Identifier, func(s *Schema) string { return s.Comment }),
-		mapField(
+		omittedWhenEmpty(mapField(
 			"Defs",
 			keyword.Defs,
 			func(s *Schema) map[string]*Schema { return s.Defs },
 			func(s *Schema, v map[string]*Schema) { s.Defs = v },
-		),
-		mapField(
+		), func(s *Schema) int { return len(s.Defs) }),
+		omittedWhenEmpty(mapField(
 			"Definitions",
 			keyword.Definitions,
 			func(s *Schema) map[string]*Schema { return s.Definitions },
 			func(s *Schema, v map[string]*Schema) { s.Definitions = v },
-		),
-		mapField(
+		), func(s *Schema) int { return len(s.Definitions) }),
+		omittedWhenEmpty(mapField(
 			"DependencySchemas",
 			keyword.Dependencies,
 			func(s *Schema) map[string]*Schema { return s.DependencySchemas },
 			func(s *Schema, v map[string]*Schema) { s.DependencySchemas = v },
-		),
+		), func(s *Schema) int { return len(s.DependencySchemas) }),
 		{
 			Name:           "DependencyStrings",
 			Class:          Constraint,
 			IsZero:         func(s *Schema) bool { return s.DependencyStrings == nil },
+			IsZeroInOutput: func(s *Schema) bool { return len(s.DependencyStrings) == 0 },
 			CloneContainer: func(s *Schema) { s.DependencyStrings = maps.Clone(s.DependencyStrings) },
 			CloneDeep: func(s *Schema, _ func(any) any) {
 				s.DependencyStrings = cloneStringLists(s.DependencyStrings)
@@ -331,6 +349,7 @@ var (
 			Name:           "Vocabulary",
 			Class:          Identifier,
 			IsZero:         func(s *Schema) bool { return s.Vocabulary == nil },
+			IsZeroInOutput: func(s *Schema) bool { return len(s.Vocabulary) == 0 },
 			CloneContainer: func(s *Schema) { s.Vocabulary = maps.Clone(s.Vocabulary) },
 		},
 
@@ -341,6 +360,7 @@ var (
 			Name:           "Default",
 			Class:          Annotation,
 			IsZero:         func(s *Schema) bool { return s.Default == nil },
+			IsZeroInOutput: func(s *Schema) bool { return len(s.Default) == 0 },
 			CloneContainer: func(s *Schema) { s.Default = slices.Clone(s.Default) },
 		},
 		boolField("Deprecated", Annotation, func(s *Schema) bool { return s.Deprecated }),
@@ -423,12 +443,12 @@ var (
 		strField("Pattern", Constraint, func(s *Schema) string { return s.Pattern }),
 
 		// Arrays.
-		sliceField(
+		omittedWhenEmpty(sliceField(
 			"PrefixItems",
 			keyword.PrefixItems,
 			func(s *Schema) []*Schema { return s.PrefixItems },
 			func(s *Schema, v []*Schema) { s.PrefixItems = v },
-		),
+		), func(s *Schema) int { return len(s.PrefixItems) }),
 		singleField(
 			"Items",
 			keyword.Items,
@@ -483,12 +503,14 @@ var (
 			Name:           "Required",
 			Class:          Constraint,
 			IsZero:         func(s *Schema) bool { return s.Required == nil },
+			IsZeroInOutput: func(s *Schema) bool { return len(s.Required) == 0 },
 			CloneContainer: func(s *Schema) { s.Required = slices.Clone(s.Required) },
 		},
 		{
 			Name:           "DependentRequired",
 			Class:          Constraint,
 			IsZero:         func(s *Schema) bool { return s.DependentRequired == nil },
+			IsZeroInOutput: func(s *Schema) bool { return len(s.DependentRequired) == 0 },
 			CloneContainer: func(s *Schema) { s.DependentRequired = maps.Clone(s.DependentRequired) },
 			CloneDeep: func(s *Schema, _ func(any) any) {
 				s.DependentRequired = cloneStringLists(s.DependentRequired)
@@ -500,12 +522,12 @@ var (
 			func(s *Schema) map[string]*Schema { return s.Properties },
 			func(s *Schema, v map[string]*Schema) { s.Properties = v },
 		),
-		mapField(
+		omittedWhenEmpty(mapField(
 			"PatternProperties",
 			keyword.PatternProperties,
 			func(s *Schema) map[string]*Schema { return s.PatternProperties },
 			func(s *Schema, v map[string]*Schema) { s.PatternProperties = v },
-		),
+		), func(s *Schema) int { return len(s.PatternProperties) }),
 		singleField(
 			"AdditionalProperties",
 			keyword.AdditionalProperties,
@@ -526,36 +548,36 @@ var (
 		),
 
 		// Logic.
-		sliceField(
+		omittedWhenEmpty(sliceField(
 			"AllOf",
 			keyword.AllOf,
 			func(s *Schema) []*Schema { return s.AllOf },
 			func(s *Schema, v []*Schema) { s.AllOf = v },
-		),
-		sliceField(
+		), func(s *Schema) int { return len(s.AllOf) }),
+		omittedWhenEmpty(sliceField(
 			"AnyOf",
 			keyword.AnyOf,
 			func(s *Schema) []*Schema { return s.AnyOf },
 			func(s *Schema, v []*Schema) { s.AnyOf = v },
-		),
-		sliceField(
+		), func(s *Schema) int { return len(s.AnyOf) }),
+		omittedWhenEmpty(sliceField(
 			"OneOf",
 			keyword.OneOf,
 			func(s *Schema) []*Schema { return s.OneOf },
 			func(s *Schema, v []*Schema) { s.OneOf = v },
-		),
+		), func(s *Schema) int { return len(s.OneOf) }),
 		singleField("Not", keyword.Not, func(s *Schema) *Schema { return s.Not }, func(s, v *Schema) { s.Not = v }),
 
 		// Conditional.
 		singleField("If", keyword.If, func(s *Schema) *Schema { return s.If }, func(s, v *Schema) { s.If = v }),
 		singleField("Then", keyword.Then, func(s *Schema) *Schema { return s.Then }, func(s, v *Schema) { s.Then = v }),
 		singleField("Else", keyword.Else, func(s *Schema) *Schema { return s.Else }, func(s, v *Schema) { s.Else = v }),
-		mapField(
+		omittedWhenEmpty(mapField(
 			"DependentSchemas",
 			keyword.DependentSchemas,
 			func(s *Schema) map[string]*Schema { return s.DependentSchemas },
 			func(s *Schema, v map[string]*Schema) { s.DependentSchemas = v },
-		),
+		), func(s *Schema) int { return len(s.DependentSchemas) }),
 
 		// Content, format, and extensions.
 		strField("ContentEncoding", Constraint, func(s *Schema) string { return s.ContentEncoding }),

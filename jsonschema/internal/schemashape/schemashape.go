@@ -42,9 +42,11 @@ func DeclaresType(s *jsonschema.Schema, name string) bool {
 // other than Ref set on s -- constraint, applicator, annotation, identifier,
 // render-only, and the Extra escape hatch alike, so every keyword that must
 // survive the allOf wrap is caught, including future upstream additions. A
-// non-nil empty Examples, Extra, or PropertyOrder is not a sibling: it leaves
-// no trace in marshaled output, so a wrap would preserve nothing (the table's
-// IsZeroInOutput semantics).
+// non-nil empty container upstream omits from the marshaled output is not a
+// sibling, because a wrap would preserve nothing (the table's IsZeroInOutput
+// semantics). Four empty containers stay siblings: Enum, because an empty
+// enum admits no value, and Types, ItemsArray, and Properties, which
+// upstream writes even when empty.
 func HasRefSiblings(s *jsonschema.Schema) bool {
 	return schemafield.HasSiblingsBesides(s, "Ref")
 }

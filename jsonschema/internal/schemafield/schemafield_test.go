@@ -5,6 +5,7 @@ import (
 	"maps"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/google/jsonschema-go/jsonschema"
@@ -89,11 +90,60 @@ func childOfShape(shape Shape, child *jsonschema.Schema) any {
 	return nil
 }
 
+var (
+	// The marshalJSONEmptyContainers table records, for each container field
+	// upstream tags json:"-", whether MarshalJSON leaves an empty one out of
+	// the output. The two dependencies halves reach "dependencies" only when one
+	// is non-empty, Extra is inlined only when non-empty, and PropertyOrder
+	// never marshals on its own. Types and ItemsArray are written whenever
+	// non-nil, as "type": [] and "items": []. Type and Items are not
+	// containers, so they have no entry. A json:"-" container missing from
+	// this table fails the guard.
+	marshalJSONEmptyContainers = map[string]bool{
+		"DependencySchemas": true,
+		"DependencyStrings": true,
+		"Extra":             true,
+		"PropertyOrder":     true,
+		"Types":             false,
+		"ItemsArray":        false,
+	}
+
+	// The writtenDespiteOmitempty set names the omitempty-tagged containers
+	// MarshalJSON writes anyway. Properties is marshaled through its own
+	// ordered writer, which emits "properties": {} for a non-nil empty map.
+	writtenDespiteOmitempty = map[string]bool{
+		"Properties": true,
+	}
+
+	// The constrainsWhenEmpty set names the containers upstream omits from
+	// the output when empty but whose empty value still constrains
+	// validation, so an empty one remains a $ref sibling. An empty enum admits no value.
+	constrainsWhenEmpty = map[string]bool{
+		"Enum": true,
+	}
+)
+
+// emptyContainer returns a schema holding only a non-nil empty value of the
+// named container field, and the field's reflected value for further edits.
+func emptyContainer(name string, typ reflect.Type) (*jsonschema.Schema, reflect.Value) {
+	s := &jsonschema.Schema{}
+	field := reflect.ValueOf(s).Elem().FieldByName(name)
+
+	if typ.Kind() == reflect.Map {
+		field.Set(reflect.MakeMap(typ))
+	} else {
+		field.Set(reflect.MakeSlice(typ, 0, 0))
+	}
+
+	return s, field
+}
+
 // TestFieldTableMatchesUpstream is the primary staleness alarm: it reflects over
 // the upstream Schema and asserts the canonical table classifies every exported
 // field exactly once, with a Shape matching the Go type, a valid Class, the
-// right sub-schema accessor, and the right presence for each of the three clone
-// columns. When upstream adds a field, this test fails until the table lists it;
+// right sub-schema accessor, the right presence for each of the three clone
+// columns, and an IsZeroInOutput exactly on the containers upstream omits when
+// empty. When upstream adds a field, this test fails until the table lists it;
 // no derived predicate needs touching.
 func TestFieldTableMatchesUpstream(t *testing.T) {
 	t.Parallel()
@@ -165,10 +215,64 @@ func TestFieldTableMatchesUpstream(t *testing.T) {
 
 			assert.Equal(t, f.Shape != None, f.CloneSubschemas != nil,
 				"field %q CloneSubschemas presence must match Shape", sf.Name)
+
+			checkZeroInOutput(t, sf, f)
 		})
 	}
 
 	assert.Len(t, Fields, exported, "the table must list exactly the exported Schema fields")
+}
+
+// checkZeroInOutput derives whether upstream omits the field's empty container
+// from the output, from the json tag or the marshalJSONEmptyContainers table,
+// confirms the derivation against a marshal probe, and asserts the field
+// carries IsZeroInOutput exactly when the omitted empty container constrains
+// nothing. A non-container field carries none.
+func checkZeroInOutput(t *testing.T, sf reflect.StructField, f *Field) {
+	t.Helper()
+
+	if kind := sf.Type.Kind(); kind != reflect.Slice && kind != reflect.Map {
+		assert.Nil(t, f.IsZeroInOutput, "non-container field %q must not carry IsZeroInOutput", sf.Name)
+
+		return
+	}
+
+	var omitted bool
+
+	if tag := sf.Tag.Get("json"); tag == "-" {
+		known, ok := marshalJSONEmptyContainers[sf.Name]
+		require.True(t, ok, "json:\"-\" container %q needs a marshalJSONEmptyContainers entry", sf.Name)
+
+		omitted = known
+	} else {
+		omitted = strings.Contains(tag, ",omitempty") && !writtenDespiteOmitempty[sf.Name]
+	}
+
+	empty, field := emptyContainer(sf.Name, sf.Type)
+
+	out, err := json.Marshal(empty)
+	require.NoError(t, err)
+	assert.Equal(t, omitted, string(out) == "true",
+		"the marshal probe of an empty %q (%s) disagrees with the derived omission", sf.Name, out)
+
+	want := omitted && !constrainsWhenEmpty[sf.Name]
+	assert.Equal(t, want, f.IsZeroInOutput != nil,
+		"field %q must carry IsZeroInOutput exactly when its empty value is omitted and constrains nothing", sf.Name)
+
+	if f.IsZeroInOutput == nil {
+		return
+	}
+
+	assert.False(t, f.IsZero(empty), "an empty %q is set under IsZero", sf.Name)
+	assert.True(t, f.IsZeroInOutput(empty), "an empty %q leaves no trace in output", sf.Name)
+
+	if sf.Type.Kind() == reflect.Map {
+		field.SetMapIndex(reflect.Zero(sf.Type.Key()), reflect.Zero(sf.Type.Elem()))
+	} else {
+		field.Set(reflect.MakeSlice(sf.Type, 1, 1))
+	}
+
+	assert.False(t, f.IsZeroInOutput(empty), "a one-element %q is a sibling", sf.Name)
 }
 
 // TestSubschemasMatchesShapeSet cross-checks that the ordered Subschemas list is
@@ -224,14 +328,37 @@ func TestIsZeroReadsNilAndEmpty(t *testing.T) {
 	assert.True(t, HasSiblingsBesides(nonNilEmpty, "Ref"),
 		"a non-nil empty Enum stays a sibling under the strict nil-based semantics")
 
+	for name, s := range map[string]*jsonschema.Schema{
+		"types":      {Types: []string{}},
+		"itemsArray": {ItemsArray: []*jsonschema.Schema{}},
+		"properties": {Properties: map[string]*jsonschema.Schema{}},
+	} {
+		assert.True(t, HasSiblingsBesides(s, "Ref"),
+			"upstream writes an empty %s, so it stays a sibling", name)
+	}
+
 	outputInvisible := &jsonschema.Schema{
-		Examples:      []any{},
-		PropertyOrder: []string{},
-		Extra:         map[string]any{},
+		Examples:          []any{},
+		PropertyOrder:     []string{},
+		Extra:             map[string]any{},
+		Defs:              map[string]*jsonschema.Schema{},
+		Definitions:       map[string]*jsonschema.Schema{},
+		DependencySchemas: map[string]*jsonschema.Schema{},
+		DependencyStrings: map[string][]string{},
+		Vocabulary:        map[string]bool{},
+		Default:           json.RawMessage{},
+		Required:          []string{},
+		DependentRequired: map[string][]string{},
+		PrefixItems:       []*jsonschema.Schema{},
+		AllOf:             []*jsonschema.Schema{},
+		AnyOf:             []*jsonschema.Schema{},
+		OneOf:             []*jsonschema.Schema{},
+		PatternProperties: map[string]*jsonschema.Schema{},
+		DependentSchemas:  map[string]*jsonschema.Schema{},
 	}
 	assert.False(t, IsTrue(outputInvisible), "non-nil empty containers count as set")
 	assert.False(t, HasSiblingsBesides(outputInvisible, "Ref"),
-		"empty Examples, Extra, and PropertyOrder leave no trace in output, so they are not siblings")
+		"an empty container upstream omits leaves no trace in output, so it is not a sibling")
 }
 
 // TestCloneContainersUnaliasesHeaders confirms the container clones reallocate
