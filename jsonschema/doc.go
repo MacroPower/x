@@ -1003,10 +1003,14 @@
 //     allowed value, so no other value can silently win.
 //   - format, pattern, and multipleOf replace what the field's type declared,
 //     since the tag names the keyword outright (a tag interpreter defers to
-//     both). Naming any of them twice in one tag is an error, because no
-//     precedence applies there and dropping one of two stated values would
-//     be silent. A repeated uniqueItems or type is an error for the same
-//     reason.
+//     both). A type extracted to $defs declares them on its definition, so a
+//     tag replacing one renders that occurrence inline, as a copy of the
+//     definition's schema with the keyword replaced, rather than beside a
+//     $ref, where JSON Schema would apply both; every other occurrence keeps
+//     the reference. Naming any of them twice in one tag is an error,
+//     because no precedence applies there and dropping one of two stated
+//     values would be silent. A repeated uniqueItems or type is an error for
+//     the same reason.
 //
 // Numeric, length, and count bounds from the Go kind, the jsonschema tag, and
 // tag interpreters compose by one rule, whichever source set them:

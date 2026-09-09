@@ -20,6 +20,7 @@ import (
 	"go.jacobcolvin.com/x/jsonschema/internal/keyword"
 	"go.jacobcolvin.com/x/jsonschema/internal/numkind"
 	"go.jacobcolvin.com/x/jsonschema/internal/reflectkind"
+	"go.jacobcolvin.com/x/jsonschema/internal/schemaclone"
 	"go.jacobcolvin.com/x/jsonschema/internal/schemashape"
 	"go.jacobcolvin.com/x/jsonschema/internal/tagparse"
 	"go.jacobcolvin.com/x/jsonschema/internal/typename"
@@ -1588,10 +1589,62 @@ func (g *run) applyFieldTag(p nodeProp) error {
 		// admission is one answer whichever site classifies it.
 		Nullable: decided.null.admit,
 	})
-	// Tagparse errors already carry the "jsonschema tag:" prefix, and their
-	// sentinels are the ones this package exports.
-	//nolint:wrapcheck // The tag grammar owns the message and the sentinel.
-	return err
+	if err != nil {
+		// Tagparse errors already carry the "jsonschema tag:" prefix, and
+		// their sentinels are the ones this package exports.
+		//nolint:wrapcheck // The tag grammar owns the message and the sentinel.
+		return err
+	}
+
+	inlineReplacedRefs(fieldNode)
+
+	return nil
+}
+
+// inlineReplacedRefs inlines a reference whose canvas replaces a keyword the
+// referenced definition declares. The jsonschema tag's format, pattern, and
+// multipleOf replace what the field's type declared, but a type extracted to
+// $defs declares them on its definition, where a sibling keyword beside the
+// $ref would conjoin with the definition's instead. The occurrence takes a
+// copy of the definition's leaf body, so the overlay replaces the keyword the
+// way it does for an inline type, while every other occurrence keeps the
+// reference. The null decision stands: a leaf body admits null through the
+// same facts as a reference to it. A verbatim body is emitted as authored,
+// so it stays referenced. The walk follows the slots the tag's element rules
+// reach, a list's element and a tuple's positions.
+func inlineReplacedRefs(n *node) {
+	if n == nil {
+		return
+	}
+
+	if n.kind == kindRef && n.def != nil && n.def.body != nil {
+		body := n.def.body
+		if body.kind == kindValue && !body.verbatim && canvasReplacesKeyword(n.authored, body.payload) {
+			n.payload = schemaclone.Clone(body.payload)
+			n.def = nil
+			n.kind = kindValue
+		}
+	}
+
+	if n.kind == kindList {
+		inlineReplacedRefs(n.items)
+	}
+
+	for _, c := range n.prefix {
+		inlineReplacedRefs(c)
+	}
+}
+
+// canvasReplacesKeyword reports whether canvas sets a replacing keyword
+// (format, pattern, multipleOf) to a value other than the one def declares.
+func canvasReplacesKeyword(canvas, def *Schema) bool {
+	if canvas == nil || def == nil {
+		return false
+	}
+
+	return (canvas.Format != "" && def.Format != "" && canvas.Format != def.Format) ||
+		(canvas.Pattern != "" && def.Pattern != "" && canvas.Pattern != def.Pattern) ||
+		(canvas.MultipleOf != nil && def.MultipleOf != nil && *canvas.MultipleOf != *def.MultipleOf)
 }
 
 // elemRefs mirrors a node's element children as the definition seams the

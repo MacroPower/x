@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"maps"
 	"math"
+	"math/big"
 	"strings"
 	"testing"
 	"time"
@@ -4519,6 +4520,10 @@ func TestTagKeywordOnReferencedDefinitionReadsItsType(t *testing.T) {
 	tests := map[string]struct {
 		generate func() (*jsonschema.Schema, error)
 		err      string
+		// Replaced marks a keyword the definition declares too, which the
+		// tag replaces by rendering the occurrence inline rather than
+		// beside the reference.
+		replaced bool
 	}{
 		"numeric bound on an object definition": {
 			generate: func() (*jsonschema.Schema, error) {
@@ -4559,7 +4564,7 @@ func TestTagKeywordOnReferencedDefinitionReadsItsType(t *testing.T) {
 				return jsonschema.GenerateFor[T](t.Context())
 			},
 		},
-		"format on a string definition rides beside the ref": {
+		"format on a string definition replaces the definition's": {
 			generate: func() (*jsonschema.Schema, error) {
 				type T struct {
 					A time.Time `json:"a" jsonschema:"format=date"`
@@ -4567,6 +4572,7 @@ func TestTagKeywordOnReferencedDefinitionReadsItsType(t *testing.T) {
 
 				return jsonschema.GenerateFor[T](t.Context())
 			},
+			replaced: true,
 		},
 		"numeric bound on an integer definition rides beside the ref": {
 			generate: func() (*jsonschema.Schema, error) {
@@ -4644,7 +4650,58 @@ func TestTagKeywordOnReferencedDefinitionReadsItsType(t *testing.T) {
 			}
 
 			require.NoError(t, err)
+
+			if tc.replaced {
+				assert.Empty(t, s.Properties["a"].Ref, "the replaced occurrence renders inline")
+				assert.Equal(t, "date", s.Properties["a"].Format)
+
+				return
+			}
+
 			assert.NotEmpty(t, s.Properties["a"].Ref, "the keyword rides beside the reference")
 		})
 	}
+}
+
+// TestTagReplacesDefinitionKeywordInline pins that a tag replacing a keyword
+// a $defs-extracted type declares renders the occurrence inline. Beside a
+// $ref the two keywords would both apply, and no string is both a date and
+// a date-time, so the property would reject every value.
+func TestTagReplacesDefinitionKeywordInline(t *testing.T) {
+	t.Parallel()
+
+	type doc struct {
+		Date *time.Time `json:"date" jsonschema:"format=date"`
+		Rat  big.Rat    `json:"rat"  jsonschema:"pattern=^x$"`
+		When time.Time  `json:"when"`
+	}
+
+	s, err := jsonschema.GenerateFor[doc](t.Context())
+	require.NoError(t, err)
+
+	got, err := json.Marshal(s.Properties["date"])
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"anyOf":[{"type":"string","format":"date"},{"type":"null"}]}`, string(got),
+		"the replaced occurrence renders inline with the tag's keyword")
+
+	got, err = json.Marshal(s.Properties["rat"])
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"type":"string","pattern":"^x$"}`, string(got))
+
+	assert.Equal(t, "#/$defs/Time", s.Properties["when"].Ref, "an untagged occurrence keeps the reference")
+	assert.Equal(t, "date-time", s.Defs["Time"].Format, "the definition keeps the type's keyword")
+
+	compiled, err := jsonschema.Compile(t.Context(), s, jsonschema.WithFormats(true))
+	require.NoError(t, err)
+
+	require.NoError(t, compiled.Validate(t.Context(), map[string]any{
+		"date": "2020-01-01",
+		"rat":  "x",
+		"when": "2020-01-01T00:00:00Z",
+	}))
+	require.Error(t, compiled.Validate(t.Context(), map[string]any{
+		"date": "2020-01-01T00:00:00Z",
+		"rat":  "x",
+		"when": "2020-01-01T00:00:00Z",
+	}), "the replaced format applies alone")
 }
