@@ -153,12 +153,11 @@ func (w *walk) value(instance any) (Value, bool) {
 		return NewString(v), true
 
 	case jsonv1.Number:
-		// The decimal parser accepts a few spellings outside the JSON grammar
-		// (a leading '+', a leading zero, a bare '.5' or '5.') that v1
-		// refuses to write, so the grammar is checked outright: a literal
-		// outside it takes the render path, where v1 reports the refusal.
+		// A literal outside the JSON grammar carries no value, and v1 refuses
+		// to write it, so it takes the render path, where v1 reports the
+		// refusal.
 		out := NewNumber(string(v))
-		if out.num == numNone || !isJSONNumber(string(v)) {
+		if out.num == numNone {
 			w.render = true
 		}
 

@@ -4926,6 +4926,27 @@ func TestJSONNumberAcrossNumericKeywords(t *testing.T) {
 	}
 }
 
+// TestJSONNumberOutsideGrammarFailsClosed pins the documented verdict for a
+// [jsonv1.Number] whose literal the JSON grammar refuses: it carries no
+// numeric value, so a bound fails closed the way an unparseable literal does.
+// The decimal parser behind the number model accepts these spellings, so the
+// grammar has to gate the parse.
+func TestJSONNumberOutsideGrammarFailsClosed(t *testing.T) {
+	t.Parallel()
+
+	schema := &jsonschema.Schema{Type: "number", Minimum: new(5.0)}
+
+	for _, literal := range []string{"+5", "007", "5.", ".5e1"} {
+		t.Run(literal, func(t *testing.T) {
+			t.Parallel()
+
+			err := jsonschema.Validate(t.Context(), schema, jsonv1.Number(literal))
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "has no numeric value to compare with minimum")
+		})
+	}
+}
+
 func TestUniqueItemsNumericRepresentation(t *testing.T) {
 	t.Parallel()
 

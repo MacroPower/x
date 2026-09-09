@@ -106,6 +106,10 @@ func TestNumberStates(t *testing.T) {
 		"negative zero":    {in: jsonvalue.NewNumber("-0"), comparable: true, exact: true, rat: new(big.Rat)},
 		"over-cap literal": {in: jsonvalue.NewNumber("1e1000000000"), comparable: true, exact: false},
 		"unparseable":      {in: jsonvalue.NewNumber("abc"), comparable: false, exact: false},
+		"leading plus":     {in: jsonvalue.NewNumber("+5"), comparable: false, exact: false},
+		"leading zero":     {in: jsonvalue.NewNumber("007"), comparable: false, exact: false},
+		"bare fraction":    {in: jsonvalue.NewNumber(".5"), comparable: false, exact: false},
+		"trailing point":   {in: jsonvalue.NewNumber("5."), comparable: false, exact: false},
 		"nan":              {in: jsonvalue.NewFloat(math.NaN()), comparable: false, exact: false},
 		"not a number":     {in: jsonvalue.NewString("1"), comparable: false, exact: false},
 	}

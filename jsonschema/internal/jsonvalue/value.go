@@ -99,6 +99,13 @@ func NewString(s string) Value { return Value{kind: String, str: s} }
 func NewNumber(literal string) Value {
 	v := Value{kind: Number, str: literal}
 
+	// The decimal parser accepts a few spellings outside the JSON grammar (a
+	// leading '+', a leading zero, a bare '.5' or '5.'), so the grammar gates
+	// the parse: a literal outside it carries no value.
+	if !isJSONNumber(literal) {
+		return v
+	}
+
 	d, ok := numrat.ParseDecNumber(literal)
 	if !ok {
 		return v
