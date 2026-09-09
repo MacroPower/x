@@ -389,4 +389,13 @@ func TestComposeMultipleOf(t *testing.T) {
 		assert.InDelta(t, 2, constraint.ComposeMultipleOf(math.Inf(1), 2), 0)
 		assert.InDelta(t, 2, constraint.ComposeMultipleOf(math.NaN(), 2), 0)
 	})
+
+	t.Run("composite past the float64 range keeps the later value", func(t *testing.T) {
+		t.Parallel()
+
+		// 1e308 and 1.5 are both finite and positive, but their least common
+		// multiple, 3e308, rounds to +Inf, which has no rational form.
+		assert.InDelta(t, 1.5, constraint.ComposeMultipleOf(1e308, 1.5), 0)
+		assert.InDelta(t, 1e308, constraint.ComposeMultipleOf(1.5, 1e308), 0)
+	})
 }

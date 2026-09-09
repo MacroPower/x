@@ -84,8 +84,11 @@ func ComposeMultipleOf(a, b float64) float64 {
 	den := new(big.Int).Mul(ra.Denom(), rb.Denom())
 	lcm := new(big.Rat).SetFrac(num, den)
 
+	// A composite past the float64 range rounds to an infinity, which has no
+	// rational form; that is the same unspellable case as an inexact finite
+	// rounding, so it keeps b too.
 	f, _ := lcm.Float64()
-	if numrat.Float64ToRat(f).Cmp(lcm) != 0 {
+	if fr := numrat.Float64ToRat(f); fr == nil || fr.Cmp(lcm) != 0 {
 		return b
 	}
 
