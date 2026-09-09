@@ -632,3 +632,41 @@ func TestWithDefaultsFromNullDefault(t *testing.T) {
 		})
 	}
 }
+
+// defaultsAliasedLiteral is a root whose extender aliases one literal into
+// both property slots, the shape a hook copying a subtree produces.
+type defaultsAliasedLiteral struct {
+	A int `json:"a"`
+	B int `json:"b"`
+}
+
+// aliasedLiteralExtender puts the same *Schema into the "a" and "b" slots.
+func aliasedLiteralExtender() jsonschema.GenerateOption {
+	return jsonschema.WithTypeSchemaExtenderFor[defaultsAliasedLiteral](
+		func(_ context.Context, _ jsonschema.TypeContext, ts *jsonschema.TypeSchema) error {
+			shared := &jsonschema.Schema{Type: "integer"}
+			ts.Value.Properties["a"] = shared
+			ts.Value.Properties["b"] = shared
+
+			return nil
+		},
+	)
+}
+
+// TestWithDefaultsFromAliasedLiteral pins that a default belongs to the
+// property slot, not the literal behind it. Two slots sharing one hook
+// literal each take their own key's default, so neither the map's iteration
+// order nor the aliasing decides which value the output carries.
+func TestWithDefaultsFromAliasedLiteral(t *testing.T) {
+	t.Parallel()
+
+	s, err := jsonschema.GenerateFor[defaultsAliasedLiteral](
+		t.Context(),
+		aliasedLiteralExtender(),
+		jsonschema.WithDefaultsFrom(defaultsAliasedLiteral{A: 1, B: 2}),
+	)
+	require.NoError(t, err)
+
+	assert.JSONEq(t, `1`, string(s.Properties["a"].Default))
+	assert.JSONEq(t, `2`, string(s.Properties["b"].Default))
+}

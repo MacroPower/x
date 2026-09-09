@@ -5,11 +5,13 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
+	"maps"
 	"reflect"
 	"slices"
 
 	"go.jacobcolvin.com/x/jsonschema/internal/jsonopts"
 	"go.jacobcolvin.com/x/jsonschema/internal/numkind"
+	"go.jacobcolvin.com/x/jsonschema/internal/schemaclone"
 	"go.jacobcolvin.com/x/jsonschema/internal/schemashape"
 	"go.jacobcolvin.com/x/jsonschema/internal/typename"
 )
@@ -387,7 +389,11 @@ func (g *run) seedDefaults(root *node, rootType reflect.Type) error {
 			ErrInvalidDefaultsInstance, rootType, target.payload.Ref)
 	}
 
-	for key, raw := range values {
+	// The keys are seeded in sorted order so a write reaching a shared
+	// literal lands the same way on every run.
+	for _, key := range slices.Sorted(maps.Keys(values)) {
+		raw := values[key]
+
 		if p := target.prop(key); p != nil {
 			if isRawNull(raw) && !p.null.admit {
 				continue
@@ -407,6 +413,12 @@ func (g *run) seedDefaults(root *node, rootType reflect.Type) error {
 			continue
 		}
 
+		// A hook may alias one literal into several slots, and a default
+		// belongs to the slot, not the literal: give the slot a private copy
+		// before writing so a sibling slot sharing the literal keeps its own
+		// default.
+		prop = schemaclone.Clone(prop)
+		target.payload.Properties[key] = prop
 		prop.Default = raw
 		// The default may now sit beside a $ref the hook declared, where
 		// Draft-07 readers would ignore it; wrap the $ref in allOf, the same
