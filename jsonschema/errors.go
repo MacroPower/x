@@ -362,9 +362,9 @@ var (
 
 	// ErrNonFiniteBound is returned by [Generate] for a numeric bound
 	// (minimum, maximum, exclusiveMinimum, exclusiveMaximum, multipleOf) a
-	// type-level hook declares as NaN or an infinity. JSON carries neither,
-	// and the bound algebra reads a non-finite bound as no bound, so the
-	// value is refused rather than silently dropped.
+	// type-level hook or a tag interpreter declares as NaN or an infinity.
+	// JSON carries neither, and the bound algebra reads a non-finite bound
+	// as no bound, so the value is refused rather than silently dropped.
 	ErrNonFiniteBound = errors.New("non-finite numeric bound")
 )
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json/v2"
 	"fmt"
+	"math"
 	"reflect"
 	"testing"
 
@@ -873,4 +874,30 @@ func TestConstraintsMultipleOfComposes(t *testing.T) {
 			assert.InDelta(t, 30, *s.Properties["v"].MultipleOf, 0, name)
 		}
 	})
+}
+
+// infinityWriter is a tag interpreter that writes an infinite bound straight
+// onto the canvas, past the facade's finite check.
+type infinityWriter struct{}
+
+func (infinityWriter) Interpret(_ context.Context, field jsonschema.FieldContext, _ jsonschema.Tag) error {
+	field.Canvas.Minimum = new(math.Inf(1))
+
+	return nil
+}
+
+// TestInterpreterCanvasNonFiniteBoundRefused pins that a non-finite bound an
+// interpreter writes on the canvas is refused as a type-level hook's is. The
+// bound algebra reads such a value as no bound, so the schema would silently
+// carry none where the interpreter meant one.
+func TestInterpreterCanvasNonFiniteBoundRefused(t *testing.T) {
+	t.Parallel()
+
+	type doc struct {
+		N float64 `inf:"x" json:"n"`
+	}
+
+	_, err := jsonschema.GenerateFor[doc](t.Context(), jsonschema.WithTagInterpreter("inf", infinityWriter{}))
+	require.ErrorIs(t, err, jsonschema.ErrNonFiniteBound)
+	assert.ErrorContains(t, err, `tag interpreter "inf" declares minimum +Inf`)
 }

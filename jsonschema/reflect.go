@@ -1798,6 +1798,14 @@ func (g *run) applyFieldInterpreters(
 			return fmt.Errorf("tag interpreter %q: %w", reg.key, err)
 		}
 
+		// The facade refuses a non-finite bound at the call, but an
+		// interpreter may write the canvas bound fields directly, and the
+		// bound algebra would read such a value as no bound at all.
+		err = checkCanvasFiniteBounds(reg.key, fc.Canvas)
+		if err != nil {
+			return err
+		}
+
 		for _, name := range parentView.Required {
 			if !slices.Contains(parent.payload.Required, name) {
 				parent.payload.Required = append(parent.payload.Required, name)
@@ -2066,6 +2074,27 @@ func (g *run) extendTypeSchema(t reflect.Type, n *node) (Nullability, error) {
 // rendered schema would silently carry none where the hook meant one, and
 // JSON could not carry the value anyway.
 func checkFiniteBounds(t reflect.Type, s *Schema) error {
+	if name, val, ok := nonFiniteBound(s); ok {
+		return fmt.Errorf("%w: type %s declares %s %v", ErrNonFiniteBound, t, name, val)
+	}
+
+	return nil
+}
+
+// checkCanvasFiniteBounds refuses a numeric bound the tag interpreter
+// registered under key wrote on a field's canvas as NaN or an infinity, the
+// canvas counterpart of [checkFiniteBounds].
+func checkCanvasFiniteBounds(key string, s *Schema) error {
+	if name, val, ok := nonFiniteBound(s); ok {
+		return fmt.Errorf("%w: tag interpreter %q declares %s %v", ErrNonFiniteBound, key, name, val)
+	}
+
+	return nil
+}
+
+// nonFiniteBound returns the first numeric bound keyword s sets to NaN or an
+// infinity, with its value, and whether there is one.
+func nonFiniteBound(s *Schema) (string, float64, bool) {
 	for _, b := range []struct {
 		val  *float64
 		name string
@@ -2077,11 +2106,11 @@ func checkFiniteBounds(t reflect.Type, s *Schema) error {
 		{s.MultipleOf, keyword.MultipleOf},
 	} {
 		if b.val != nil && (math.IsNaN(*b.val) || math.IsInf(*b.val, 0)) {
-			return fmt.Errorf("%w: type %s declares %s %v", ErrNonFiniteBound, t, b.name, *b.val)
+			return b.name, *b.val, true
 		}
 	}
 
-	return nil
+	return "", 0, false
 }
 
 // jsonTagInfo holds parsed json tag information.
