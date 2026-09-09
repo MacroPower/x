@@ -1698,8 +1698,14 @@
 // The run reports an unresolvable local fragment ref the same way when it sits
 // inside a document first fetched during that run or inside a schema reached
 // through an unknown keyword. Inside a document Compile checked, the run skips
-// such a ref, since Compile already rejected the broken ones. The run detects
-// circular refs and treats them as passing.
+// such a ref, since Compile already rejected the broken ones.
+//
+// A reference that leads the run back into a schema it is already validating
+// at the same instance position would never return, so the second entry
+// passes and goes no deeper. That frame records no annotations, so an
+// enclosing unevaluatedProperties or unevaluatedItems sees only what the
+// other keywords recorded. The same schema entered at a different instance
+// position is the ordinary recursive case and validates in full.
 //
 // One policy governs every document a reference reaches, from the moment it
 // is reached. That covers a fetched document at its fetch, whether at compile

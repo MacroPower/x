@@ -779,3 +779,22 @@ func TestCompileOneKeyPerDocument(t *testing.T) {
 	assert.Equal(t, map[string]int{canonical: 1}, resolver.calls,
 		"three canonically-equal spellings name one document, fetched once")
 }
+
+// TestCircularRefShortCircuitRecordsNoAnnotations pins what a cycle
+// short-circuit contributes: the second entry into a schema at one instance
+// position passes without recording annotations, so an unevaluatedProperties
+// beside the cycling $ref sees only what the other keywords recorded and
+// rejects every member the cycle would have evaluated.
+func TestCircularRefShortCircuitRecordsNoAnnotations(t *testing.T) {
+	t.Parallel()
+
+	schema, err := jsonschema.ParseSchema([]byte(`{"$ref": "#", "unevaluatedProperties": false}`))
+	require.NoError(t, err)
+
+	require.NoError(t, validateValue(t.Context(), schema, map[string]any{}),
+		"the empty object has no member for unevaluatedProperties to reject")
+
+	err = validateValue(t.Context(), schema, map[string]any{"a": 1})
+	require.Error(t, err, "the short-circuited $ref evaluates nothing, so a is unevaluated")
+	assert.Contains(t, err.Error(), "unevaluatedProperties")
+}
