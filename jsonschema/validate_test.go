@@ -8029,9 +8029,11 @@ func TestValidateRationalBoundMessageUnderflow(t *testing.T) {
 // additionalProperties, required, min/maxProperties, dependentSchemas, allOf,
 // and if/then. The instance is valid, so every active row's eval runs to
 // completion rather than short-circuiting -- the worst case for per-node
-// dispatch overhead.
+// dispatch overhead. The ref-free case holds the allOf member inline; the
+// ref-bearing case reaches it through a $ref into $defs, so the run carries
+// the cycle set a reference-bearing graph needs.
 func BenchmarkValidateObjectHeavy(b *testing.B) {
-	const schema = `{
+	const refFree = `{
 		"type": "object",
 		"required": ["id", "name"],
 		"minProperties": 2,
@@ -8056,6 +8058,34 @@ func BenchmarkValidateObjectHeavy(b *testing.B) {
 		"then": {"properties": {"score": {"minimum": 0}}}
 	}`
 
+	const refBearing = `{
+		"type": "object",
+		"required": ["id", "name"],
+		"minProperties": 2,
+		"maxProperties": 20,
+		"properties": {
+			"id": {"type": "integer", "minimum": 0},
+			"name": {"type": "string", "minLength": 1, "maxLength": 100},
+			"tags": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+			"score": {"type": "number", "minimum": 0, "maximum": 100}
+		},
+		"patternProperties": {
+			"^x-": {"type": "string"}
+		},
+		"additionalProperties": {"type": "string"},
+		"dependentSchemas": {
+			"score": {"required": ["id"]}
+		},
+		"allOf": [
+			{"$ref": "#/$defs/idCap"}
+		],
+		"if": {"required": ["score"]},
+		"then": {"properties": {"score": {"minimum": 0}}},
+		"$defs": {
+			"idCap": {"properties": {"id": {"maximum": 1000000}}}
+		}
+	}`
+
 	instance := []byte(`{
 		"id": 42,
 		"name": "widget",
@@ -8065,27 +8095,31 @@ func BenchmarkValidateObjectHeavy(b *testing.B) {
 		"note": "free-form"
 	}`)
 
-	var s jsonschema.Schema
+	for name, schema := range map[string]string{"ref-free": refFree, "ref-bearing": refBearing} {
+		b.Run(name, func(b *testing.B) {
+			var s jsonschema.Schema
 
-	err := json.Unmarshal([]byte(schema), &s)
-	if err != nil {
-		b.Fatal(err)
-	}
+			err := json.Unmarshal([]byte(schema), &s)
+			if err != nil {
+				b.Fatal(err)
+			}
 
-	v, err := jsonschema.Compile(b.Context(), &s)
-	if err != nil {
-		b.Fatal(err)
-	}
+			v, err := jsonschema.Compile(b.Context(), &s)
+			if err != nil {
+				b.Fatal(err)
+			}
 
-	b.ReportAllocs()
-	b.ResetTimer()
+			b.ReportAllocs()
+			b.ResetTimer()
 
-	// The instance satisfies the schema, so a non-nil error means the benchmark
-	// stopped measuring the full traversal.
-	for b.Loop() {
-		if v.ValidateJSON(b.Context(), instance) != nil {
-			b.Fatal("expected the instance to validate")
-		}
+			// The instance satisfies the schema, so a non-nil error means the
+			// benchmark stopped measuring the full traversal.
+			for b.Loop() {
+				if v.ValidateJSON(b.Context(), instance) != nil {
+					b.Fatal("expected the instance to validate")
+				}
+			}
+		})
 	}
 }
 

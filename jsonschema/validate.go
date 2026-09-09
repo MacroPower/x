@@ -372,6 +372,9 @@ type validator struct {
 	vocabOverride      map[string]bool // from WithVocabularies
 	formatCheckers     map[string]FormatValidator
 	metaSchemaResolver RefResolver // metaschema lookup by $schema URI (WithMetaSchemaResolver)
+	// The visiting set is the run's cycle detection, allocated by forInstance
+	// only when refBearing is set; a reference-free run leaves it nil and
+	// never consults it.
 	visiting           map[visitKey]bool
 	patternCache       []*compiledPattern           // schema.Pattern compiled (see numericBounds)
 	patternProps       []map[string]compiledPattern // patternProperties keys compiled (see numericBounds)
@@ -416,6 +419,17 @@ type validator struct {
 	profile draftProfile // per-draft behavioral policy, resolved once from draft
 	vocabs  vocab.Set    // resolved active vocabularies
 
+	// The refBearing flag records that some indexed node sets $ref or
+	// $dynamicRef under an active row. Only a reference can lead the run back
+	// into a schema it is already validating at one instance position, since
+	// Freeze refuses structural loops and every out-of-index node is reached
+	// through a reference, so a run over a graph with no reference skips the
+	// cycle set. The $ref and $dynamicRef rows' compile steps set it, which
+	// covers the root and every document the compile-time walk fetches. It
+	// is written only inside Compile and read through the per-run copy, like
+	// activeRows.
+	refBearing bool
+
 	formatsEnabled bool
 	// Whether format assertion runs under the 2020-12 format-assertion
 	// vocabulary rather than the WithFormats opt-in alone or Draft-07's
@@ -445,7 +459,6 @@ func newValidator(ctx context.Context, schema *Schema, opts []ValidateOption) (*
 	v := &validator{
 		root:           schema,
 		formatCheckers: map[string]FormatValidator{},
-		visiting:       map[visitKey]bool{},
 		// The compile context, for resolver calls made while compiling: the
 		// metaschema lookup below, and the remote fetches the compile-time
 		// reference walk makes after construction. Compile drops it before
@@ -567,7 +580,8 @@ func (v *validator) buildRefReg() {
 }
 
 // forInstance returns a per-validation view of a compiled validator with fresh
-// mutable walk state (the visiting set and a fresh per-run refSession), so a
+// mutable walk state (the visiting set on a reference-bearing graph, and a
+// fresh per-run refSession), so a
 // [Validator] can be reused and is safe for concurrent use. The immutable
 // per-schema state (the compiled refReg, resolved vocabularies, draft, and
 // format configuration) is shared. The caller's ctx is carried on the per-run
@@ -582,8 +596,12 @@ func (v *validator) buildRefReg() {
 func (v *validator) forInstance(ctx context.Context) *validator {
 	rv := *v
 	rv.ctx = ctx
-	rv.visiting = map[visitKey]bool{}
 	rv.lateEnums = nil
+
+	if v.refBearing {
+		rv.visiting = map[visitKey]bool{}
+	}
+
 	rv.lateConsts = nil
 
 	// A JSON-pointer fallback target materialized during this run is a fresh
@@ -792,6 +810,23 @@ func (v *validator) precomputeRange(from, to int) {
 				e.compile(v, id, schema)
 			}
 		}
+	}
+}
+
+// refCompile records that the graph bears a $ref, so the run allocates and
+// consults the cycle set.
+func refCompile(v *validator, _ int, s *Schema) {
+	if s.Ref != "" {
+		v.refBearing = true
+	}
+}
+
+// dynamicRefCompile records that the graph bears a $dynamicRef, so the run
+// allocates and consults the cycle set. The row is absent under Draft-07,
+// where the keyword never evaluates.
+func dynamicRefCompile(v *validator, _ int, s *Schema) {
+	if s.DynamicRef != "" {
+		v.refBearing = true
 	}
 }
 
@@ -1903,13 +1938,17 @@ func (v *validator) validate(
 	}
 
 	// Circular ref detection: same schema + same instance path = true cycle.
-	key := visitKey{schema, instancePath.ptr}
-	if v.visiting[key] {
-		return nil // treat as passing to avoid infinite recursion
-	}
+	// Only a reference can close such a cycle, so a reference-free graph
+	// skips the set (see refBearing).
+	if v.refBearing {
+		key := visitKey{schema, instancePath.ptr}
+		if v.visiting[key] {
+			return nil // treat as passing to avoid infinite recursion
+		}
 
-	v.visiting[key] = true
-	defer delete(v.visiting, key)
+		v.visiting[key] = true
+		defer delete(v.visiting, key)
+	}
 
 	// Dynamic scope tracking: push when entering a new resource boundary.
 	// The root is already on the stack from seeding; subsequent pushes happen

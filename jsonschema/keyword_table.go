@@ -40,6 +40,7 @@ func init() {
 			vocab:    vocabCore,
 			phase:    phaseRef,
 			isRef:    true,
+			compile:  refCompile,
 			eval:     evalRef,
 		},
 		{
@@ -47,6 +48,7 @@ func init() {
 			keywords: []string{KeywordDynamicRef},
 			vocab:    vocabCore,
 			phase:    phaseRef,
+			compile:  dynamicRefCompile,
 			eval:     evalDynamicRef,
 		},
 
