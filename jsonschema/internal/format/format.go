@@ -1264,8 +1264,17 @@ func validateRegex(s string) error {
 			// counts as an atom for a quantifier to repeat.
 			if i+1 < len(s) && s[i+1] == '?' {
 				mod := s[i+2:]
+
+				// A "(?" that opens none of the known modifiers is a
+				// malformed group: an empty or ill-formed capture name, or
+				// nothing at all. Reading its bytes as atoms would accept it.
+				n := regexGroupModifierLen(mod)
+				if n == 0 {
+					return errors.New("invalid regex: malformed group modifier")
+				}
+
 				lookbehind = len(mod) > 1 && mod[0] == '<' && (mod[1] == '=' || mod[1] == '!')
-				i += 1 + regexGroupModifierLen(mod)
+				i += 1 + n
 			}
 
 			groups = append(groups, lookbehind)
@@ -1345,7 +1354,7 @@ func validateRegex(s string) error {
 // "(?" at the start of s: the lookaround and non-capturing introducers ":",
 // "=", "!", "<=", and "<!", a named-capture name "<name>" (RE2 spells it
 // "P<name>"), or an RE2 flag run such as "i" or "ims-U:". It returns 0 when s
-// opens none of them, and the scan then reads the bytes as ordinary atoms.
+// opens none of them, which the scan reports as a malformed group.
 func regexGroupModifierLen(s string) int {
 	if s == "" {
 		return 0

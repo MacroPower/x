@@ -294,6 +294,13 @@ func regexCarveOut(s string) bool {
 		return true
 	}
 
+	// An empty "(?)" is an empty flag run to RE2, while ECMA 262 has no
+	// group modifier there and reads the '?' as a quantifier with nothing
+	// to repeat.
+	if strings.Contains(s, "(?)") {
+		return true
+	}
+
 	// A braced bound with a leading zero. RE2's parseInt refuses one, so it
 	// reads "{00}" as four literal characters, while ECMA 262 DecimalDigits
 	// admits it and "{00}" is a quantifier with nothing to repeat.

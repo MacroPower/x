@@ -59,5 +59,9 @@
 "(?<=a)*"	false	no Term production lets a quantifier follow a lookbehind
 "(?<!a)+"	false	no Term production lets a quantifier follow a negative lookbehind
 "(?<=a){1}"	false	a braced quantifier after a lookbehind has nothing to repeat either
+"(?<name>a)"	true	a named capture group
+"(?<>a)"	false	an empty capture name, which no engine accepts
+"(?<a-b>x)"	false	a capture name outside the identifier grammar
+"(?)"	false	a group modifier naming nothing, so the '?' has nothing to repeat
 "[ab]{2}"	true	a class is quantifiable
 "\\d+"	true	an escape is quantifiable
