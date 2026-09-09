@@ -592,7 +592,11 @@
 // as every other reference does; a circular target still renders as $ref.
 //
 // Generation disambiguates name collisions with the package's base directory
-// name, then with the full import path if needed. For generic type
+// name, then with the full import path if needed. The collision check runs
+// over every named type the run reflects, including one that a type=
+// override or root inlining later drops from the output, so a key can carry
+// a package prefix although the rendered $defs shows no other type of that
+// name. For generic type
 // instantiations, it replaces the brackets and commas in [reflect.Type.Name]
 // with underscores to form the $defs key (e.g., "MyStruct[int]" becomes
 // "MyStruct_int_"). The [WithNamer] option overrides this naming.
