@@ -505,3 +505,30 @@ func checkBoundDomains(schema *Schema, schemaPath string, visited map[*Schema]bo
 
 	return nil
 }
+
+// checkFormatNames refuses a format keyword naming a format the run holds no
+// checker for, as known reports. It runs only under a run the 2020-12
+// format-assertion vocabulary governs ([Profile.KnownFormat] is set), where
+// validation section 7.2.3 requires an implementation to fail upon
+// encountering an unknown format; every other run reads an unknown name as
+// annotation-only and never reaches this check.
+func checkFormatNames(schema *Schema, schemaPath string, known func(string) bool, visited map[*Schema]bool) error {
+	if schema == nil || visited[schema] {
+		return nil
+	}
+
+	visited[schema] = true
+
+	if schema.Format != "" && !known(schema.Format) {
+		return fmt.Errorf("%w: %q at %s/%s", ErrUnknownFormat, schema.Format, schemaPath, keyword.Format)
+	}
+
+	for _, entry := range Entries(schema) {
+		err := checkFormatNames(entry.Schema, schemaPath+string(entry.Pointer), known, visited)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}

@@ -299,6 +299,8 @@ type ValidationError struct {
 
 `format` is asserted under Draft-07 and annotation-only under Draft 2020-12
 unless the format-assertion vocabulary or `WithFormats(true)` turns it on.
+With the vocabulary active, a `format` naming no registered checker fails
+`Compile` with `ErrUnknownFormat`.
 Remote `$ref` URIs resolve through a `RefResolver` set with `WithRefResolver`,
 which receives the caller's context; the package ships no network resolver.
 See

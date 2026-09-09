@@ -25,10 +25,19 @@ func TestValidateLateFallbackTargetStructuralChecks(t *testing.T) {
 
 	tests := map[string]struct {
 		doc      string
+		opts     []jsonschema.ValidateOption
 		instance string
 		err      error
 		valid    bool
 	}{
+		"unknown format in fallback target under the format-assertion vocabulary": {
+			doc: `{"x-custom": {"sub": {"format": "no-such-format"}}, "$ref": "#/x-custom/sub"}`,
+			opts: []jsonschema.ValidateOption{jsonschema.WithVocabularies(
+				jsonschema.VocabCore2020, jsonschema.VocabFormatAssertion2020,
+			)},
+			instance: `"x"`,
+			err:      jsonschema.ErrUnknownFormat,
+		},
 		"negative bound in fallback target": {
 			doc:      `{"x-custom": {"sub": {"minItems": -1}}, "$ref": "#/x-custom/sub"}`,
 			instance: `[]`,
@@ -63,7 +72,9 @@ func TestValidateLateFallbackTargetStructuralChecks(t *testing.T) {
 
 			resolver := &lateResolver{doc: doc}
 
-			v, err := jsonschema.Compile(t.Context(), schema, jsonschema.WithRefResolver(resolver))
+			opts := append([]jsonschema.ValidateOption{jsonschema.WithRefResolver(resolver)}, tc.opts...)
+
+			v, err := jsonschema.Compile(t.Context(), schema, opts...)
 			require.NoError(t, err, "a resolver miss at compile time is tolerated")
 
 			resolver.armed.Store(true)
@@ -282,10 +293,20 @@ func TestValidateLateFetchedRemoteStructuralChecks(t *testing.T) {
 	tests := map[string]struct {
 		schema   string
 		doc      string
+		opts     []jsonschema.ValidateOption
 		instance string
 		err      error
 		valid    bool
 	}{
+		"unknown format in late-fetched document under the format-assertion vocabulary": {
+			schema: `{"$ref": "https://example.test/late.json"}`,
+			doc:    `{"format": "no-such-format"}`,
+			opts: []jsonschema.ValidateOption{jsonschema.WithVocabularies(
+				jsonschema.VocabCore2020, jsonschema.VocabFormatAssertion2020,
+			)},
+			instance: `"x"`,
+			err:      jsonschema.ErrUnknownFormat,
+		},
 		"negative bound in late-fetched document": {
 			schema:   `{"$ref": "https://example.test/late.json"}`,
 			doc:      `{"maxItems": -1}`,
@@ -330,7 +351,9 @@ func TestValidateLateFetchedRemoteStructuralChecks(t *testing.T) {
 
 			resolver := &lateResolver{doc: doc}
 
-			v, err := jsonschema.Compile(t.Context(), schema, jsonschema.WithRefResolver(resolver))
+			opts := append([]jsonschema.ValidateOption{jsonschema.WithRefResolver(resolver)}, tc.opts...)
+
+			v, err := jsonschema.Compile(t.Context(), schema, opts...)
 			require.NoError(t, err, "a resolver miss at compile time is tolerated")
 
 			resolver.armed.Store(true)

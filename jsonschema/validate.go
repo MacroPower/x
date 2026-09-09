@@ -52,7 +52,10 @@ func (f validateOptionFunc) applyValidate(v *validator) { f(v) }
 // again, including a built-in format name, replaces the previous checker. A
 // nil f or an empty name is ignored. A registered checker runs only when the
 // run asserts format: always under Draft-07, and under Draft 2020-12 only
-// with [WithFormats](true) or an active format-assertion vocabulary.
+// with [WithFormats](true) or an active format-assertion vocabulary. Under
+// that vocabulary, registering a name is also what lets a schema carrying it
+// compile: [Compile] refuses a format name with no registered checker with
+// [ErrUnknownFormat].
 func WithFormatValidator(name string, f FormatValidator) ValidateOption {
 	return validateOptionFunc(func(v *validator) {
 		if f != nil && name != "" {
@@ -68,8 +71,9 @@ func WithFormatValidator(name string, f FormatValidator) ValidateOption {
 // validation §7.2.1, which requires format-assertion to be disabled by
 // default). WithFormats(true) opts in to assertion regardless of draft or
 // vocabulary; WithFormats(false) disables it entirely. WithFormats(true)
-// does not relax the unknown-format failure an active format-assertion
-// vocabulary mandates.
+// does not relax the unknown-format refusal an active format-assertion
+// vocabulary mandates at [Compile] ([ErrUnknownFormat]); WithFormats(false)
+// turns that refusal off with the assertion.
 func WithFormats(enabled bool) ValidateOption {
 	return validateOptionFunc(func(v *validator) { v.formatsForce = &enabled })
 }
@@ -413,11 +417,12 @@ type validator struct {
 	vocabs  vocab.Set    // resolved active vocabularies
 
 	formatsEnabled bool
-	// Whether format assertion was activated by the 2020-12 format-assertion
-	// vocabulary rather than the WithFormats opt-in or Draft-07's default. In
-	// this mode the spec (validation section 7.2.3) mandates failure on
-	// unknown formats, so evalFormat rejects a format name with no registered
-	// checker instead of treating it as annotation-only.
+	// Whether format assertion runs under the 2020-12 format-assertion
+	// vocabulary rather than the WithFormats opt-in alone or Draft-07's
+	// default. In this mode the spec (validation section 7.2.3) mandates
+	// failure on unknown formats, so vetProfile installs the known-format
+	// predicate and Compile refuses a format name with no registered checker
+	// instead of treating it as annotation-only.
 	formatsVocabDriven bool
 	contentEnabled     bool // assert contentEncoding/contentMediaType (WithContent)
 
@@ -500,7 +505,7 @@ func newValidator(ctx context.Context, schema *Schema, opts []ValidateOption) (*
 	// frozen copy, so the caller's value is never held and never read again,
 	// and a node reached through two paths in the caller's value is two nodes
 	// here.
-	frozen, err := schemavet.Freeze(schema, "the root document", v.base, v.draft.vetProfile())
+	frozen, err := schemavet.Freeze(schema, "the root document", v.base, v.vetProfile())
 	if err != nil {
 		//nolint:wrapcheck // The freeze error already names the document and path.
 		return nil, err
@@ -554,7 +559,7 @@ func (v *validator) buildRefReg() {
 	// the closure walk reaches first. The vet does not wrap, so Compile
 	// reports the bare vetting sentinel and refWalkError supplies the
 	// reference framing.
-	v.refSession = v.refReg.NewSession(newFallbackVet(v.draft.vetProfile(), false))
+	v.refSession = v.refReg.NewSession(newFallbackVet(v.vetProfile(), false))
 	// The fetch reads the run's context from the ctx field, so no parameter
 	// threads through the deep resolution machinery.
 	//nolint:contextcheck // See the comment above.
@@ -588,7 +593,7 @@ func (v *validator) forInstance(ctx context.Context) *validator {
 	// compile-time one does. A violation surfaces through the referencing ref
 	// as an error wrapping [ErrRefResolve], matching the
 	// late-fetched-document vet.
-	rv.refSession = v.refReg.NewSession(newFallbackVet(rv.draft.vetProfile(), true))
+	rv.refSession = v.refReg.NewSession(newFallbackVet(rv.vetProfile(), true))
 	if rv.profile.dynamicRef {
 		rv.refSession.SeedDynamicScope(rv.refSession.SchemaBase(rv.root))
 	}
@@ -682,10 +687,31 @@ func (v *validator) resolveFormats() {
 	// Only an active format-assertion vocabulary is spec-bound to fail on
 	// unknown formats (2020-12 validation section 7.2.3), whether it or a
 	// WithFormats(true) opt-in turned assertion on; the vocabulary still
-	// governs the run. Assertion under Draft-07's default or under
-	// WithFormats(true) without the vocabulary keeps unknown names
-	// annotation-only, and WithFormats(false) asserts nothing at all.
+	// governs the run, and the vet refuses an unknown name at Compile.
+	// Assertion under Draft-07's default or under WithFormats(true) without
+	// the vocabulary keeps unknown names annotation-only, and
+	// WithFormats(false) asserts nothing and checks no name.
 	v.formatsVocabDriven = v.formatsEnabled && v.profile.vocabularies && v.vocabs.FormatAssertion
+}
+
+// vetProfile is the vetting policy the run applies to every document it
+// holds: the draft's policy plus, when the format-assertion vocabulary drives
+// assertion, the known-format predicate over the run's checker table, which
+// is final once the options applied. The inliner builds its own.
+func (v *validator) vetProfile() schemavet.Profile {
+	profile := v.draft.vetProfile()
+	if v.formatsVocabDriven {
+		profile.KnownFormat = v.knownFormat
+	}
+
+	return profile
+}
+
+// knownFormat reports whether the run holds a checker for name.
+func (v *validator) knownFormat(name string) bool {
+	_, ok := v.formatCheckers[name]
+
+	return ok
 }
 
 // precomputedBounds holds the numeric bound keywords of a schema as rationals,
@@ -1104,7 +1130,7 @@ func (v *validator) remoteFetch(sess *refresolve.Session, cow bool) refresolve.F
 			return nil, nil //nolint:nilnil // A missing resolver is a plain miss, not an error.
 		}
 
-		doc, missed, err := fetchAndFreeze(v.runContext(), v.refResolver, sess, baseURI, v.draft.vetProfile())
+		doc, missed, err := fetchAndFreeze(v.runContext(), v.refResolver, sess, baseURI, v.vetProfile())
 		if err != nil {
 			return nil, err
 		}
@@ -2551,19 +2577,11 @@ func evalFormat(ctx evalContext) []*ValidationError {
 
 	fv, exists := ctx.v.formatCheckers[schema.Format]
 	if !exists {
-		// When the format-assertion vocabulary is active, 2020-12
-		// validation section 7.2.3 mandates failure on unknown formats, so a
-		// name with no registered checker rejects the instance. Assertion via
-		// WithFormats(true) without the vocabulary or via Draft-07's default
-		// stays lenient: those are the package's own opt-in contracts, and an
-		// unknown name asserts nothing.
-		if ctx.v.formatsVocabDriven {
-			return []*ValidationError{
-				leafError(ctx.instancePath, ctx.schemaPath, KeywordFormat,
-					fmt.Sprintf("format %q has no registered checker", schema.Format)),
-			}
-		}
-
+		// Under a run the format-assertion vocabulary governs, the vet refused
+		// an unknown name before any instance (every schema the walk reaches
+		// was vetted under vetProfile), so this branch serves the runs that
+		// read an unknown name as annotation-only: WithFormats(true) without
+		// the vocabulary and Draft-07's default.
 		return nil
 	}
 

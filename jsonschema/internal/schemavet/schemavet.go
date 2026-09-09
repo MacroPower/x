@@ -4,12 +4,13 @@
 // document into a private tree, refusing a pointer cycle, and reads its
 // identifiers into the tables the resolution registry is built from. The
 // [Frozen] tree then vets: [Frozen.VetNode] runs the field-structure check,
-// the type-name check, the non-negative-bounds check, and (only when
+// the type-name check, the non-negative-bounds check, (only when
 // [Profile.RejectItemsArray] is set, i.e. under a draft where the array form
-// of items is invalid) the items-array check, in that order, so the first
-// violation a document carries is the one reported. [Frozen.Vet] adds the
-// identifier checks ($id domain and $vocabulary placement) for call sites
-// that hold a whole document with a known base URI.
+// of items is invalid) the items-array check, and (only when
+// [Profile.KnownFormat] is set) the format-name check, in that order, so the
+// first violation a document carries is the one reported. [Frozen.Vet] adds
+// the identifier checks ($id domain and $vocabulary placement) after them
+// for call sites that hold a whole document with a known base URI.
 //
 // The currency types [Doc] and [Node] carry unexported fields and are minted
 // only by [Frozen.Vet] and [Frozen.VetNode], so a function that demands one
@@ -30,11 +31,19 @@ import (
 // Schema is the upstream schema type this package vets.
 type Schema = jsonschema.Schema
 
-// Profile carries the draft policy the checks read: the parent package's
+// Profile carries the policy the checks read: the parent package's
 // draftProfile has many more fields, and the conversion (vetProfile in
-// draft.go) narrows it to the three the vetting checks consult, mirroring how
-// refresolve carries its own two-value Draft enum.
+// draft.go) narrows it to the flags the vetting checks consult, mirroring how
+// refresolve carries its own two-value Draft enum. The validator adds the one
+// predicate, [Profile.KnownFormat], from run state the draft does not carry.
 type Profile struct {
+	// KnownFormat reports whether the run holds a checker for a format name.
+	// The validator sets it only when the 2020-12 format-assertion vocabulary
+	// drives assertion, where validation section 7.2.3 requires an
+	// implementation to fail upon encountering an unknown format; nil leaves
+	// every format name unchecked, the annotation-only reading every other
+	// run applies. The inliner never sets it, since it asserts no format.
+	KnownFormat func(name string) bool
 	// RejectItemsArray reports whether the array form of items is a
 	// structural error (Draft 2020-12, where tuples use prefixItems).
 	RejectItemsArray bool

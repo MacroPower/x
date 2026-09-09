@@ -48,6 +48,13 @@ var (
 	// does not establish the Draft 2020-12 dialect.
 	ErrMisplacedVocabulary = errors.New("misplaced $vocabulary")
 
+	// ErrUnknownFormat reports a format keyword naming a format the run holds
+	// no checker for, under a run the 2020-12 format-assertion vocabulary
+	// governs, where validation section 7.2.3 requires an implementation to
+	// fail upon encountering an unknown format. [Profile.KnownFormat] turns
+	// the check on.
+	ErrUnknownFormat = errors.New("unknown format")
+
 	// ErrSchemaCycle reports a schema graph holding a loop that crosses a
 	// schema, which has no tree form and which upstream's MarshalJSON
 	// recurses into without bound.

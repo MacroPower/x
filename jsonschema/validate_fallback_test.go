@@ -205,18 +205,29 @@ func TestFallbackTargetConstExactInLateFetchedDocument(t *testing.T) {
 }
 
 // TestCompileChecksJSONPointerFallbackTargets locks in that the compile-time
-// structural checks (type names, non-negative bounds, and the Draft-07 items
-// array under Draft 2020-12) extend to $ref targets materialized through the
-// JSON-pointer fallback: schemas carried inside unknown keywords, which the
-// typed root pass never reaches. Without the extension such a target compiles
-// cleanly and then silently mis-validates.
+// structural checks (type names, non-negative bounds, the Draft-07 items
+// array under Draft 2020-12, and the format names under the format-assertion
+// vocabulary) extend to $ref targets materialized through the JSON-pointer
+// fallback: schemas carried inside unknown keywords, which the typed root
+// pass never reaches. Without the extension such a target compiles cleanly
+// and then silently mis-validates.
 func TestCompileChecksJSONPointerFallbackTargets(t *testing.T) {
 	t.Parallel()
 
 	tests := map[string]struct {
-		schema string
-		err    error
+		schema   string
+		opts     []jsonschema.ValidateOption
+		err      error
+		contains []string
 	}{
+		"unknown format in fallback target under the format-assertion vocabulary": {
+			schema: `{"$ref": "#/x", "x": {"format": "no-such-format"}}`,
+			opts: []jsonschema.ValidateOption{jsonschema.WithVocabularies(
+				jsonschema.VocabCore2020, jsonschema.VocabFormatAssertion2020,
+			)},
+			err:      jsonschema.ErrUnknownFormat,
+			contains: []string{"#/x/format", `cannot resolve $ref "#/x"`},
+		},
 		"items array in fallback target": {
 			schema: `{"$ref": "#/x", "x": {"type": "array", "items": [{"type": "string"}]}}`,
 			err:    jsonschema.ErrItemsArrayUnderDraft2020,
@@ -254,7 +265,7 @@ func TestCompileChecksJSONPointerFallbackTargets(t *testing.T) {
 			schema, err := jsonschema.ParseSchema([]byte(tc.schema))
 			require.NoError(t, err)
 
-			_, err = jsonschema.Compile(t.Context(), schema)
+			_, err = jsonschema.Compile(t.Context(), schema, tc.opts...)
 			if tc.err == nil {
 				require.NoError(t, err)
 
@@ -263,6 +274,10 @@ func TestCompileChecksJSONPointerFallbackTargets(t *testing.T) {
 
 			require.ErrorIs(t, err, tc.err,
 				"a fallback-materialized target must fail the same compile checks as the typed tree")
+
+			for _, want := range tc.contains {
+				assert.Contains(t, err.Error(), want)
+			}
 		})
 	}
 }

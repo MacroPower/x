@@ -1284,14 +1284,18 @@
 //     "https://json-schema.org/draft/2020-12/schema", while an empty one
 //     inherits the run's dialect, accepted under 2020-12 and rejected under
 //     Draft-07, which predates the vocabulary concept.
+//   - [ErrUnknownFormat]: under Draft 2020-12 with the format-assertion
+//     vocabulary driving assertion, a format keyword naming a format with no
+//     registered checker (see Vocabularies below). Every other run reads an
+//     unknown name as annotation-only.
 //
 // [Inline] applies these same checks to the root it is given, to each
 // document its references reach, and to each [SubstituteRef] schema a
 // fallback supplies, so the two entry points refuse the same documents for
-// the same sentinels. One compile-time refusal has no Inline counterpart,
-// [ErrUnknownVocabulary], which belongs to the vocabulary resolution Inline
-// does not run. See Inlining below, where [WithRetrievalBase] and
-// [WithRefFallback] each narrow the rest.
+// the same sentinels. Two compile-time refusals have no Inline counterpart,
+// [ErrUnknownVocabulary] and [ErrUnknownFormat], which belong to the
+// vocabulary resolution Inline does not run. See Inlining below, where
+// [WithRetrievalBase] and [WithRefFallback] each narrow the rest.
 //
 // Compile then resolves every reference reachable from the root ($ref and,
 // under 2020-12, $dynamicRef). A reference that resolves to nothing while its
@@ -1386,7 +1390,9 @@
 //     the validation run's context and the name each check runs under. A
 //     registered checker runs only when the run asserts format: always under
 //     Draft-07, and under Draft 2020-12 only with [WithFormats](true) or an
-//     active format-assertion vocabulary.
+//     active format-assertion vocabulary. Under that vocabulary, registering
+//     a name is also what lets a schema carrying it compile (see Vocabularies
+//     below).
 //   - [WithFormats] forces built-in format assertion on or off. By default a
 //     run asserts format under Draft-07 and treats it as annotation-only
 //     under Draft 2020-12 unless the format-assertion vocabulary is active.
@@ -1607,11 +1613,17 @@
 //
 // When the format-assertion vocabulary is active and assertion is on (by that
 // vocabulary or by [WithFormats](true)), a format name with no registered
-// checker rejects every string instance, per the 2020-12 requirement that
-// implementations fail upon encountering unknown formats (validation section
-// 7.2.3). Assertion enabled by [WithFormats] without the vocabulary or by
-// Draft-07's default instead treats an unknown format name as
-// annotation-only, asserting nothing.
+// checker, built-in or [WithFormatValidator], fails [Compile] with
+// [ErrUnknownFormat], per the 2020-12 requirement that implementations fail
+// upon encountering unknown formats (validation section 7.2.3). The check
+// covers every document the run reads: the root, each document a reference
+// reaches, and a schema inside an unknown keyword a JSON Pointer reaches, so
+// a document first fetched during a validation run fails the referencing ref
+// with an error wrapping [ErrRefResolve] and [ErrUnknownFormat]. Assertion
+// enabled by [WithFormats] without the vocabulary or by Draft-07's default
+// instead treats an unknown format name as annotation-only, asserting
+// nothing, and [WithFormats](false) beside the vocabulary asserts nothing and
+// checks no name.
 //
 // Vocabulary support is a Draft 2020-12 feature. Under Draft 7 the full
 // built-in vocabulary set is always in force, and [WithVocabularies] and
@@ -1716,14 +1728,16 @@
 //     schema skips this check altogether, since the check needs a document
 //     base no pointer target carries.
 //
-// The structural checks run last: field structure, the $id domain, type
-// names, non-negative bounds, and under [Draft2020] the Draft-07 items array,
-// the same checks Compile applies to the root. The failing check's sentinel is
+// The structural checks run last: field structure, type names, non-negative
+// bounds, under [Draft2020] the Draft-07 items array, and, when the
+// format-assertion vocabulary drives assertion, the format names, followed
+// for a fetched document by the $id domain and $vocabulary placement, the
+// same checks Compile applies to the root. The failing check's sentinel is
 // the refusal ([ErrInvalidType], [ErrNegativeBound],
 // [ErrNonPositiveMultipleOf], [ErrItemsArrayUnderDraft2020],
 // [ErrConflictingSchemaFields], [ErrNilSubschema],
-// [ErrDuplicatePropertyOrder], or, for a fetched document, [ErrInvalidID] or
-// [ErrMisplacedVocabulary]).
+// [ErrDuplicatePropertyOrder], [ErrUnknownFormat], or, for a fetched
+// document, [ErrInvalidID] or [ErrMisplacedVocabulary]).
 //
 // A validation run and [Inline] both fail the referencing ref with an error
 // wrapping [ErrRefResolve] and that sentinel. [Compile] reports the bare

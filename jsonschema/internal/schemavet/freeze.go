@@ -27,12 +27,12 @@ type Frozen struct {
 	uri     map[uriref.DocKey]*Schema
 	anchor  map[uriref.AnchorKey]*Schema
 	dynamic map[uriref.AnchorKey]*Schema
+	profile Profile
 	base    uriref.DocKey
 	nodes   []*Schema
 	paths   []string
 	bases   []uriref.DocKey
 	scopes  []uriref.DocKey
-	profile Profile
 }
 
 // Freeze copies s into a tree and builds its tables. A node the source
@@ -412,8 +412,9 @@ func (f *Frozen) Vet(pathPrefix string) (Doc, error) {
 }
 
 // VetNode runs the structural checks alone: field structure, type names,
-// bound domains, and under [Profile.RejectItemsArray] the array form of
-// items. It serves a fragment of a document, such as a JSON-pointer target
+// bound domains, under [Profile.RejectItemsArray] the array form of items,
+// and under [Profile.KnownFormat] the format names, in that order. It serves
+// a fragment of a document, such as a JSON-pointer target
 // materialized from an unknown keyword, which has no document base of its
 // own. It returns the minted [Node] on success, or the zero Node and the
 // first violation.
@@ -435,6 +436,13 @@ func (f *Frozen) VetNode(pathPrefix string) (Node, error) {
 
 	if f.profile.RejectItemsArray {
 		err = checkItemsArrayDraft2020(f.root, pathPrefix, map[*Schema]bool{})
+		if err != nil {
+			return Node{}, err
+		}
+	}
+
+	if f.profile.KnownFormat != nil {
+		err = checkFormatNames(f.root, pathPrefix, f.profile.KnownFormat, map[*Schema]bool{})
 		if err != nil {
 			return Node{}, err
 		}

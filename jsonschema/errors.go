@@ -214,6 +214,23 @@ var (
 	// originates in that package or here.
 	ErrMisplacedVocabulary = schemavet.ErrMisplacedVocabulary
 
+	// ErrUnknownFormat is returned by [Compile] under Draft 2020-12 when the
+	// format-assertion vocabulary drives assertion and a format keyword names
+	// a format with no registered checker, built-in or registered through
+	// [WithFormatValidator]. Validation section 7.2.3 requires an
+	// implementation supporting that vocabulary to fail upon encountering an
+	// unknown format, so the refusal is the schema's, not an instance's. The
+	// check covers every document the run reads; a fetched document's
+	// violation arrives wrapped in [ErrRefResolve]. Assertion enabled by
+	// [WithFormats](true) without the vocabulary, or by Draft-07's default,
+	// reads an unknown name as annotation-only and never returns it. [Inline]
+	// resolves no vocabulary and has no counterpart.
+	//
+	// It is re-exported from internal/schemavet, the shared structural-vetting
+	// core, so [errors.Is] matches the sentinel identically whether a failure
+	// originates in that package or here.
+	ErrUnknownFormat = schemavet.ErrUnknownFormat
+
 	// ErrInvalidSchemaDocument is returned by [CompileJSON], [ParseSchema],
 	// and [ParseSchemaValue] when a schema document's top-level value is not a
 	// JSON object or boolean.

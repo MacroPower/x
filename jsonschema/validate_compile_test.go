@@ -17,6 +17,154 @@ import (
 	"go.jacobcolvin.com/x/jsonschema"
 )
 
+// TestCompileRejectsUnknownFormatUnderFormatAssertionVocabulary locks in the
+// 2020-12 requirement (validation section 7.2.3) that an implementation fails
+// on unknown formats when the format-assertion vocabulary is specified: with
+// that vocabulary driving assertion, whether the vocabulary or WithFormats(true)
+// turned assertion on, Compile refuses a format name with no registered
+// checker with ErrUnknownFormat, in the root and in every document a reference
+// reaches. The refusal was once per string instance, which read the section's
+// schema-level MUST as an instance verdict. The WithFormats(true) opt-in
+// without the vocabulary and Draft-07's default assertion are the package's
+// own contracts and stay lenient for unknown names. WithFormats(true) beside
+// the vocabulary once dropped the failure, so that case pins that an option
+// documented as opting in to assertion does not relax the spec's MUST.
+func TestCompileRejectsUnknownFormatUnderFormatAssertionVocabulary(t *testing.T) {
+	t.Parallel()
+
+	assertionVocabs := jsonschema.WithVocabularies(
+		jsonschema.VocabCore2020,
+		jsonschema.VocabValidation2020,
+		jsonschema.VocabApplicator2020,
+		jsonschema.VocabFormatAssertion2020,
+	)
+
+	const metaID = "https://example.test/meta/format-assertion"
+
+	meta := &jsonschema.Schema{
+		ID: metaID,
+		Vocabulary: map[string]bool{
+			jsonschema.VocabCore2020:            true,
+			jsonschema.VocabFormatAssertion2020: true,
+		},
+	}
+
+	rejectAll := jsonschema.FormatValidatorFunc(func(context.Context, string, string) error {
+		return errors.New("rejected")
+	})
+
+	tests := map[string]struct {
+		schema   string
+		opts     []jsonschema.ValidateOption
+		err      error
+		contains []string
+		// The instance is validated after a successful compile when non-empty;
+		// keyword names the keyword it fails on, and empty means it is valid.
+		instance string
+		keyword  string
+	}{
+		"unknown format under the vocabulary": {
+			schema:   `{"properties": {"a": {"format": "no-such-format"}}}`,
+			opts:     []jsonschema.ValidateOption{assertionVocabs},
+			err:      jsonschema.ErrUnknownFormat,
+			contains: []string{`"no-such-format"`, "/properties/a/format"},
+		},
+		"known format still asserted under the vocabulary": {
+			schema:   `{"format": "ipv4"}`,
+			opts:     []jsonschema.ValidateOption{assertionVocabs},
+			instance: `"not-an-ip"`,
+			keyword:  jsonschema.KeywordFormat,
+		},
+		"registered format compiles and its checker runs": {
+			schema: `{"format": "no-such-format"}`,
+			opts: []jsonschema.ValidateOption{
+				assertionVocabs, jsonschema.WithFormatValidator("no-such-format", rejectAll),
+			},
+			instance: `"x"`,
+			keyword:  jsonschema.KeywordFormat,
+		},
+		"WithFormats force keeps the vocabulary-driven refusal": {
+			schema: `{"format": "no-such-format"}`,
+			opts:   []jsonschema.ValidateOption{assertionVocabs, jsonschema.WithFormats(true)},
+			err:    jsonschema.ErrUnknownFormat,
+		},
+		"WithFormats off checks no name under the vocabulary": {
+			schema:   `{"format": "no-such-format"}`,
+			opts:     []jsonschema.ValidateOption{assertionVocabs, jsonschema.WithFormats(false)},
+			instance: `"x"`,
+		},
+		"unknown format stays lenient under WithFormats force alone": {
+			schema:   `{"format": "no-such-format"}`,
+			opts:     []jsonschema.ValidateOption{jsonschema.WithFormats(true)},
+			instance: `"x"`,
+		},
+		"unknown format stays lenient under draft-07 default assertion": {
+			schema:   `{"$schema": "http://json-schema.org/draft-07/schema#", "format": "no-such-format"}`,
+			instance: `"x"`,
+		},
+		"unknown format compiles under the default 2020-12 vocabularies": {
+			schema:   `{"format": "no-such-format"}`,
+			instance: `"x"`,
+		},
+		"metaschema-driven vocabulary refuses an unknown format": {
+			schema: `{"$schema": "` + metaID + `", "format": "no-such-format"}`,
+			opts: []jsonschema.ValidateOption{
+				jsonschema.WithMetaSchemaResolver(jsonschema.SchemaMap{metaID: meta}),
+			},
+			err: jsonschema.ErrUnknownFormat,
+		},
+		"unknown format in a fetched document": {
+			schema: `{"$ref": "https://example.test/doc.json"}`,
+			opts: []jsonschema.ValidateOption{
+				assertionVocabs,
+				jsonschema.WithRefResolver(jsonschema.SchemaMap{
+					"https://example.test/doc.json": {Format: "no-such-format"},
+				}),
+			},
+			err:      jsonschema.ErrUnknownFormat,
+			contains: []string{"https://example.test/doc.json", "/format"},
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			schema, err := jsonschema.ParseSchema([]byte(tc.schema))
+			require.NoError(t, err)
+
+			v, err := jsonschema.Compile(t.Context(), schema, tc.opts...)
+			if tc.err != nil {
+				require.ErrorIs(t, err, tc.err)
+
+				for _, want := range tc.contains {
+					assert.Contains(t, err.Error(), want)
+				}
+
+				return
+			}
+
+			require.NoError(t, err)
+
+			if tc.instance == "" {
+				return
+			}
+
+			err = v.ValidateJSON(t.Context(), []byte(tc.instance))
+			if tc.keyword == "" {
+				require.NoError(t, err)
+
+				return
+			}
+
+			var ve *jsonschema.ValidationError
+
+			require.ErrorAs(t, err, &ve)
+			assert.Equal(t, tc.keyword, ve.Keyword)
+		})
+	}
+}
+
 // TestCompileChecksIDDomain locks in the compile-time $id domain checks: a
 // fragment in $id is rejected under Draft 2020-12 (core section 8.2.1) and
 // tolerated under Draft-07 (the anchor spelling), an $id beside a $ref is

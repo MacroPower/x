@@ -166,8 +166,11 @@ var (
 		"ErrIDCollision":              jsonschema.ErrIDCollision,
 		"ErrUnsupportedDraft":         jsonschema.ErrUnsupportedDraft,
 		"ErrUnknownVocabulary":        jsonschema.ErrUnknownVocabulary,
-		"ErrInvalidSchemaDocument":    jsonschema.ErrInvalidSchemaDocument,
-		"ErrNilSchema":                jsonschema.ErrNilSchema,
+		// A Compile-only refusal Inline reproduces through the standalone
+		// compile of its expanded output.
+		"ErrUnknownFormat":         jsonschema.ErrUnknownFormat,
+		"ErrInvalidSchemaDocument": jsonschema.ErrInvalidSchemaDocument,
+		"ErrNilSchema":             jsonschema.ErrNilSchema,
 	}
 )
 

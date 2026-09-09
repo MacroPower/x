@@ -79,6 +79,14 @@ func TestVetViolationPaths(t *testing.T) {
 			err:     schemavet.ErrItemsArrayUnderDraft2020,
 			path:    "/items",
 		},
+		"unknown format under a known-format predicate": {
+			schema: &schemavet.Schema{Properties: map[string]*schemavet.Schema{
+				"a": {Format: "no-such-format"},
+			}},
+			profile: schemavet.Profile{KnownFormat: func(string) bool { return false }},
+			err:     schemavet.ErrUnknownFormat,
+			path:    "/properties/a/format",
+		},
 	}
 
 	for name, tc := range tests {
@@ -88,6 +96,46 @@ func TestVetViolationPaths(t *testing.T) {
 			_, err := schemavet.FreezeNode(tc.schema, "", bk(t, "https://example.com/s"), tc.profile)
 			require.ErrorIs(t, err, tc.err)
 			assert.Contains(t, err.Error(), tc.path)
+		})
+	}
+}
+
+// TestVetFormatNamesGatedByPredicate pins that the format-name check runs
+// only when the profile carries a predicate: a nil predicate leaves every
+// name unchecked, and a predicate decides each name on its own.
+func TestVetFormatNamesGatedByPredicate(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		known func(string) bool
+		err   error
+	}{
+		"nil predicate checks nothing": {},
+		"predicate admitting the name passes": {
+			known: func(name string) bool { return name == "custom" },
+		},
+		"predicate refusing the name fails": {
+			known: func(string) bool { return false },
+			err:   schemavet.ErrUnknownFormat,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			schema := &schemavet.Schema{Format: "custom"}
+			profile := schemavet.Profile{KnownFormat: tc.known}
+
+			_, err := schemavet.FreezeNode(schema, "", bk(t, "https://example.com/s"), profile)
+			if tc.err == nil {
+				require.NoError(t, err)
+
+				return
+			}
+
+			require.ErrorIs(t, err, tc.err)
+			assert.Contains(t, err.Error(), "/format")
 		})
 	}
 }
