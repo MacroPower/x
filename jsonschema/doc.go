@@ -162,13 +162,12 @@
 //     wrapper, or the $defs entry that schema references. When a
 //     self-referential root stays in $defs, the defaults apply to that
 //     definition, shared by every recursive occurrence.
-//   - A name a composed embed promotes (see Struct Fields) takes a default
-//     only where the parent declares it as a property. [Draft2020] emits a
-//     true placeholder for it beside allOf when the object closes with
-//     unevaluatedProperties, and the placeholder takes the default. An
-//     object left open by [WithAdditionalProperties], and every object under
-//     [Draft7], gets no placeholder, so the name keeps whatever the embed's
-//     branch carries and its key seeds nothing.
+//   - A name a composed embed promotes (see Struct Fields) takes a seeded
+//     default on a true placeholder property beside allOf, under every
+//     draft and closing choice, so the embed's branch still judges the name
+//     and the placeholder carries the default alone. Without a seeded key
+//     only an object closing with unevaluatedProperties emits the
+//     placeholder, since that close needs the parent to evaluate the name.
 //   - A root a [TypeSchema.Ref] aliases seeds the aliased type's schema, or
 //     its $defs entry when that stays referenced, shared by every occurrence.
 //     The instance's keys must therefore name the target's properties; a key

@@ -36,6 +36,7 @@ const (
 var overrideEffects = map[string]overrideEffect{
 	"payload":  effectPayload,
 	"overrode": effectCopy,
+	"ghostWon": effectByKind,
 	"def":      effectReset,
 	"occ":      effectReset,
 	"stance":   effectReset,
@@ -71,6 +72,7 @@ func nodeFields(n *node) map[string]any {
 		"props":    n.props,
 		"prefix":   n.prefix,
 		"embeds":   n.embeds,
+		"ghostWon": n.ghostWon,
 		"occ":      n.occ,
 		"stance":   n.stance,
 		"null":     n.null,
@@ -113,6 +115,13 @@ func TestOverrideTypeClassifiesEveryNodeField(t *testing.T) {
 
 type overrideVerbatim struct{}
 
+// overrideComposed is an embedded type a WithTypeSchema value intercepts, so
+// the struct embedding it composes through allOf and its field G is a
+// ghost-won name on that struct's node.
+type overrideComposed struct {
+	G int `json:"g"`
+}
+
 type overrideNamed struct {
 	A int `json:"a"`
 }
@@ -127,6 +136,9 @@ type overrideFixture struct {
 	In struct {
 		X int `json:"x"`
 	} `json:"in"`
+	C struct {
+		overrideComposed
+	} `json:"c"`
 	M map[string]*int  `json:"m"`
 	T time.Time        `json:"t"`
 	N overrideNamed    `json:"n"`
@@ -142,6 +154,7 @@ func reflectOverrideFixture(t *testing.T) map[string]*node {
 
 	g := newConfig([]GenerateOption{
 		WithTypeSchemaFor[overrideVerbatim](TypeSchema{Verbatim: &Schema{Type: typename.Object}}),
+		WithTypeSchemaFor[overrideComposed](TypeSchema{Value: &Schema{Type: typename.Object}}),
 	}).forRun(t.Context())
 
 	root, err := g.schemaForType(reflect.TypeFor[overrideFixture](), false)
@@ -194,6 +207,7 @@ func TestOverrideTypeMatchesReflection(t *testing.T) {
 			require.True(t, props["p"].occ.pointer, "the pointer field reflects as a pointer occurrence")
 			require.NotNil(t, props["n"].def, "the extracted struct reflects as a reference")
 			require.NotNil(t, props["i"].payload.Minimum, "the int64 reflects with kind-derived bounds")
+			require.Equal(t, []string{"g"}, props["c"].ghostWon, "the composed embed promotes a ghost-won name")
 
 			for name, n := range props {
 				pre := *n

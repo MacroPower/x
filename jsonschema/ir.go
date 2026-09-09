@@ -94,6 +94,11 @@ type node struct {
 	props    []nodeProp  // struct properties, declaration order
 	prefix   []*node     // array elements (prefixItems / itemsArray)
 	embeds   []embedNode // struct allOf/anyOf composition branches
+	// GhostWon lists the names a composed embed's promoted field won on an
+	// object node: each appears in the marshaled object under the embed's
+	// allOf branch with no property of its own, so the seed pass can give a
+	// seeded default a placeholder property to land on.
+	ghostWon []string
 
 	// Occ holds the facts of this occurrence that decide whether it admits
 	// null, and stance the null-admission stance a type-level hook declared
@@ -793,6 +798,7 @@ func (n *node) overrideType(typeName string) {
 	n.prefix = nil
 	n.props = nil
 	n.embeds = nil
+	n.ghostWon = nil
 	n.fallback = slotNone
 }
 

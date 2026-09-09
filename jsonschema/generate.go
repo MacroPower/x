@@ -404,6 +404,15 @@ func (g *run) seedDefaults(root *node, rootType reflect.Type) error {
 			continue
 		}
 
+		// A name a composed embed promotes has no property of its own unless
+		// the object's close punched one; a seeded key for it gets the same
+		// placeholder here, under every close and draft, so the default has
+		// a home. The placeholder carries only the default, so the embed's
+		// branch still judges the name through allOf.
+		if _, ok := target.payload.Properties[key]; !ok && slices.Contains(target.ghostWon, key) {
+			punchPlaceholder(target.payload, key)
+		}
+
 		prop, ok := target.payload.Properties[key]
 		if !ok || prop == nil {
 			continue

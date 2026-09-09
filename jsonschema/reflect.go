@@ -1114,6 +1114,7 @@ func (g *run) buildStructSchema(t reflect.Type) (*node, Nullability, error) {
 	}
 
 	fields, ghostWon := resolved.Fields, resolved.GhostWon
+	obj.ghostWon = ghostWon
 
 	// An embedded fallback's members splice into the marshaled object after
 	// the named fields, so the map form's value schema becomes the object's
@@ -1165,16 +1166,7 @@ func (g *run) buildStructSchema(t reflect.Type) (*node, Nullability, error) {
 	// verdict a property-enumerating branch produces.
 	punchGhostWon := func() {
 		for _, name := range ghostWon {
-			if _, ok := s.Properties[name]; ok {
-				continue
-			}
-
-			if s.Properties == nil {
-				s.Properties = map[string]*Schema{}
-			}
-
-			s.Properties[name] = &Schema{}
-			s.PropertyOrder = append(s.PropertyOrder, name)
+			punchPlaceholder(s, name)
 		}
 	}
 
@@ -1260,6 +1252,22 @@ func (g *run) buildStructSchema(t reflect.Type) (*node, Nullability, error) {
 	}
 
 	return obj, stance, nil
+}
+
+// punchPlaceholder gives name a true property on s where s declares none,
+// appending it to the property order. It is the placeholder a ghost-won name
+// takes, whether the object's close punches it or the seed pass does.
+func punchPlaceholder(s *Schema, name string) {
+	if _, ok := s.Properties[name]; ok {
+		return
+	}
+
+	if s.Properties == nil {
+		s.Properties = map[string]*Schema{}
+	}
+
+	s.Properties[name] = &Schema{}
+	s.PropertyOrder = append(s.PropertyOrder, name)
 }
 
 // needsAllOfComposition reports whether an embedded struct type should be

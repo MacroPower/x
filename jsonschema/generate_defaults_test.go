@@ -747,12 +747,12 @@ type defaultsComposedOuter struct {
 	Y int `json:"Y"`
 }
 
-// TestWithDefaultsFromComposedEmbedPlaceholder pins where a name a composed
-// embed promotes takes its seeded default under Draft 2020-12. An object
-// closing with unevaluatedProperties carries a placeholder property beside
-// allOf, which takes the default; an object left open by
-// WithAdditionalProperties carries none, so the key seeds nothing and the
-// name keeps whatever the embed's branch carries.
+// TestWithDefaultsFromComposedEmbedPlaceholder pins that a name a composed
+// embed promotes takes its seeded default on a placeholder property beside
+// allOf under every close and draft. An object closing with
+// unevaluatedProperties already carries the placeholder; an object left open
+// by WithAdditionalProperties, and one under Draft 7, gets it from the seed
+// pass, so the key seeds the same way.
 func TestWithDefaultsFromComposedEmbedPlaceholder(t *testing.T) {
 	t.Parallel()
 
@@ -761,19 +761,20 @@ func TestWithDefaultsFromComposedEmbedPlaceholder(t *testing.T) {
 		Properties: map[string]*jsonschema.Schema{"X": {Type: "integer"}},
 	}}
 
-	generate := func(t *testing.T, open bool) *jsonschema.Schema {
+	generate := func(t *testing.T, opts ...jsonschema.GenerateOption) *jsonschema.Schema {
 		t.Helper()
 
-		s, err := jsonschema.GenerateFor[defaultsComposedOuter](t.Context(),
+		s, err := jsonschema.GenerateFor[defaultsComposedOuter](t.Context(), append(opts,
 			jsonschema.WithTypeSchema(reflect.TypeFor[defaultsComposedEmbed](), provided),
-			jsonschema.WithAdditionalProperties(open),
 			jsonschema.WithDefaultsFrom(defaultsComposedOuter{
 				defaultsComposedEmbed: defaultsComposedEmbed{X: 7},
 				Y:                     1,
 			}),
-		)
+		)...)
 		require.NoError(t, err)
 		assert.JSONEq(t, `1`, string(s.Properties["Y"].Default), "the parent's own field seeds either way")
+		require.Contains(t, s.Properties, "X", "the promoted name has its placeholder")
+		assert.JSONEq(t, `7`, string(s.Properties["X"].Default))
 
 		return s
 	}
@@ -781,16 +782,19 @@ func TestWithDefaultsFromComposedEmbedPlaceholder(t *testing.T) {
 	t.Run("closed with unevaluatedProperties", func(t *testing.T) {
 		t.Parallel()
 
-		s := generate(t, false)
-		require.Contains(t, s.Properties, "X", "the promoted name has its placeholder")
-		assert.JSONEq(t, `7`, string(s.Properties["X"].Default))
+		generate(t, jsonschema.WithAdditionalProperties(false))
 	})
 
 	t.Run("open", func(t *testing.T) {
 		t.Parallel()
 
-		s := generate(t, true)
-		assert.NotContains(t, s.Properties, "X", "an open object carries no placeholder")
+		generate(t, jsonschema.WithAdditionalProperties(true))
+	})
+
+	t.Run("draft 7", func(t *testing.T) {
+		t.Parallel()
+
+		generate(t, jsonschema.WithDraft(jsonschema.Draft7))
 	})
 }
 
