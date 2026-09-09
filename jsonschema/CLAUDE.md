@@ -137,6 +137,9 @@ is the only one that imports the parent package.
   `TestDispatchDraftGatingCoversRows`, `TestDraftConstantsInSync`,
   `TestPublicKeywordConstantsMirrorInternal` (dispatch_test.go): the dispatch
   table agrees with the keyword table and the public constants.
+- `TestDispatchRowPresenceMatchesFields`, `TestRowsForKeepsTableOrder`
+  (dispatch_internal_test.go): a row's presence predicate is the fields its
+  keywords claim, and the per-node row list keeps the table's order.
 - `TestTableCoversToolchain` (jsonopts): every toolchain option is classified.
 - `TestAgreesWithV2` (jsonprobe): the probe's verdicts are v2's.
 - `TestMatrixGolden`, `TestFormClassificationTotal` (tagmodel): the matrix is

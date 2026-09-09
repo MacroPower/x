@@ -366,6 +366,10 @@ type validator struct {
 	// remote or JSON-pointer fallback schema) is outside the index, so its cache
 	// lookup misses and the validation path computes the value directly.
 	numericBounds []*precomputedBounds // numeric bound keywords as rationals, by node id
+	// The nodeRows are each indexed node's active rows narrowed to the ones
+	// the node sets, in table order (see rowsFor); an out-of-index node runs
+	// every active row.
+	nodeRows [][]*keywordEntry
 
 	root               *Schema
 	formatsForce       *bool           // explicit WithFormats override; nil if unset
@@ -774,6 +778,7 @@ func (v *validator) precompute() {
 // keyword the cache covers.
 func (v *validator) sizeCaches(n int) {
 	v.numericBounds = growSlice(v.numericBounds, n)
+	v.nodeRows = growSlice(v.nodeRows, n)
 	v.patternCache = growSlice(v.patternCache, n)
 	v.patternProps = growSlice(v.patternProps, n)
 	v.constVals = growSlice(v.constVals, n)
@@ -810,6 +815,8 @@ func (v *validator) precomputeRange(from, to int) {
 				e.compile(v, id, schema)
 			}
 		}
+
+		v.nodeRows[id] = v.rowsFor(schema)
 	}
 }
 
@@ -1978,8 +1985,15 @@ func (v *validator) validate(
 	}
 
 	// Drive keyword evaluation from the run's active dispatch rows (filtered once
-	// at Compile by buildActiveRows), evaluated in table order -- the
-	// deterministic error-slice order the tests pin.
+	// at Compile by buildActiveRows, and narrowed per indexed node to the rows
+	// it sets by precomputeRange), evaluated in table order -- the
+	// deterministic error-slice order the tests pin. A node outside the index
+	// (a fallback target or a late-fetched document) runs every active row.
+	rows := v.activeRows
+	if nodeID >= 0 {
+		rows = v.nodeRows[nodeID]
+	}
+
 	ctx := evalContext{
 		v: v, schema: schema, nodeID: nodeID, instance: instance,
 		instancePath: instancePath, schemaPath: schemaPath, ann: ann,
@@ -1992,7 +2006,7 @@ func (v *validator) validate(
 
 	var errs []*ValidationError
 
-	for _, e := range v.activeRows {
+	for _, e := range rows {
 		if onlyRef && !e.isRef {
 			continue
 		}

@@ -610,6 +610,18 @@ var (
 		},
 	}
 
+	// ByName indexes Fields by Go field name, for a caller resolving the
+	// field names another table declares, such as the keyword metadata's
+	// Fields column.
+	ByName = func() map[string]*Field {
+		out := make(map[string]*Field, len(Fields))
+		for i := range Fields {
+			out[Fields[i].Name] = &Fields[i]
+		}
+
+		return out
+	}()
+
 	// Subschemas lists the 23 sub-schema-bearing fields in the emission order
 	// the package's traversal contract pins: all map fields, then all slice
 	// fields, then all single fields. That order is behaviorally load-bearing
@@ -618,11 +630,6 @@ var (
 	// order, which would give the wrong map order. TestFieldTableMatchesUpstream
 	// cross-checks that this list is exactly the set of Fields with Shape != None.
 	Subschemas = func() []*Field {
-		byName := make(map[string]*Field, len(Fields))
-		for i := range Fields {
-			byName[Fields[i].Name] = &Fields[i]
-		}
-
 		order := []string{
 			// Maps.
 			"Properties", "PatternProperties", "Defs", "Definitions",
@@ -637,7 +644,7 @@ var (
 
 		out := make([]*Field, len(order))
 		for i, name := range order {
-			out[i] = byName[name]
+			out[i] = ByName[name]
 		}
 
 		return out

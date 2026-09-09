@@ -6,6 +6,7 @@ import (
 	"go.jacobcolvin.com/x/jsonschema/internal/annotations"
 	"go.jacobcolvin.com/x/jsonschema/internal/jsonvalue"
 	"go.jacobcolvin.com/x/jsonschema/internal/keywordmeta"
+	"go.jacobcolvin.com/x/jsonschema/internal/schemafield"
 )
 
 // vocabGroup names the vocabulary that owns a keyword row, so the dispatch loop
@@ -93,6 +94,11 @@ type keywordEntry struct {
 	// validator asserts, and a keyword added to the constants but not to any
 	// row's keywords is caught automatically.
 	keywords []string
+	// The fields are the Schema fields the row's keywords claim in
+	// [keywordmeta.Keywords], resolved at load by deriveRowFields. A node
+	// sets the row exactly when one of them is set, which is how
+	// precomputeRange narrows the rows the dispatch loop runs per node.
+	fields []*schemafield.Field
 	// The drafts range is the only field the table literal leaves unset:
 	// deriveRowDrafts fills it at load from the row's member keywords, so a
 	// keyword's applicability is declared once in [keywordmeta.Keywords].
@@ -177,6 +183,48 @@ func (v *validator) gatePasses(e *keywordEntry) bool {
 	}
 
 	return true
+}
+
+// sets reports whether s sets any keyword the row owns, read through the
+// row's Schema fields. A non-nil empty container counts as set, as the field
+// table's IsZero reads it, since an empty enum or required list still
+// evaluates.
+func (e *keywordEntry) sets(s *Schema) bool {
+	for _, f := range e.fields {
+		if !f.IsZero(s) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// rowsFor filters the run's active rows down to the ones s sets, in table
+// order, so the phase partition the table enforces survives the narrowing. A
+// node setting every active row shares the activeRows slice itself.
+func (v *validator) rowsFor(s *Schema) []*keywordEntry {
+	var rows []*keywordEntry
+
+	for i, e := range v.activeRows {
+		if !e.sets(s) {
+			if rows == nil {
+				rows = make([]*keywordEntry, 0, len(v.activeRows)-1)
+				rows = append(rows, v.activeRows[:i]...)
+			}
+
+			continue
+		}
+
+		if rows != nil {
+			rows = append(rows, e)
+		}
+	}
+
+	if rows == nil {
+		return v.activeRows
+	}
+
+	return rows
 }
 
 // buildActiveRows records the keywordTable rows this run evaluates -- those

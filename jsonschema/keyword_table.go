@@ -5,6 +5,7 @@ import (
 	"slices"
 
 	"go.jacobcolvin.com/x/jsonschema/internal/keywordmeta"
+	"go.jacobcolvin.com/x/jsonschema/internal/schemafield"
 )
 
 // keywordTable is the ordered keyword dispatch table. It drives the Compile-time
@@ -230,6 +231,7 @@ func init() {
 	}
 
 	deriveRowDrafts()
+	deriveRowFields()
 	checkRowVocabularies()
 
 	for i := 1; i < len(keywordTable); i++ {
@@ -336,6 +338,35 @@ func checkRowVocabularies() {
 					e.name, e.vocab, kw, meta.Vocab,
 				))
 			}
+		}
+	}
+}
+
+// deriveRowFields resolves each dispatch row's Schema fields from the Fields
+// column of its member keywords, so a row's presence predicate is declared
+// once, in [keywordmeta.Keywords], and the field table guards the names. A
+// keyword naming a field the table does not list panics at load.
+func deriveRowFields() {
+	for i := range keywordTable {
+		e := &keywordTable[i]
+
+		for _, kw := range e.keywords {
+			for _, name := range rowMeta(e, kw).Fields {
+				f, ok := schemafield.ByName[name]
+				if !ok {
+					panic(fmt.Sprintf(
+						"jsonschema: keyword %q on dispatch row %q claims unknown field %q", kw, e.name, name,
+					))
+				}
+
+				if !slices.Contains(e.fields, f) {
+					e.fields = append(e.fields, f)
+				}
+			}
+		}
+
+		if len(e.fields) == 0 {
+			panic(fmt.Sprintf("jsonschema: dispatch row %q claims no Schema field", e.name))
 		}
 	}
 }
