@@ -1554,7 +1554,12 @@
 //     U-label to the RFC 5892 PVALID and CONTEXT categories, read off the
 //     Unicode general categories, so a symbol or emoji label ("xn--ls8h", a
 //     snowman before ".com") is refused although a UTS 46 lookup would
-//     convert it.
+//     convert it. idn-hostname and idn-email judge each label after the UTS
+//     46 mapping step RFC 5891 §5.3 permits, which folds case, width, and
+//     compatibility forms (the "fi" ligature U+FB01 becomes "fi") and drops
+//     default-ignorable code points such as U+200B and U+FEFF, so a label
+//     that spells "ab" with a zero-width space between the letters is
+//     accepted as "ab".
 //
 // # Traversal
 //

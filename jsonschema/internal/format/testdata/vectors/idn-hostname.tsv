@@ -108,3 +108,6 @@
 "xn--n3h.com"	false	an A-label decoding to U+2603, DISALLOWED under RFC 5892
 "\u00df.example"	true	U+00DF LATIN SMALL LETTER SHARP S is a section 2.6 PVALID exception
 "\u03b1\u03b2.example"	true	a lowercase letter (Ll) is PVALID
+"a\u200bb.example"	true	UTS 46 mapping drops U+200B ZERO WIDTH SPACE (an ignorable) before the RFC 5892 gate
+"\ufb01.example"	true	UTS 46 mapping folds U+FB01 LATIN SMALL LIGATURE FI to "fi" before the RFC 5892 gate
+"\ufeff.example"	false	UTS 46 mapping drops U+FEFF ZERO WIDTH NO-BREAK SPACE, leaving an empty label
