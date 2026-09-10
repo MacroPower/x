@@ -64,6 +64,11 @@
 //     pointer to one, or a nil interface, marshals as null, which
 //     go-playground's required rejects, while a non-nil one may hold the zero
 //     value and passes there, so no floor or forbidden zero follows the null.
+//     Required is the one validator an interface field takes: go-playground
+//     runs any other against the dynamic value by its kind, so ne=0 there
+//     rejects the string "0", the integer 0, an empty collection, and false
+//     alike, which no schema over an untyped instance can express, and the
+//     shared model refuses the rule.
 //     A reference to a $defs entry takes the form the definition declares, so
 //     a reference to a struct definition is in this list while a reference to
 //     a string definition gets the string floor beside its $ref. A byte slice
