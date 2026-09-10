@@ -97,9 +97,8 @@
 #
 # RegExpIdentifierName opens on an IdentifierStartChar, which excludes a digit
 # and a combining mark, and continues with IdentifierPartChars, which admit
-# both. RE2 accepts a name opening on a digit, so the differential rig carves
-# that shape out; the scan once applied one test to every position and
-# accepted "(?<1a>x)".
+# both. The scan once applied one test to every position and accepted
+# "(?<1a>x)".
 #
 "(?<1a>x)"	false	a name opening on a digit
 "(?<1>x)"	false	a name that is one digit
@@ -110,8 +109,7 @@
 #
 # ECMA-262 22.2.1.1 refuses a capture name defined twice wherever both groups
 # can take part in one match, and ES2025 admits it across the alternatives of
-# one disjunction. RE2 accepts a repeated name, so the differential rig carves
-# that shape out; the scan once kept no names at all.
+# one disjunction. The scan once kept no names at all.
 #
 "(?<a>x)(?<a>y)"	false	one name twice in one alternative
 "(?<a>x)|(?<a>y)"	true	one name in two alternatives of the pattern
@@ -120,29 +118,54 @@
 "(?:(?<a>x)|y)(?<a>z)"	false	a name repeated after the group holding its first use closes
 "(?<a>x)(?:(?<a>y)|z)"	false	a name repeated inside a group after its first use
 "(?<a>(?<a>x))"	false	a name repeated inside the group of that name
+"(?<a>(?<a>x)|y)"	false	the same, in a non-final alternative of that group, which V8 alone compiles
 "(?<a>x|(?<a>y))"	false	a group's own name repeated in its second alternative
 "(?<a>x)|(?:(?<a>y)(?<a>z))"	false	a repeat within one alternative of a disjunction
 "(?<a>x)|(?<b>y)(?<a>z)"	true	a repeat across alternatives beside another name
 "(?<a>x)(?<\\u0061>y)"	false	one name spelled literally and as an escape
-"(?P<a>x)(?<a>y)"	false	one name in both group spellings
+"(?P<a>x)(?<a>y)"	false	RE2's "(?P<" spelling of a named group, which no engine reads
+"(?P<n>a)"	false	the same spelling on its own
 "(?<a>x)\\k<a>"	true	a backreference by name defines nothing
 "(?)"	false	a group modifier naming nothing, so the '?' has nothing to repeat
 #
-# A flag run after "(?" is the shape RE2's parsePerlFlags reads: letters from
-# "imsU", at most one '-' with a letter after it, and a ':' or ')' closing the
-# run. ECMA-262's modifiers "(?ims-ims:" are a subset of it. Any other run
-# after "(?" is a group no engine compiles; the scan once read every run of
-# ASCII letters and hyphens as a flag run and accepted all of these.
+# A flag run after "(?" is the ES2025 RegularExpressionModifiers form: letters
+# from "ims", each at most once, at most one '-' with a flag on at least one
+# side of it, and a ':' closing the run. Any other run after "(?" is a group
+# no engine compiles, the global "(?i)" form and RE2's "U" flag included; the
+# scan once read every run of ASCII letters and hyphens as a flag run and
+# accepted all of these, and then held the run to RE2's parsePerlFlags shape.
 #
-"(?i)a"	true	a flag run closed by ')'
-"(?ims-U:a)"	true	every RE2 flag, a negation, and a ':' closing the run
+"(?i:a)"	true	one flag and a ':' closing the run
+"(?im-s:a)"	true	two flags added, one removed
 "(?-i:a)"	true	a negated flag run
+"(?i-:a)"	true	a '-' with no flag after it, which the grammar admits
+"(?i)a"	false	a flag run closed by ')', the global form no engine compiles
+"(?ims-U:a)"	false	RE2's "U" flag, which ECMA-262 has no modifier for
+"(?U:a)"	false	the same flag on its own
+"(?ii:a)"	false	a flag repeated in one run
+"(?i-i:a)"	false	a flag both added and removed
 "(?xyz:a)"	false	letters no engine reads as flags
 "(?a)"	false	a single letter no engine reads as a flag
 "(?-)"	false	a '-' with no flag on its far side
 "(?-:a)"	false	a '-' with no flag before the ':'
-"(?i-)"	false	a negation with no flag after it
+"(?i-)"	false	a negation with no flag after it and no ':' closing the run
 "(?i--m)"	false	a second '-' in one run
 "(?ia)"	false	a flag run interrupted by a letter that is no flag
 "[ab]{2}"	true	a class is quantifiable
 "\\d+"	true	an escape is quantifiable
+#
+# ECMA-262 22.2.1 derives Term from an Assertion on its own or from an Atom
+# with an optional Quantifier, so the assertions '^', '$', "\b", and "\B" take
+# no quantifier, while Annex B's QuantifiableAssertion admits one after a
+# lookahead. The scan once left every assertion quantifiable, as RE2 reads
+# them.
+#
+"^*"	false	nothing to repeat after the start assertion
+"$?"	false	nothing to repeat after the end assertion
+"\\b+"	false	nothing to repeat after a word boundary
+"\\B{2}"	false	nothing to repeat after a non-boundary
+"[\\b]+"	true	inside a class "\b" is a backspace, an ordinary member
+"(^)*"	true	a group holding an assertion is quantifiable
+"x{1,2}{3}"	false	a second quantifier has nothing to repeat
+"x*+"	false	a '+' after a quantifier is no lazy suffix
+"(?<a>)(?:|(?<a>))"	false	a name repeated in a later alternative of a group after its first use, which V8 alone compiles

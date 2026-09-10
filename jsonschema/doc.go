@@ -1586,8 +1586,11 @@
 //   - regex is a structural ECMA-262 check, not a compile. It checks balanced
 //     groups, terminated classes, well-formed escapes, and that every
 //     quantifier follows something to repeat with its bounds in order. The
-//     assertions "^", "$", "\b", and "\B" are left quantifiable, as RE2 reads
-//     them, and so is a lookahead; a lookbehind is not. A capture name is an
+//     assertions "^", "$", "\b", and "\B" take no quantifier, and neither
+//     does a lookbehind; a lookahead does, under Annex B. A group modifier
+//     is the ES2025 "(?ims-ims:" form, each flag at most once and a ":"
+//     closing it, so the global "(?i)" form and RE2's "(?P<name>" spelling
+//     are refused, as every engine refuses them. A capture name is an
 //     ECMA-262 RegExpIdentifierName, so it opens on a code point with the
 //     Unicode ID_Start property and continues with ID_Continue ones, each
 //     written literally or as a "\u" escape; "(?<\u03c0>x)" is a valid

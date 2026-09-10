@@ -6,7 +6,6 @@ import (
 	"net/url"
 	"path/filepath"
 	"regexp"
-	"regexp/syntax"
 	"strings"
 	"testing"
 	"time"
@@ -235,110 +234,6 @@ func hasTwoDigitHour(timePart string) bool {
 	isDigit := func(b byte) bool { return b >= '0' && b <= '9' }
 
 	return isDigit(timePart[0]) && isDigit(timePart[1]) && timePart[2] == ':'
-}
-
-// FuzzFormatRegexVsRE2 differentials the regex validator against Go's
-// regexp/syntax parser in Perl mode. The sound direction is one-way: RE2 parses
-// s implies the regex format accepts s. The validator is deliberately looser
-// than RE2 -- ECMA 262 permits backreferences and lookaround, which RE2 rejects
-// by design -- so "SUT accepts implies RE2 parses" is false for a whole class of
-// valid patterns and must not be asserted. What the one direction does guard is
-// false rejection: a structural scan that misreads the grammar starts turning
-// away patterns every engine compiles, which is how the Annex B identity-escape
-// misread was found.
-//
-// Two carve-out families, each a genuine RE2/ECMA-262 divergence:
-//   - \Q...\E literal quoting, an RE2/PCRE extension ECMA 262 does not have, so
-//     RE2 reads "\Q[" as a literal '[' where ECMA 262 sees an unterminated class;
-//   - "[]", where RE2 reads a leading ']' POSIX-style as a class member (making
-//     "[]Z(]" a valid class) while ECMA 262 22.2.1 reads "[]" as the empty class.
-func FuzzFormatRegexVsRE2(f *testing.F) {
-	fn := validator(f, "regex")
-
-	for _, seed := range []string{
-		"^[a-z]+$", `(foo)\1`, "foo(?=bar)", "[abc]", "a{2,3}", `\a`, `\_`, `\c`,
-		`\Q[\E`, "[]", "[]Z(]", "(", "[", `\`, "a|b", `\p{L}`, "", "*a", "a**",
-		"{1}", "a{2,1}", "a{,5}", "a+?", "(?i)a*", "(?P<n>a)+", "{00}", "a{}",
-	} {
-		f.Add(seed)
-	}
-
-	f.Fuzz(func(t *testing.T, s string) {
-		_, err := syntax.Parse(s, syntax.Perl)
-		if err != nil {
-			return
-		}
-
-		if regexCarveOut(s) {
-			return
-		}
-
-		err = fn(s)
-		if err != nil {
-			t.Fatalf("RE2 parses %q but the regex format rejects it: %v", s, err)
-		}
-	})
-}
-
-// regexCarveOut skips patterns where RE2 and ECMA 262 read the same bytes as
-// different constructs, so RE2 parsing one is no evidence ECMA 262 accepts it.
-func regexCarveOut(s string) bool {
-	// \Q...\E literal quoting suspends RE2's metacharacter reading; ECMA 262
-	// has no such construct and keeps reading the quoted text as syntax.
-	if strings.Contains(s, `\Q`) || strings.Contains(s, `\E`) {
-		return true
-	}
-
-	// A leading ']' is a class member to RE2 and closes an empty class to
-	// ECMA 262, so the two disagree on where the class ends.
-	if strings.Contains(s, "[]") {
-		return true
-	}
-
-	// An empty "(?)" is an empty flag run to RE2, while ECMA 262 has no
-	// group modifier there and reads the '?' as a quantifier with nothing
-	// to repeat.
-	if strings.Contains(s, "(?)") {
-		return true
-	}
-
-	// A braced bound with a leading zero. RE2's parseInt refuses one, so it
-	// reads "{00}" as four literal characters, while ECMA 262 DecimalDigits
-	// admits it and "{00}" is a quantifier with nothing to repeat.
-	if leadingZeroBound.MatchString(s) {
-		return true
-	}
-
-	// A capture name opening on a digit. RE2's isValidCaptureName takes any
-	// run of ASCII word characters, while ECMA 262 reads the name as a
-	// RegExpIdentifierName, whose IdentifierStartChar excludes a digit, so
-	// "(?<1a>x)" is a syntax error there.
-	if digitLedCaptureName.MatchString(s) {
-		return true
-	}
-
-	// A capture name defined twice. RE2 accepts a repeated name, while ECMA
-	// 262 22.2.1.1 refuses one wherever both groups can take part in a
-	// match. The check is coarse and skips a repeat across alternatives too,
-	// which ECMA 262 admits; skipping is always safe.
-	return repeatedCaptureName(s)
-}
-
-// repeatedCaptureName reports whether s names two capture groups alike, in
-// either group spelling. It reads the literal name only, which is every name
-// RE2 parses.
-func repeatedCaptureName(s string) bool {
-	seen := map[string]bool{}
-
-	for _, m := range captureName.FindAllStringSubmatch(s, -1) {
-		if seen[m[1]] {
-			return true
-		}
-
-		seen[m[1]] = true
-	}
-
-	return false
 }
 
 // FuzzFormatURIVsNetURL differentials the uri validator against net/url. The
@@ -790,19 +685,6 @@ const (
 )
 
 var (
-	// A braced quantifier bound that opens on a zero followed by another
-	// digit, in either the lower or the upper position; regexCarveOut skips
-	// a pattern carrying one.
-	leadingZeroBound = regexp.MustCompile(`\{0\d|\{\d+,0\d`)
-
-	// A named group, in either spelling, whose name opens on a digit;
-	// regexCarveOut skips a pattern carrying one.
-	digitLedCaptureName = regexp.MustCompile(`\(\?P?<\d`)
-
-	// A named group in either spelling, capturing its name; the first byte
-	// is held off '=' and '!' so a lookbehind does not match.
-	captureName = regexp.MustCompile(`\(\?P?<([^>=!][^>]*)>`)
-
 	// The RFC 9562 §4 canonical textual representation: four hyphens at fixed
 	// places and hex digits of either case elsewhere.
 	uuidGrammar = regexp.MustCompile(

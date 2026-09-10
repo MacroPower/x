@@ -65,10 +65,11 @@ func TestRegexFormatAcceptsECMA262Constructs(t *testing.T) {
 
 // TestRegexFormatFlagRuns pins the flag run the scan reads after "(?". The
 // scan once accepted any run of ASCII letters and hyphens there, so "(?xyz:a)",
-// "(?a)", "(?-)", and "(?-:a)" passed the format although neither an ECMA 262
-// engine nor RE2 compiles them. The run is held to RE2's parsePerlFlags shape,
-// which ECMA 262's "(?ims-ims:" modifiers fit inside: letters from "imsU", at
-// most one '-' with a letter after it, and a ':' or ')' closing the run.
+// "(?a)", "(?-)", and "(?-:a)" passed the format although no ECMA 262 engine
+// compiles them, and then held the run to RE2's parsePerlFlags shape, which
+// admits the global "(?i)" form and the "U" flag no engine compiles either.
+// The run is the ES2025 "(?ims-ims:" modifier: letters from "ims", each at
+// most once, at most one '-', and a ':' closing the run.
 func TestRegexFormatFlagRuns(t *testing.T) {
 	t.Parallel()
 
@@ -78,11 +79,13 @@ func TestRegexFormatFlagRuns(t *testing.T) {
 		instance string
 		valid    bool
 	}{
-		"flag run closed by a parenthesis":     {instance: "(?i)a", valid: true},
+		"flag run closed by a parenthesis":     {instance: "(?i)a", valid: false},
 		"flag run closed by a colon":           {instance: "(?i:a)", valid: true},
-		"every flag with a negation":           {instance: "(?ims-U:a)", valid: true},
+		"every flag with a negation":           {instance: "(?im-s:a)", valid: true},
+		"RE2's U flag":                         {instance: "(?ims-U:a)", valid: false},
 		"negated run":                          {instance: "(?-i:a)", valid: true},
-		"repeated flag":                        {instance: "(?ii)a", valid: true},
+		"repeated flag":                        {instance: "(?ii:a)", valid: false},
+		"flag added and removed":               {instance: "(?i-i:a)", valid: false},
 		"unknown flag letters":                 {instance: "(?xyz:a)", valid: false},
 		"single unknown flag":                  {instance: "(?a)", valid: false},
 		"bare hyphen":                          {instance: "(?-)", valid: false},

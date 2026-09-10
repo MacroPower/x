@@ -171,11 +171,11 @@ func TestFormatVectors(t *testing.T) {
 // fail the load, because each of the three would otherwise degrade a row into a
 // weaker test that still passes. The note documents the row for whoever reads
 // the file; the failure messages identify a row by its input.
-func loadVectorFile(t *testing.T, path string) map[string]formatVector {
-	t.Helper()
+func loadVectorFile(tb testing.TB, path string) map[string]formatVector {
+	tb.Helper()
 
 	data, err := os.ReadFile(path)
-	require.NoError(t, err, "read vector file %s", path)
+	require.NoError(tb, err, "read vector file %s", path)
 
 	cases := make(map[string]formatVector)
 	seen := make(map[string]int)
@@ -190,27 +190,27 @@ func loadVectorFile(t *testing.T, path string) map[string]formatVector {
 		}
 
 		fields := strings.SplitN(text, "\t", 3)
-		require.Len(t, fields, 3, "%s:%d: want three tab-separated fields in %q", path, line, text)
+		require.Len(tb, fields, 3, "%s:%d: want three tab-separated fields in %q", path, line, text)
 
 		quoted, validText, note := fields[0], fields[1], fields[2]
-		require.NotEmpty(t, strings.TrimSpace(note), "%s:%d: the note field is mandatory", path, line)
+		require.NotEmpty(tb, strings.TrimSpace(note), "%s:%d: the note field is mandatory", path, line)
 
 		input, err := strconv.Unquote(quoted)
-		require.NoError(t, err, "%s:%d: input %s is not a Go quoted string", path, line, quoted)
+		require.NoError(tb, err, "%s:%d: input %s is not a Go quoted string", path, line, quoted)
 
-		require.Contains(t, []string{"true", "false"}, validText,
+		require.Contains(tb, []string{"true", "false"}, validText,
 			"%s:%d: validity must be true or false", path, line)
 
 		prior, duplicate := seen[input]
-		require.False(t, duplicate, "%s:%d: input %s repeats the row on line %d", path, line, quoted, prior)
+		require.False(tb, duplicate, "%s:%d: input %s repeats the row on line %d", path, line, quoted, prior)
 
 		seen[input] = line
 
 		cases[quoted] = formatVector{instance: input, valid: validText == "true"}
 	}
 
-	require.NoError(t, scanner.Err(), "scan vector file %s", path)
-	require.NotEmpty(t, cases, "vector file %s carries no rows", path)
+	require.NoError(tb, scanner.Err(), "scan vector file %s", path)
+	require.NotEmpty(tb, cases, "vector file %s carries no rows", path)
 
 	return cases
 }

@@ -189,6 +189,10 @@ is the only one that imports the parent package.
 - `FuzzFormat*VsABNF` (format): the four URI and IRI formats agree with
   `uriabnf` in both directions, and `TestURIVectorsAgreeWithGrammar` runs every
   vector row through the grammar.
+- `FuzzFormatRegexVsV8` and `TestRegexVectorsAgreeWithV8` (format): the regex
+  format accepts a pattern exactly when V8 compiles it. The oracle is the node
+  process `testdata/oracle/ecma_regex.mjs`, so the tests need devbox's node
+  and fail, rather than skip, without it.
 - `tags_shape_oracle_test.go`: the `Form` a field classifies to is the JSON v2
   writes for it. `suite_test.go` runs the vendored official suite with reasoned
   skips; `conformance_test.go` checks generated schemas against the metaschemas.

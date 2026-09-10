@@ -1201,15 +1201,18 @@ const (
 // "{m,n}" must not exceed the second. A '{' that opens no braced quantifier
 // form is an Annex B ExtendedPatternCharacter, so "a{,5}" and "a{2,1" stay
 // literal. The assertions '^' and '$' and the word-boundary escapes "\b" and
-// "\B" are left quantifiable, as RE2 reads them, and so is a lookahead, which
-// Annex B's QuantifiableAssertion covers; a lookbehind is not, since no Term
-// production lets a Quantifier follow it.
 // A class range whose two ends are literal code points must run upward, the
 // early error 22.2.1.1 keeps; a range with an escape on either side is left
 // alone, since Annex B lets a class escape stand beside a literal '-'. A
 // capture name defined twice is refused where both groups can take part in
 // one match, the early error 22.2.1.1 keeps, and admitted across the
 // alternatives of one disjunction, as ES2025 reads it.
+// "\B" take no quantifier, since Term derives an Assertion on its own, and
+// neither does a lookbehind; a lookahead does, which Annex B's
+// QuantifiableAssertion covers. A group modifier is the ES2025
+// "(?ims-ims:" form, each flag at most once and a ':' closing the run, so a
+// bare "(?i)" and RE2's "(?P<name>" spelling are refused as every engine
+// refuses them.
 func validateRegex(s string) error {
 	// ECMA 262 reads a pattern as code points, so a byte sequence that is
 	// not UTF-8 holds no source character; every engine refuses it. The
@@ -1254,6 +1257,12 @@ func validateRegex(s string) error {
 			// An escape's value is not read, so a range it bounds goes
 			// unchecked.
 			classPrev, classDash = -1, false
+			// Outside a class "\b" and "\B" are word-boundary assertions,
+			// which no quantifier may follow; inside one "\b" is a
+			// backspace, an ordinary class member.
+			if r == 'b' || r == 'B' {
+				state = regexNothing
+			}
 
 			continue
 
@@ -1306,9 +1315,9 @@ func validateRegex(s string) error {
 			parent := &groups[len(groups)-1]
 			lookbehind := false
 
-			// A "(?" opens a non-capturing, lookaround, named, or (in RE2)
-			// flagged group; its modifier is consumed here so no byte of it
-			// counts as an atom for a quantifier to repeat.
+			// A "(?" opens a non-capturing, lookaround, named, or modified
+			// group; its modifier is consumed here so no byte of it counts
+			// as an atom for a quantifier to repeat.
 			if i+1 < len(s) && s[i+1] == '?' {
 				mod := s[i+2:]
 
@@ -1407,6 +1416,10 @@ func validateRegex(s string) error {
 
 			continue
 
+		case c == '^', c == '$':
+			// An assertion, which no quantifier may follow.
+			state = regexNothing
+
 		default:
 			state = regexAtom
 		}
@@ -1448,11 +1461,11 @@ type regexGroup struct {
 
 // regexGroupModifierLen returns the length of the group modifier that follows
 // "(?" at the start of s: the lookaround and non-capturing introducers ":",
-// "=", "!", "<=", and "<!", a named-capture name "<name>" (RE2 spells it
-// "P<name>"), or a flag run such as "i" or "ims-U:". It returns 0 when s
-// opens none of them, which the scan reports as a malformed group. The
-// second result is the decoded capture name for the named forms and empty
-// for the rest.
+// "=", "!", "<=", and "<!", a named-capture name "<name>", or a flag run
+// such as "i:" or "im-s:". It returns 0 when s opens none of them, which the
+// scan reports as a malformed group; RE2's "P<name>" spelling of a named
+// group is one such, since no ECMA 262 engine reads it. The second result is
+// the decoded capture name for the named form and empty for the rest.
 func regexGroupModifierLen(s string) (int, string) {
 	if s == "" {
 		return 0, ""
@@ -1465,35 +1478,42 @@ func regexGroupModifierLen(s string) (int, string) {
 		return 2, ""
 	case s[0] == '<':
 		return regexGroupNameLen(s, 1)
-	case s[0] == 'P' && len(s) > 1 && s[1] == '<':
-		return regexGroupNameLen(s, 2)
 	}
 
 	return regexFlagRunLen(s), ""
 }
 
 // regexFlagRunLen returns the length of the flag run at the start of s, the
-// form RE2's parsePerlFlags reads after "(?": letters from "imsU", at most
-// one '-' with a letter on its far side, and a ':' (consumed) or ')' (left
-// for the group accounting) closing the run. ECMA 262's modifiers "(?ims-ims:"
-// are a subset of the same shape. A run holding any other byte, a bare '-',
-// or no letter at all is no modifier, so the function returns 0 and the scan
+// ES2025 RegularExpressionModifiers form after "(?": letters from "ims", each
+// at most once across the run, at most one '-' separating the flags added
+// from the flags removed, at least one flag on either side of it, and a ':'
+// (consumed) closing the run. A run holding any other byte, a run ')' closes
+// (the global "(?i)" form no engine compiles), a bare '-', a repeated flag,
+// or no flag at all is no modifier, so the function returns 0 and the scan
 // reports a malformed group.
 func regexFlagRunLen(s string) int {
+	var seen [3]bool
+
 	sawFlag := false
 	negated := false
 
 	for n := range len(s) {
 		switch s[n] {
-		case 'i', 'm', 's', 'U':
+		case 'i', 'm', 's':
+			flag := strings.IndexByte("ims", s[n])
+			if seen[flag] {
+				return 0
+			}
+
+			seen[flag] = true
 			sawFlag = true
+
 		case '-':
 			if negated {
 				return 0
 			}
 
 			negated = true
-			sawFlag = false
 
 		case ':':
 			if !sawFlag {
@@ -1501,13 +1521,6 @@ func regexFlagRunLen(s string) int {
 			}
 
 			return n + 1
-
-		case ')':
-			if !sawFlag {
-				return 0
-			}
-
-			return n
 
 		default:
 			return 0

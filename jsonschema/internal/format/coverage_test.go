@@ -56,7 +56,7 @@ import (
 // source. A containment oracle is another format in this package rather than an
 // independent one, so a containment pair that drifts together stays green, and
 // a format covered by containment alone is not covered. One-wayness is not the
-// distinction, since six of the thirteen differentials this table accepts
+// distinction, since five of the thirteen differentials this table accepts
 // assert one direction only. Because a containment target covers none of the
 // formats it names, the second guard passes over any target naming more than
 // one, rather than asking for rows the table deliberately does not carry.
@@ -120,7 +120,7 @@ var formatCoverage = map[string]coverage{
 	"ipv6":                  {differentials: []coverageSource{FuzzFormatIPv6VsNetip}},
 	"json-pointer":          {vectors: true},
 	"relative-json-pointer": {vectors: true},
-	"regex":                 {differentials: []coverageSource{FuzzFormatRegexVsRE2}, vectors: true},
+	"regex":                 {differentials: []coverageSource{FuzzFormatRegexVsV8}, vectors: true},
 }
 
 // TestFormatCoverage asserts that every registered format carries a coverage
