@@ -582,8 +582,8 @@ func TestEmittedDefsMatchRender(t *testing.T) {
 
 			g.resolveNullability(root)
 
-			emitted := g.emittedDefs(root)
-			g.assignDefNames(emitted)
+			emitted, deferred := g.emittedDefs(root)
+			g.assignDefNames(emitted, deferred)
 			g.finalizeRefs(root)
 			require.NoError(t, g.applyFieldHooks(root))
 

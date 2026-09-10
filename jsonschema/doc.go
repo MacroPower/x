@@ -627,7 +627,11 @@
 // name, then with the full import path if needed. The collision check runs
 // over the definitions the output emits, so a type a type= override, a tag
 // replacing a definition keyword, or root inlining drops never prefixes a
-// surviving name. For generic type
+// surviving name. A root type's own definition, when nothing else refers to
+// it, stays out of the collision check but keeps a key of its own (its name,
+// or a suffixed one where another definition holds the name), so a $ref a
+// tag interpreter writes to it keeps the root a reference under that key
+// rather than dangling. For generic type
 // instantiations, it replaces the brackets and commas in [reflect.Type.Name]
 // with underscores to form the $defs key (e.g., "MyStruct[int]" becomes
 // "MyStruct_int_"). The [WithNamer] option overrides this naming.

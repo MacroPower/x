@@ -528,6 +528,75 @@ func TestGenerateFor_RootInliningUnderBaseNameCollision(t *testing.T) {
 		"an inlined root leaves no def behind")
 }
 
+// canvasRefRoot is a root type a field hook names by hand, so its own
+// definition is referenced only from a canvas.
+type canvasRefRoot struct {
+	B string `canvasref:"#/$defs/canvasRefRoot" json:"b"`
+}
+
+// Widget shares alpha.Widget's base name, so as a root whose definition
+// nothing refers to at naming it yields the bare key to the emitted
+// alpha.Widget and takes a suffixed one.
+type Widget struct {
+	A alpha.Widget `canvasref:"#/$defs/Widget" json:"a"`
+}
+
+// TestHookCanvasRefToRootKeepsItsDefinition pins that the naming pass and
+// the root inlining check agree on the root's own definition when a field
+// hook names it in a canvas $ref. The names are assigned before the hooks
+// run, over the definitions the output emits, which left out a root
+// definition nothing referred to yet; a canvas $ref written afterward kept
+// the root a reference through the reachability scan, so the definition
+// rendered under its token-shaped key and the canvas $ref dangled at
+// Compile. The root entry takes a key of its own, its base name where no
+// emitted definition holds it, so the canvas $ref keeps the root a
+// reference under that key; where another definition holds the name, the
+// hand-spelled $ref names that definition and the root is inlined.
+func TestHookCanvasRefToRootKeepsItsDefinition(t *testing.T) {
+	t.Parallel()
+
+	interp := jsonschema.TagInterpreterFunc(
+		func(_ context.Context, fc jsonschema.FieldContext, tag jsonschema.Tag) error {
+			return fc.Constraints().ForbidSchema(&jsonschema.Schema{Ref: tag.Value})
+		},
+	)
+
+	t.Run("the root keeps its reference under its own key", func(t *testing.T) {
+		t.Parallel()
+
+		s, err := jsonschema.GenerateFor[canvasRefRoot](t.Context(), jsonschema.WithTagInterpreter("canvasref", interp))
+		require.NoError(t, err)
+
+		assert.Equal(t, "#/$defs/canvasRefRoot", s.Ref, "the canvas $ref keeps the root a reference")
+		require.Contains(t, s.Defs, "canvasRefRoot")
+
+		body := s.Defs["canvasRefRoot"]
+		require.Len(t, body.Properties["b"].AllOf, 1)
+		assert.Equal(t, "#/$defs/canvasRefRoot", body.Properties["b"].AllOf[0].Not.Ref)
+
+		_, err = jsonschema.Compile(t.Context(), s)
+		require.NoError(t, err, "every $ref the output carries must resolve")
+	})
+
+	t.Run("a name another definition holds inlines the root", func(t *testing.T) {
+		t.Parallel()
+
+		s, err := jsonschema.GenerateFor[Widget](t.Context(), jsonschema.WithTagInterpreter("canvasref", interp))
+		require.NoError(t, err)
+
+		assert.Empty(t, s.Ref, "the hand-spelled $ref names alpha.Widget, so nothing refers to the root")
+		assert.Equal(t, "object", s.Type)
+		assert.Equal(t, "#/$defs/Widget", s.Properties["a"].Ref)
+		assert.Equal(t, "#/$defs/Widget", s.Properties["a"].AllOf[0].Not.Ref)
+
+		require.Len(t, s.Defs, 1, "the emitted alpha.Widget holds the bare key alone")
+		require.Contains(t, s.Defs, "Widget")
+
+		_, err = jsonschema.Compile(t.Context(), s)
+		require.NoError(t, err, "every $ref the output carries must resolve")
+	})
+}
+
 // TestGenerateFor_HandSpelledRefSurvivesNameEscalation pins the hand-spelled
 // "#/$defs/<name>" reference a hook authors from the namer's answer for a
 // type, under a base-name collision. The reachability scan resolved such a

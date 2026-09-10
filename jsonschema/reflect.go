@@ -212,7 +212,10 @@ func (g *run) generate(t reflect.Type) (*Schema, error) {
 	// payload, whether a ref node's own or one a type-level hook copied into
 	// a literal, so nothing after this phase sees a token. Names are keyed on
 	// defEntry identity, so reachability and root inlining below key on
-	// identity too and need no renamed-entry lookup.
+	// identity too and need no renamed-entry lookup. A root entry nothing
+	// refers to yet stays out of the collision check but still takes a key,
+	// since a field hook below can name it in a canvas $ref and keep the
+	// root a reference.
 	g.assignDefNames(g.emittedDefs(root))
 	g.finalizeRefs(root)
 

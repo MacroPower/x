@@ -201,8 +201,10 @@ func bareContainerType(s *Schema, base string) {
 }
 
 // maybeInlineRoot inlines a root $ref whose def is reached from nowhere else,
-// dropping the entry. A def referenced elsewhere (self-reference or mutual
-// recursion) keeps the root a $ref so those references never dangle.
+// dropping the entry. A def referenced elsewhere (self-reference, mutual
+// recursion, or a $ref a field hook wrote onto a canvas) keeps the root a
+// $ref so those references never dangle; the naming pass gave the entry a
+// key of its own for that case, since the hooks run after it.
 func (g *run) maybeInlineRoot(root *node) *node {
 	if root.kind != kindRef {
 		return root
