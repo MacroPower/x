@@ -221,11 +221,13 @@ func WithNilContainers() Option {
 // the type carries, since a nil pointer marshals as null and an empty
 // container as [] or {} without visiting the element type.
 //
-// The depth cap does not apply. A pointer or container is left nil or empty
-// only where its element type (or a map's key type) is already being filled
-// higher on the path, which is where a recursive type would otherwise fill
-// forever. A chain of distinct types, such as a pointer to a pointer to an
-// int, fills to its leaf however long it is.
+// The depth cap does not apply. A pointer or slice is left nil or empty only
+// where its element type is already being filled higher on the path, and a
+// map only where its key type is, which is where a recursive type would
+// otherwise fill forever. A map whose value type is on the path still holds
+// entries, each with a filled key and a zero value, so the key type is
+// exposed however the values recur. A chain of distinct types, such as a
+// pointer to a pointer to an int, fills to its leaf however long it is.
 //
 // A saturated blob is not a substitute. [Cursor.Intn] reduces a draw modulo
 // its bound, and an all-ones read is divisible by five, so every collection
@@ -405,9 +407,16 @@ func (f *filler) fillSlice(rv reflect.Value, depth int) {
 
 func (f *filler) fillMap(rv reflect.Value, depth int) {
 	kt, vt := rv.Type().Key(), rv.Type().Elem()
-	if f.atLimit(rv, depth, kt, vt) || f.drewNil(rv) {
+	if f.atLimit(rv, depth, kt) || f.drewNil(rv) {
 		return
 	}
+
+	// Under [WithFull] a value type already on the path (a map whose value
+	// is the map's own type, or a struct holding the map) stays at its zero
+	// value while the key still fills. An empty map would hide the key
+	// type, which a probe of the map reads, and a filled value would
+	// re-enter the type without bound.
+	fillValues := !f.cfg.full || !f.path[vt]
 
 	n := f.collLen()
 	m := reflect.MakeMap(rv.Type())
@@ -417,7 +426,10 @@ func (f *filler) fillMap(rv reflect.Value, depth int) {
 		f.fill(k, depth+1)
 
 		v := reflect.New(vt).Elem()
-		f.fill(v, depth+1)
+		if fillValues {
+			f.fill(v, depth+1)
+		}
+
 		m.SetMapIndex(k, v)
 	}
 

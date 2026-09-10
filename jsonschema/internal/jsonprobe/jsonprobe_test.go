@@ -64,17 +64,40 @@ type detourX struct {
 
 type detourY struct{ V detourX }
 
-// recursiveShapes are the self-referential types the agreement rig adds to
-// the fuzzshape population, which [reflect.StructOf] cannot express. Each is
-// a shape the full fill once mishandled: the pointer detour re-entered
-// detourX by value and cleared the outer frame's path mark, so the fill
-// recursed without bound.
-var recursiveShapes = map[string]reflect.Type{
-	"pointer detour":            reflect.TypeFor[detourX](),
-	"pointer detour by pointer": reflect.TypeFor[*detourX](),
-	"pointer detour in map":     reflect.TypeFor[map[string]detourX](),
-	"pointer detour in slice":   reflect.TypeFor[[]detourY](),
-}
+// The self-recursive map types carry a key kind v2 refuses (bool, complex,
+// struct, array) or accepts (string) under a value that is the map's own
+// type.
+type (
+	recursiveBoolMap    map[bool]recursiveBoolMap
+	recursiveComplexMap map[complex128]recursiveComplexMap
+	recursiveStructMap  map[struct{ A int }]recursiveStructMap
+	recursiveArrayMap   map[[2]int]recursiveArrayMap
+	recursiveStringMap  map[string]recursiveStringMap
+)
+
+// The recursive rosters are the self-referential types the agreement rig
+// adds to the fuzzshape population, which [reflect.StructOf] cannot express.
+// Each is a shape the full fill once mishandled. The detourShapes re-enter
+// detourX by value, which cleared the outer frame's path mark and let the
+// fill recurse without bound. The recursiveMapShapes filled as nil maps, so
+// their keys never reached v2.
+var (
+	detourShapes = map[string]reflect.Type{
+		"pointer detour":            reflect.TypeFor[detourX](),
+		"pointer detour by pointer": reflect.TypeFor[*detourX](),
+		"pointer detour in map":     reflect.TypeFor[map[string]detourX](),
+		"pointer detour in slice":   reflect.TypeFor[[]detourY](),
+	}
+
+	recursiveMapShapes = map[string]reflect.Type{
+		"recursive bool key":      reflect.TypeFor[recursiveBoolMap](),
+		"recursive complex key":   reflect.TypeFor[recursiveComplexMap](),
+		"recursive struct key":    reflect.TypeFor[recursiveStructMap](),
+		"recursive array key":     reflect.TypeFor[recursiveArrayMap](),
+		"recursive string key":    reflect.TypeFor[recursiveStringMap](),
+		"recursive map in struct": reflect.TypeFor[struct{ M recursiveBoolMap }](),
+	}
+)
 
 func field(t *testing.T, typ reflect.Type, tag string) reflect.StructField {
 	t.Helper()
@@ -377,7 +400,7 @@ func TestType(t *testing.T) {
 func TestTypeTerminatesOnPointerDetourReentry(t *testing.T) {
 	t.Parallel()
 
-	for name, typ := range recursiveShapes {
+	for name, typ := range detourShapes {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
@@ -392,6 +415,40 @@ func TestTypeTerminatesOnPointerDetourReentry(t *testing.T) {
 					_, err := p.Field(sf)
 					require.NoError(t, err)
 				}
+			}
+		})
+	}
+}
+
+// TestTypeRecursiveMapKey pins the map-key verdict on a map whose value is
+// the map's own type. The full fill once left such a map nil, since the
+// map's type was already on the path when the guard read its value type,
+// so no key reached v2 and map[bool]M passed while map[bool]int was
+// refused. The fill keeps a key under a zero value, and the verdict on the
+// key is the one v2 gives the non-recursive map.
+func TestTypeRecursiveMapKey(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		typ reflect.Type
+		err error
+	}{
+		"bool key":    {typ: reflect.TypeFor[recursiveBoolMap](), err: ErrMapKey},
+		"complex key": {typ: reflect.TypeFor[recursiveComplexMap](), err: ErrMapKey},
+		"struct key":  {typ: reflect.TypeFor[recursiveStructMap](), err: ErrMapKey},
+		"array key":   {typ: reflect.TypeFor[recursiveArrayMap](), err: ErrMapKey},
+		"string key":  {typ: reflect.TypeFor[recursiveStringMap]()},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := New(nil).Type(tc.typ)
+			if tc.err == nil {
+				require.NoError(t, err)
+			} else {
+				require.ErrorIs(t, err, tc.err)
 			}
 		})
 	}
@@ -479,10 +536,10 @@ func TestHonorsCallerOptions(t *testing.T) {
 }
 
 // TestAgreesWithV2 is the agreement rig. Over the fuzzshape population and
-// the recursiveShapes roster, the probe's verdict must match whether v2
-// itself marshals a full value of the type, with the type's own marshalers
-// running. A struct answers through its declaration and its fields, the way
-// the generator asks; any other type answers through [Probe.Type].
+// the recursive rosters, the probe's verdict must match whether v2 itself
+// marshals a full value of the type, with the type's own marshalers running.
+// A struct answers through its declaration and its fields, the way the
+// generator asks; any other type answers through [Probe.Type].
 func TestAgreesWithV2(t *testing.T) {
 	t.Parallel()
 
@@ -495,8 +552,10 @@ func TestAgreesWithV2(t *testing.T) {
 		requireAgreement(t, p, typ, fillOpts, fmt.Sprintf("blob %d", i))
 	}
 
-	for name, typ := range recursiveShapes {
-		requireAgreement(t, p, typ, fillOptions, name)
+	for _, roster := range []map[string]reflect.Type{detourShapes, recursiveMapShapes} {
+		for name, typ := range roster {
+			requireAgreement(t, p, typ, fillOptions, name)
+		}
 	}
 }
 

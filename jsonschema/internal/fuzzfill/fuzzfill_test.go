@@ -145,10 +145,14 @@ func TestFillWithFullAllocatesEverything(t *testing.T) {
 }
 
 // TestFillWithFullStopsWhereATypeRecurs pins the guard that replaces the
-// depth cap under the option. A pointer, slice, or map whose element type is
+// depth cap under the option. A pointer or slice whose element type is
 // already being filled higher on the path stays nil or empty, and the
-// recursion ends there rather than at a fixed depth. A sibling of another
-// type on the same path still fills.
+// recursion ends there rather than at a fixed depth. A map whose value type
+// is on the path still holds entries with filled keys and zero values, since
+// an empty map hid the key type from the probe, which once accepted a
+// map[bool]M for M the map's own type while refusing map[bool]int. A map
+// whose key type is on the path stays empty. A sibling of another type on
+// the same path still fills.
 func TestFillWithFullStopsWhereATypeRecurs(t *testing.T) {
 	t.Parallel()
 
@@ -165,8 +169,43 @@ func TestFillWithFullStopsWhereATypeRecurs(t *testing.T) {
 
 	assert.Nil(t, val.Next, "the self-referential pointer must stay nil")
 	assert.Empty(t, val.Children, "the self-referential slice must stay empty")
-	assert.Empty(t, val.Index, "the self-referential map must stay empty")
+	assert.NotEmpty(t, val.Index, "a map whose value type recurs must still hold a key")
 	assert.NotNil(t, val.Label, "a pointer to another type on the same path must fill")
+
+	for key, child := range val.Index {
+		assert.Zero(t, child, "the value under %q must stay zero", key)
+	}
+
+	// A key type on the path is the one case that leaves a map empty. The
+	// map sits behind a pointer, since a struct holding a map by value is
+	// not comparable and so cannot key one.
+	type keyed struct{ Self *map[keyed]int }
+
+	var k keyed
+
+	fuzzfill.Fill(reflect.ValueOf(&k), rampBlob(), fuzzfill.WithFull())
+
+	require.NotNil(t, k.Self, "the pointer to the map must fill")
+	assert.Empty(t, *k.Self, "a map whose key type recurs must stay empty")
+}
+
+// TestFillWithFullKeysASelfRecursiveMap pins the map guard on a map whose
+// value type is the map itself: the root map holds entries with filled keys
+// and nil values.
+func TestFillWithFullKeysASelfRecursiveMap(t *testing.T) {
+	t.Parallel()
+
+	type selfMap map[bool]selfMap
+
+	var val selfMap
+
+	fuzzfill.Fill(reflect.ValueOf(&val), rampBlob(), fuzzfill.WithFull())
+
+	require.NotEmpty(t, val, "the root map must hold a key to expose")
+
+	for key, child := range val {
+		assert.Nil(t, child, "the value under %t must stay nil", key)
+	}
 }
 
 // detourX and detourY re-enter detourX by value through a pointer detour:

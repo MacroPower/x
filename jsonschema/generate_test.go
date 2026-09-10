@@ -994,6 +994,23 @@ func TestGenerateFor_RecursiveMap(t *testing.T) {
 	}`, string(got))
 }
 
+// recursiveBoolMap is a self-recursive map under a key kind v2 refuses.
+type recursiveBoolMap map[bool]recursiveBoolMap
+
+// TestGenerateFor_RecursiveMapKeyRefused pins that a self-recursive map is
+// refused on its key the way the non-recursive map is. The probe's full
+// fill once left such a map nil, so no key reached v2 and generation
+// emitted a schema for a type v2 refuses on every non-nil value.
+func TestGenerateFor_RecursiveMapKeyRefused(t *testing.T) {
+	t.Parallel()
+
+	_, err := jsonschema.GenerateFor[recursiveBoolMap](t.Context())
+	require.ErrorIs(t, err, jsonschema.ErrUnsupportedMapKey)
+
+	_, err = json.Marshal(recursiveBoolMap{true: recursiveBoolMap{}})
+	require.Error(t, err, "encoding/json/v2 refuses the same key")
+}
+
 // TestGenerateFor_RecursiveArray covers a named array type whose elements are
 // pointers to the array type itself, exercising cycle detection on the array
 // path (the only recursive array form Go permits).
