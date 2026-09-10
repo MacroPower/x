@@ -7982,6 +7982,29 @@ func TestGenerateFor_NonFiniteBoundRefused(t *testing.T) {
 		require.ErrorIs(t, err, jsonschema.ErrNonFiniteBound)
 		require.ErrorContains(t, err, "multipleOf")
 	})
+
+	// An extender edits a reflected property's view, which absorbView reads
+	// back onto the property's own node, so a bound it writes there enters
+	// the algebra through a different path than a provider's nested value.
+	// The check used to read the root of the extender's value alone, so a
+	// -Inf maximum on a property reached the algebra, which read it as no
+	// bound and dropped the keyword with nothing reported.
+	t.Run("extender property", func(t *testing.T) {
+		t.Parallel()
+
+		inf := math.Inf(-1)
+
+		_, err := jsonschema.GenerateFor[T](t.Context(),
+			jsonschema.WithTypeSchemaExtenderFor[T](
+				func(_ context.Context, _ jsonschema.TypeContext, ts *jsonschema.TypeSchema) error {
+					ts.Value.Properties["n"].Maximum = &inf
+
+					return nil
+				},
+			))
+		require.ErrorIs(t, err, jsonschema.ErrNonFiniteBound)
+		require.ErrorContains(t, err, "maximum -Inf")
+	})
 }
 
 // TestGenerateFor_RefAliasPointerTargetNamesElement pins that a
