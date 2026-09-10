@@ -955,3 +955,59 @@ func TestInterpreterCanvasNonFiniteBoundRefused(t *testing.T) {
 	require.ErrorIs(t, err, jsonschema.ErrNonFiniteBound)
 	assert.ErrorContains(t, err, `tag interpreter "inf" declares minimum +Inf`)
 }
+
+// TestInterpreterElementCanvasNonFiniteBoundRefused pins ErrNonFiniteBound
+// against the element canvases ElementContexts hands out, at any depth. The
+// check used to read the field's own canvas alone, so an interpreter writing
+// an infinity or a NaN on an element canvas generated with no error and the
+// bound algebra dropped the bound, the outcome the sentinel exists to
+// prevent.
+func TestInterpreterElementCanvasNonFiniteBoundRefused(t *testing.T) {
+	t.Parallel()
+
+	type doc struct {
+		Items  []float64   `inf:"x" json:"items"`
+		Nested [][]float64 `inf:"x" json:"nested"`
+	}
+
+	tests := map[string]struct {
+		write func(canvas *jsonschema.Schema)
+		want  string
+	}{
+		"infinity on the element": {
+			write: func(canvas *jsonschema.Schema) { canvas.Minimum = new(math.Inf(1)) },
+			want:  `declares minimum +Inf`,
+		},
+		"NaN on the element": {
+			write: func(canvas *jsonschema.Schema) { canvas.Maximum = new(math.NaN()) },
+			want:  `declares maximum NaN`,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			interp := jsonschema.TagInterpreterFunc(
+				func(_ context.Context, field jsonschema.FieldContext, _ jsonschema.Tag) error {
+					elems := field.ElementContexts()
+					require.Len(t, elems, 1)
+
+					// Descend to the innermost element so the nested field
+					// writes two levels down.
+					for inner := elems[0].ElementContexts(); len(inner) == 1; inner = inner[0].ElementContexts() {
+						elems = inner
+					}
+
+					tc.write(elems[0].Canvas)
+
+					return nil
+				},
+			)
+
+			_, err := jsonschema.GenerateFor[doc](t.Context(), jsonschema.WithTagInterpreter("inf", interp))
+			require.ErrorIs(t, err, jsonschema.ErrNonFiniteBound)
+			assert.ErrorContains(t, err, `tag interpreter "inf" `+tc.want)
+		})
+	}
+}

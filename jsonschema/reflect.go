@@ -21,6 +21,7 @@ import (
 	"go.jacobcolvin.com/x/jsonschema/internal/numkind"
 	"go.jacobcolvin.com/x/jsonschema/internal/reflectkind"
 	"go.jacobcolvin.com/x/jsonschema/internal/schemaclone"
+	"go.jacobcolvin.com/x/jsonschema/internal/schemafield"
 	"go.jacobcolvin.com/x/jsonschema/internal/schemashape"
 	"go.jacobcolvin.com/x/jsonschema/internal/tagparse"
 	"go.jacobcolvin.com/x/jsonschema/internal/typename"
@@ -2109,25 +2110,49 @@ func checkCanvasFiniteBounds(key string, s *Schema) error {
 	return nil
 }
 
-// nonFiniteBound returns the first numeric bound keyword s sets to NaN or an
-// infinity, with its value, and whether there is one.
+// nonFiniteBound returns the first numeric bound keyword s or any sub-schema
+// beneath it sets to NaN or an infinity, with its value, and whether there
+// is one. The walk covers every slot a hook can reach: a type-level hook's
+// property and element schemas, and the element canvases a field canvas
+// wires into its sub-schema slots. A schema reached twice is read once, so a
+// cyclic value a hook authored ends the walk.
 func nonFiniteBound(s *Schema) (string, float64, bool) {
-	for _, b := range []struct {
-		val  *float64
-		name string
-	}{
-		{s.Minimum, keyword.Minimum},
-		{s.Maximum, keyword.Maximum},
-		{s.ExclusiveMinimum, keyword.ExclusiveMinimum},
-		{s.ExclusiveMaximum, keyword.ExclusiveMaximum},
-		{s.MultipleOf, keyword.MultipleOf},
-	} {
-		if b.val != nil && (math.IsNaN(*b.val) || math.IsInf(*b.val, 0)) {
-			return b.name, *b.val, true
+	seen := map[*Schema]bool{}
+
+	var walk func(s *Schema) (string, float64, bool)
+
+	walk = func(s *Schema) (string, float64, bool) {
+		if s == nil || seen[s] {
+			return "", 0, false
 		}
+
+		seen[s] = true
+
+		for _, b := range []struct {
+			val  *float64
+			name string
+		}{
+			{s.Minimum, keyword.Minimum},
+			{s.Maximum, keyword.Maximum},
+			{s.ExclusiveMinimum, keyword.ExclusiveMinimum},
+			{s.ExclusiveMaximum, keyword.ExclusiveMaximum},
+			{s.MultipleOf, keyword.MultipleOf},
+		} {
+			if b.val != nil && (math.IsNaN(*b.val) || math.IsInf(*b.val, 0)) {
+				return b.name, *b.val, true
+			}
+		}
+
+		for _, child := range schemafield.Children(s) {
+			if name, val, ok := walk(child); ok {
+				return name, val, true
+			}
+		}
+
+		return "", 0, false
 	}
 
-	return "", 0, false
+	return walk(s)
 }
 
 // jsonTagInfo holds parsed json tag information.

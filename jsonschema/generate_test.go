@@ -7937,6 +7937,33 @@ func TestGenerateFor_NonFiniteBoundRefused(t *testing.T) {
 		require.ErrorContains(t, err, "minimum")
 	})
 
+	t.Run("nested in a type schema value", func(t *testing.T) {
+		t.Parallel()
+
+		type inner struct {
+			N float64 `json:"n"`
+		}
+
+		type outer struct {
+			I inner `json:"i"`
+		}
+
+		nan := math.NaN()
+
+		// The check walks every sub-schema a hook's value carries, so a bound
+		// one property down is refused like one on the value itself; the
+		// returned schema would otherwise not marshal at all.
+		_, err := jsonschema.GenerateFor[outer](t.Context(),
+			jsonschema.WithTypeSchemaFor[inner](jsonschema.TypeSchema{
+				Value: &jsonschema.Schema{
+					Type:       "object",
+					Properties: map[string]*jsonschema.Schema{"n": {Type: "number", Minimum: &nan}},
+				},
+			}))
+		require.ErrorIs(t, err, jsonschema.ErrNonFiniteBound)
+		require.ErrorContains(t, err, "minimum NaN")
+	})
+
 	t.Run("extender", func(t *testing.T) {
 		t.Parallel()
 

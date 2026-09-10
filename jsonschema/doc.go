@@ -90,8 +90,9 @@
 //     does not match the generated root type or does not marshal to a JSON
 //     object.
 //   - [ErrNonFiniteBound] reports a numeric bound a type-level hook or a tag
-//     interpreter declares as NaN or an infinity, which JSON cannot carry
-//     and the bound algebra would otherwise read as no bound at all.
+//     interpreter declares as NaN or an infinity, at any depth of the hook's
+//     value or on an element canvas, which JSON cannot carry and the bound
+//     algebra would otherwise read as no bound at all.
 //   - [ErrCanvasKeyword] reports a keyword a tag interpreter wrote on
 //     [FieldContext.Canvas] that generation never reads (type, required, an
 //     applicator, an Extra entry), which the overlay would otherwise drop
