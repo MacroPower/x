@@ -25,6 +25,7 @@
     "github:dagger/nix/89dee52f7839a290326eb1f929a4ac99d4a1aae1#packages.x86_64-linux.dagger": {
       "version": "",
       "platforms": ["x86_64-linux"]
-    }
+    },
+    "nodejs": "24"
   }
 }
