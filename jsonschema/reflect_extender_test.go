@@ -201,6 +201,69 @@ func TestGenerateFor_ExtenderCopiedRefResolvesUnderCollision(t *testing.T) {
 	require.NoError(t, v.ValidateJSON(t.Context(), []byte(`{"a":{"label":"x","size":1},"b":null}`)))
 }
 
+// TestGenerateFor_ExtenderTokenInAnExtensionKeyword pins that a provisional
+// def token an extender copies into an extension keyword is rewritten to the
+// final $ref like one copied into a sub-schema slot, and keeps its
+// definition reachable. The token rewrite and the reachability scan used to
+// descend through the typed sub-schema fields alone, so the output carried
+// the token string under the extension keyword, and a definition the
+// extension copy alone referenced was dropped.
+func TestGenerateFor_ExtenderTokenInAnExtensionKeyword(t *testing.T) {
+	t.Parallel()
+
+	type leaf struct {
+		N int `json:"n"`
+	}
+
+	type root struct {
+		Ref leaf `json:"ref"`
+	}
+
+	tests := map[string]struct {
+		keepSlot bool
+	}{
+		"beside the sub-schema copy": {keepSlot: true},
+		"as the only reference":      {keepSlot: false},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			opt := jsonschema.WithTypeSchemaExtenderFor[root](
+				func(_ context.Context, _ jsonschema.TypeContext, ts *jsonschema.TypeSchema) error {
+					token := ts.Value.Properties["ref"].Ref
+					if !tc.keepSlot {
+						ts.Value.Properties["ref"] = &jsonschema.Schema{Type: "string"}
+					}
+
+					ts.Value.Extra = map[string]any{
+						"x-ref": map[string]any{"$ref": token},
+						"x-alternatives": []any{
+							map[string]any{"$ref": token},
+							&jsonschema.Schema{Ref: token},
+						},
+					}
+
+					return nil
+				},
+			)
+
+			s, err := jsonschema.GenerateFor[root](t.Context(), opt)
+			require.NoError(t, err)
+
+			out, err := json.Marshal(s)
+			require.NoError(t, err)
+			assert.NotContains(t, string(out), "@", "no provisional token survives into the output")
+			require.Contains(t, s.Defs, "leaf", "the extension copy keeps the definition reachable")
+
+			want := map[string]any{"$ref": "#/$defs/leaf"}
+			assert.Equal(t, want, s.Extra["x-ref"])
+			assert.Equal(t, []any{want, &jsonschema.Schema{Ref: "#/$defs/leaf"}}, s.Extra["x-alternatives"])
+		})
+	}
+}
+
 // TestGenerateFor_ExtenderRetainedValueIsCopied pins that an extender
 // assigning its own schema to ts.Value, or splicing one into the view, keeps
 // that schema. The node used to adopt the extender's pointer as its payload,

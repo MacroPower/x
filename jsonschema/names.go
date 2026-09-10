@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"go.jacobcolvin.com/x/jsonschema/internal/jsonptr"
+	"go.jacobcolvin.com/x/jsonschema/internal/keyword"
 	"go.jacobcolvin.com/x/jsonschema/internal/schemafield"
 )
 
@@ -184,8 +185,9 @@ func (g *run) assignDefNames(emitted map[*defEntry]bool) {
 // finalizeRefs rewrites every provisional def token in the IR to the final
 // $ref string assignDefNames settled, so no phase after it sees a token. A
 // token sits in a ref node's own payload, and in any literal a type-level
-// hook copied it into, such as a branch grafted beside a property or a slot
-// replaced wholesale. The walk covers the root graph, every def body whether
+// hook copied it into, such as a branch grafted beside a property, a slot
+// replaced wholesale, or a "$ref" member inside an extension keyword's
+// value. The walk covers the root graph, every def body whether
 // or not the root reaches it, and the node a type= override replaced, whose
 // view the jsonschema tag reads later. An entry render never emits keeps its
 // token-shaped name, so a field inside an orphaned body whose type is another
@@ -219,6 +221,14 @@ func (g *run) finalizeRefs(root *node) {
 		for _, child := range schemafield.Children(s) {
 			rewrite(child)
 		}
+
+		extraRefs(s.Extra, func(ref string) string {
+			if name, ok := final[ref]; ok {
+				return name
+			}
+
+			return ref
+		}, rewrite)
 	}
 
 	seen := map[*defEntry]bool{}
@@ -240,6 +250,47 @@ func (g *run) finalizeRefs(root *node) {
 			seen[e] = true
 			walkNodes(e.body, seen, visit)
 		}
+	}
+}
+
+// extraRefs visits every "$ref" string the extension keywords in extra hold,
+// descending through the map[string]any and []any values a JSON-shaped
+// extension carries, and stores what visit returns in the string's place. A
+// *Schema riding in an extension keyword goes to visitSchema, which resumes
+// the caller's own sub-schema walk on it. [run.finalizeRefs] and
+// [run.walkReachable] both read extension values through it, so a token a
+// type-level hook copied into one is rewritten to the final key and counts
+// as a reachability edge, as a copy in a sub-schema slot does. Only a string
+// under the "$ref" member name is a reference; no other extension string is
+// read.
+func extraRefs(extra map[string]any, visit func(ref string) string, visitSchema func(*Schema)) {
+	var walk func(v any)
+
+	walk = func(v any) {
+		switch v := v.(type) {
+		case map[string]any:
+			for k, item := range v {
+				if ref, ok := item.(string); ok && k == keyword.Ref {
+					v[k] = visit(ref)
+
+					continue
+				}
+
+				walk(item)
+			}
+
+		case []any:
+			for _, item := range v {
+				walk(item)
+			}
+
+		case *Schema:
+			visitSchema(v)
+		}
+	}
+
+	if extra != nil {
+		walk(extra)
 	}
 }
 

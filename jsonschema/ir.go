@@ -1288,9 +1288,11 @@ func (g *run) payloadRefTargets() map[string]*defEntry {
 // additionally follows the raw $ref strings inside every payload. A payload
 // holds no node-backed child, so what the scan reaches is what a hook
 // declared: a Verbatim payload ([TypeSchema.Verbatim]), a provider's Value, a
-// slot a build-time extender replaced or a branch it grafted. A $defs
-// reference inside any of those is a reachability edge only a string scan
-// sees. A kindRef node's own Ref is scanned too; it is node-backed (walkNodes
+// slot a build-time extender replaced or a branch it grafted, in a typed
+// sub-schema field or under a "$ref" member of an extension keyword's
+// value ([extraRefs]). A $defs reference inside any of those is a
+// reachability edge only a string scan sees. A kindRef node's own Ref is
+// scanned too; it is node-backed (walkNodes
 // follows it via n.def) and holds the same final key the string scan
 // resolves, so the hit is a repeat. Each def reached by a string hit has its
 // body walked too, and onPayloadRef (when non-nil) observes every payload ref
@@ -1314,6 +1316,22 @@ func (g *run) walkReachable(
 		scanPayload(n.payload)
 	}
 
+	hit := func(ref string) {
+		e, ok := targets[ref]
+		if !ok {
+			return
+		}
+
+		if onPayloadRef != nil {
+			onPayloadRef(e)
+		}
+
+		if !seen[e] {
+			seen[e] = true
+			walkNodes(e.body, seen, visitAndScan)
+		}
+	}
+
 	scanPayload = func(s *Schema) {
 		if s == nil || scanned[s] {
 			return
@@ -1321,20 +1339,17 @@ func (g *run) walkReachable(
 
 		scanned[s] = true
 
-		if e, ok := targets[s.Ref]; ok {
-			if onPayloadRef != nil {
-				onPayloadRef(e)
-			}
-
-			if !seen[e] {
-				seen[e] = true
-				walkNodes(e.body, seen, visitAndScan)
-			}
-		}
+		hit(s.Ref)
 
 		for _, child := range schemafield.Children(s) {
 			scanPayload(child)
 		}
+
+		extraRefs(s.Extra, func(ref string) string {
+			hit(ref)
+
+			return ref
+		}, scanPayload)
 	}
 
 	walkNodes(root, seen, visitAndScan)
