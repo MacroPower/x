@@ -2,6 +2,7 @@ package jsonvalue
 
 import (
 	"encoding/json/v2"
+	"math"
 	"reflect"
 	"strconv"
 	"unicode/utf8"
@@ -27,8 +28,8 @@ type walk struct {
 	// The render flag reports that the input holds a leaf [encoding/json] v1
 	// renders to a different shape than the converted value: a nil []any or
 	// map[string]any (null, where the empty instance writes [] or {}), a
-	// float32 (v1 formats the 32-bit shortest decimal, where the walk widens
-	// the bits to float64), a [jsonv1.Number] outside the strict JSON number
+	// finite float32 (v1 formats the 32-bit shortest decimal, where the walk
+	// widens the bits to float64), a [jsonv1.Number] outside the strict JSON number
 	// grammar (v1 writes an empty one as 0 and refuses any other), and, with document
 	// set, a string or member name holding invalid UTF-8 (v1 writes U+FFFD).
 	render bool
@@ -67,7 +68,10 @@ func FromGo(instance any) (Value, bool) {
 // FromGo widens the bits to float64 (0.1 against 0.10000000149011612); a
 // [jsonv1.Number] outside the JSON number grammar, which v1 writes as 0 when
 // empty and refuses otherwise; and a string or member name holding invalid
-// UTF-8, which v1 writes with U+FFFD in place of each bad byte. FromDocument
+// UTF-8, which v1 writes with U+FFFD in place of each bad byte. A NaN or
+// infinity of either float width skips the round trip and keeps its Go-float
+// identity, a Number that equals nothing, since v1 refuses it and the
+// shortest decimal that separates the widths does not exist. FromDocument
 // reports false where v has no JSON form (a func, a channel, a cyclic value,
 // a map v1 refuses, a Number literal v1 cannot parse) or its own marshaler
 // panics, and recovers the panic so the caller sees only the flag.
@@ -164,9 +168,16 @@ func (w *walk) value(instance any) (Value, bool) {
 		return out, true
 
 	case float32:
-		w.render = true
+		// A finite float32 takes the render path, where v1 formats the
+		// 32-bit shortest decimal. A NaN or infinity has no decimal at
+		// either width and v1 refuses it, so it keeps its Go-float identity
+		// the way a float64 one does, and the two widths reach one verdict.
+		f := float64(v)
+		if !math.IsNaN(f) && !math.IsInf(f, 0) {
+			w.render = true
+		}
 
-		return NewFloat(float64(v)), true
+		return NewFloat(f), true
 
 	case map[string]any:
 		return w.object(v)

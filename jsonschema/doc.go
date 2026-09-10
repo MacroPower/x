@@ -1399,7 +1399,8 @@
 //
 //   - A typed nil map, slice, or pointer matches the instance null rather
 //     than [] or {}.
-//   - A float32 compares at its 32-bit shortest decimal.
+//   - A float32 compares at its 32-bit shortest decimal. A NaN or infinity
+//     of either width keeps its Go value, which equals no instance.
 //   - An empty [encoding/json.Number] compares as 0.
 //   - A string carrying invalid UTF-8 compares with each bad byte replaced by
 //     U+FFFD.

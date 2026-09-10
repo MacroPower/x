@@ -286,6 +286,39 @@ func TestFromDocumentNonFinite(t *testing.T) {
 	assert.False(t, got.Equal(same))
 }
 
+// TestFromDocumentNonFiniteWidthsAgree pins that a NaN or infinity reaches
+// the same verdict at both float widths, at the root and inside a container.
+// The float32 case once took the render path, where v1 refuses a non-finite
+// float, so float32 NaN reported false while float64 NaN kept its identity,
+// and a const or enum verdict downstream flipped on the width the author
+// wrote.
+func TestFromDocumentNonFiniteWidthsAgree(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]any{
+		"float64 NaN":            math.NaN(),
+		"float32 NaN":            float32(math.NaN()),
+		"float64 +Inf":           math.Inf(1),
+		"float32 +Inf":           float32(math.Inf(1)),
+		"float64 NaN in array":   []any{math.NaN()},
+		"float32 NaN in array":   []any{float32(math.NaN())},
+		"float64 -Inf in object": map[string]any{"a": math.Inf(-1)},
+		"float32 -Inf in object": map[string]any{"a": float32(math.Inf(-1))},
+	}
+
+	for name, in := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got, ok := jsonvalue.FromDocument(in)
+			require.True(t, ok, "every non-finite float width keeps its document identity")
+
+			same := got
+			assert.False(t, got.Equal(same), "a value holding a non-finite float equals nothing")
+		})
+	}
+}
+
 func TestFromDocumentCycleRefused(t *testing.T) {
 	t.Parallel()
 
