@@ -2998,8 +2998,8 @@ func assertForbidsNull(t *testing.T, s *jsonschema.Schema) {
 // constraint here rather than a silent skip; a non-canonical numeric oneof
 // token matches no value there, so it is an error here; eq= and unique= carry
 // an empty parameter there, so they do here; a trailing dive is a no-op
-// there, so it is here; and an empty first OR alternative is refused there,
-// so it is here.
+// there, so it is here; and an empty OR alternative anywhere in a group is
+// refused there, so it is here.
 func TestValidateInterpreterGoPlaygroundParity(t *testing.T) {
 	t.Parallel()
 
@@ -3171,15 +3171,51 @@ func TestValidateInterpreterGoPlaygroundParity(t *testing.T) {
 		require.ErrorContains(t, err, "cannot dive")
 	})
 
-	t.Run("empty first OR alternative is refused", func(t *testing.T) {
+	t.Run("empty OR alternative anywhere is refused", func(t *testing.T) {
 		t.Parallel()
 
-		type T struct {
+		// Go-playground splits every alternative of a group and panics on
+		// an empty key in any of them, not only the first. The interpreter
+		// used to check the first alone, so required| generated minLength 1
+		// for a tag the library cannot load.
+		type First struct {
 			F string `json:"f" validate:"|required"`
 		}
 
-		_, err := jsonschema.GenerateFor[T](t.Context(), opt)
+		_, err := jsonschema.GenerateFor[First](t.Context(), opt)
 		require.ErrorContains(t, err, "empty OR alternative")
+
+		type Trailing struct {
+			F string `json:"f" validate:"required|"`
+		}
+
+		_, err = jsonschema.GenerateFor[Trailing](t.Context(), opt)
+		require.ErrorContains(t, err, "empty OR alternative")
+
+		type Doubled struct {
+			F string `json:"f" validate:"eq=a||eq=b"`
+		}
+
+		_, err = jsonschema.GenerateFor[Doubled](t.Context(), opt)
+		require.ErrorContains(t, err, "empty OR alternative")
+
+		type Keyless struct {
+			F string `json:"f" validate:"eq=a|=b"`
+		}
+
+		_, err = jsonschema.GenerateFor[Keyless](t.Context(), opt)
+		require.ErrorContains(t, err, "empty OR alternative")
+
+		// A keyed later alternative is loadable there and read here as the
+		// documented first-alternative tightening.
+		type Keyed struct {
+			F string `json:"f" validate:"eq=a|eq=b"`
+		}
+
+		s, err := jsonschema.GenerateFor[Keyed](t.Context(), opt)
+		require.NoError(t, err)
+		require.NotNil(t, s.Properties["f"].Const)
+		assert.Equal(t, "a", *s.Properties["f"].Const)
 	})
 
 	t.Run("a repeated oneof intersects", func(t *testing.T) {

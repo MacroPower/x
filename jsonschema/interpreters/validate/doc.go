@@ -360,8 +360,8 @@
 // space. The | OR operator is not modeled
 // either: within a single comma group the pipe separates OR alternatives, of
 // which only the first is interpreted, so later comma-separated constraints
-// still apply; an empty first alternative is an error, since go-playground
-// refuses the tag.
+// still apply; an alternative with no key, anywhere in the group, is an
+// error, since go-playground refuses the tag.
 //
 // Any other key that is not a recognized constraint causes Interpret to return
 // [ErrUnrecognizedValidator] rather than being silently consumed, so a typo'd

@@ -297,16 +297,21 @@ func skipKeysBlock(parts []string) (int, error) {
 // looser than the group. Splitting per part rather than across the whole tag
 // keeps later comma-separated constraints intact, and a literal pipe in a
 // parameter is written 0x7C and survives, since unescapeParam runs after
-// this split. An empty first alternative is a tag go-playground refuses
-// outright, so it is an error rather than a group dropped in silence.
+// this split. An alternative with no key, anywhere in the group, is a tag
+// go-playground refuses outright: its parser splits every alternative and
+// panics on an empty key in any of them. So a trailing pipe or a doubled one
+// is an error here rather than a group whose tail is dropped in silence.
 func firstAlternative(raw string) (string, bool, error) {
 	first, _, orGroup := strings.Cut(raw, "|")
 	if !orGroup {
 		return raw, false, nil
 	}
 
-	if strings.TrimSpace(first) == "" {
-		return "", true, fmt.Errorf("validate tag: empty OR alternative in %q", strings.TrimSpace(raw))
+	for alt := range strings.SplitSeq(raw, "|") {
+		key, _, _ := strings.Cut(alt, "=")
+		if strings.TrimSpace(key) == "" {
+			return "", true, fmt.Errorf("validate tag: empty OR alternative in %q", strings.TrimSpace(raw))
+		}
 	}
 
 	return first, true, nil
