@@ -190,6 +190,64 @@ func TestConstraintsFacadeBaseCrossCheck(t *testing.T) {
 		require.ErrorIs(t, conflict, jsonschema.ErrConstraintConflict,
 			"an enumeration sharing no value with the one in force is a conflict")
 	})
+
+	// The two cases below pin that a type-declared numeric bound is checked
+	// the way a type-declared const or enum is. Generation drops the type's
+	// bounds under a const or enum, and used to drop a WithTypeSchema minimum
+	// of 1 under enum=0|1|2 or const=0 with no check, admitting the 0 the
+	// type forbids.
+	t.Run("enum narrows to the members the type's bound admits", func(t *testing.T) {
+		t.Parallel()
+
+		type Payload struct {
+			N int `json:"n" pin:"x"`
+		}
+
+		interp := boundInterp(func(c *jsonschema.Constraints) error {
+			return c.SetEnum([]any{0, 1, 2})
+		})
+
+		one := 1.0
+
+		s, err := jsonschema.GenerateFor[Payload](t.Context(),
+			jsonschema.WithTagInterpreter("pin", interp),
+			jsonschema.WithTypeSchemaFor[int](jsonschema.TypeSchema{
+				Value: &jsonschema.Schema{Type: "integer", Minimum: &one},
+			}),
+		)
+		require.NoError(t, err)
+		assert.Equal(t, []any{1, 2}, s.Properties["n"].Enum,
+			"the member below the type's floor is dropped, the rest keep their order")
+		assert.Nil(t, s.Properties["n"].Minimum, "the floor is redundant beside the narrowed enum")
+	})
+
+	t.Run("const outside the type's bound is a conflict", func(t *testing.T) {
+		t.Parallel()
+
+		type Payload struct {
+			N int `json:"n" pin:"x"`
+		}
+
+		var conflict error
+
+		interp := boundInterp(func(c *jsonschema.Constraints) error {
+			conflict = c.SetConst(0)
+
+			return nil
+		})
+
+		one := 1.0
+
+		_, err := jsonschema.GenerateFor[Payload](t.Context(),
+			jsonschema.WithTagInterpreter("pin", interp),
+			jsonschema.WithTypeSchemaFor[int](jsonschema.TypeSchema{
+				Value: &jsonschema.Schema{Type: "integer", Minimum: &one},
+			}),
+		)
+		require.NoError(t, err)
+		require.ErrorIs(t, conflict, jsonschema.ErrConstraintConflict,
+			"a const the type's floor excludes can never hold")
+	})
 }
 
 // TestConstraintsFacadeNumericBoundPolicy confirms the facade applies the shared

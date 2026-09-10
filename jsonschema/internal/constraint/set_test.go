@@ -1,6 +1,7 @@
 package constraint_test
 
 import (
+	"encoding/json"
 	"math"
 	"testing"
 
@@ -352,6 +353,54 @@ func TestCanonicalizeNumeric(t *testing.T) {
 		constraint.CanonicalizeNumeric(s)
 		assert.Nil(t, s.Minimum)
 		require.NotNil(t, s.MinLength)
+	})
+}
+
+// TestNumericIntervalAdmits pins the membership test a writer runs on a value
+// it pins or enumerates against the bounds a type's schema declares: each
+// side collapses to its tighter keyword, an exclusive endpoint rejects its own
+// value, a number compares exactly whatever Go type carries it, and a value
+// that is not a number is admitted. Without the test a WithTypeSchema minimum
+// vanished under a field enum or const with no check, admitting a value the
+// type forbids.
+func TestNumericIntervalAdmits(t *testing.T) {
+	t.Parallel()
+
+	bounds := constraint.NumericInterval(&jsonschema.Schema{
+		Minimum:          new(1.0),
+		ExclusiveMinimum: new(0.5),
+		ExclusiveMaximum: new(10.0),
+	})
+
+	tests := map[string]struct {
+		value any
+		want  bool
+	}{
+		"below the floor":            {value: 0, want: false},
+		"between the two floors":     {value: 0.75, want: false},
+		"on the inclusive floor":     {value: 1, want: true},
+		"inside as a float":          {value: 2.5, want: true},
+		"inside as a uint64":         {value: uint64(9), want: true},
+		"inside as a json.Number":    {value: json.Number("9.999"), want: true},
+		"on the exclusive ceiling":   {value: 10, want: false},
+		"above the ceiling":          {value: 11, want: false},
+		"over-cap number is ordered": {value: json.Number("1e5000"), want: false},
+		"a string is not judged":     {value: "0", want: true},
+		"null is not judged":         {value: nil, want: true},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, bounds.Admits(tc.value))
+		})
+	}
+
+	t.Run("no bounds admit everything", func(t *testing.T) {
+		t.Parallel()
+
+		assert.True(t, constraint.NumericInterval(&jsonschema.Schema{}).Admits(-1e300))
 	})
 }
 

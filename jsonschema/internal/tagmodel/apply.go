@@ -574,13 +574,19 @@ func SetMultipleOf(t Target, value float64, pol Policy) error {
 // be silently overwritten when the canvas is overlaid. An enumeration already
 // in force is checked too: a const outside it can never hold, and both keywords
 // fully describe the allowed set, so the impossible pair is reported rather
-// than composed into a schema no instance satisfies.
+// than composed into a schema no instance satisfies. A numeric bound the
+// type's base declares is checked the same way. Generation drops the base's
+// bounds under a const, since a pinned value makes them redundant, and that
+// drop is safe only because the value satisfies them: a const the bound
+// excludes would otherwise ship alone and admit a value the type forbids.
 func SetConst(t Target, v any) error {
 	if t.Canvas.Const != nil && !constraint.ValuesEqual(*t.Canvas.Const, v) {
 		return fmt.Errorf("%w: a different value is already pinned", ErrConflict)
 	}
 
-	if base := baseOf(t); base.Const != nil && !constraint.ValuesEqual(*base.Const, v) {
+	base := baseOf(t)
+
+	if base.Const != nil && !constraint.ValuesEqual(*base.Const, v) {
 		return fmt.Errorf("%w: the type already pins a different value", ErrConflict)
 	}
 
@@ -588,8 +594,12 @@ func SetConst(t Target, v any) error {
 		return fmt.Errorf("%w: an enumeration already in force excludes the value", ErrConflict)
 	}
 
-	if base := baseOf(t); base.Enum != nil && !constraint.ValuesContain(base.Enum, v) {
+	if base.Enum != nil && !constraint.ValuesContain(base.Enum, v) {
 		return fmt.Errorf("%w: the type's enumeration excludes the value", ErrConflict)
+	}
+
+	if !constraint.NumericInterval(base).Admits(v) {
+		return fmt.Errorf("%w: the type's numeric bounds exclude the value", ErrConflict)
 	}
 
 	value := v
@@ -612,16 +622,26 @@ func SetConst(t Target, v any) error {
 // once, at its first position: JSON Schema asks that enum members be unique,
 // and the numeric-aware comparison folds 1 and 1.0 together as the validator
 // would.
+//
+// A numeric bound the type's base declares narrows the enumeration too: only
+// the members the bound admits are kept, and none left is [ErrConflict].
+// Generation drops the base's bounds under an enum, since the members are
+// the allowed set, and that drop is safe only because every member satisfies
+// them. A kind-derived bound admits every member already, because a member
+// parses at the field's kind and overflows there; a bound a type-level hook
+// declared has no such parse, so this is where it holds.
 func SetEnum(t Target, vals []any) error {
 	if len(vals) == 0 {
 		return fmt.Errorf("tagmodel: enumeration %w", ErrNoValues)
 	}
 
+	base := baseOf(t)
+
 	if c := t.Canvas.Const; c != nil && !constraint.ValuesContain(vals, *c) {
 		return fmt.Errorf("%w: the enumeration excludes a value already pinned", ErrConflict)
 	}
 
-	if c := baseOf(t).Const; c != nil && !constraint.ValuesContain(vals, *c) {
+	if c := base.Const; c != nil && !constraint.ValuesContain(vals, *c) {
 		return fmt.Errorf("%w: the enumeration excludes the value the type pins", ErrConflict)
 	}
 
@@ -637,16 +657,29 @@ func SetEnum(t Target, vals []any) error {
 		}
 	}
 
-	if inForce := baseOf(t).Enum; inForce != nil {
+	if inForce := base.Enum; inForce != nil {
 		enum = intersectValues(inForce, enum)
 		if len(enum) == 0 {
 			return fmt.Errorf("%w: the enumeration shares no value with the type's own", ErrConflict)
 		}
 	}
 
+	enum = admittedValues(constraint.NumericInterval(base), enum)
+	if len(enum) == 0 {
+		return fmt.Errorf("%w: the type's numeric bounds admit none of the values", ErrConflict)
+	}
+
 	t.Canvas.Enum = enum
 
 	return nil
+}
+
+// admittedValues returns the members of vals the interval admits, in their
+// order, on a fresh slice.
+func admittedValues(bounds constraint.Interval, vals []any) []any {
+	return slices.DeleteFunc(slices.Clone(vals), func(v any) bool {
+		return !bounds.Admits(v)
+	})
 }
 
 // intersectValues returns the members of inForce that vals also holds, in

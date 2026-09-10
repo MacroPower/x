@@ -236,6 +236,15 @@ func CanonicalizeNumeric(s *jsonschema.Schema) {
 		return
 	}
 
+	renderNumeric(s, NumericInterval(s))
+}
+
+// NumericInterval returns the interval a schema's four numeric bound keywords
+// describe, each side collapsed to the tighter of its inclusive and exclusive
+// keyword. A schema carrying no numeric bound yields the unbounded interval.
+// It is how a writer reads the bounds a type's own schema declares, to judge
+// a value it is about to pin or enumerate against them ([Interval.Admits]).
+func NumericInterval(s *jsonschema.Schema) Interval {
 	var ax axis
 
 	absorbBound(&ax, s.Minimum, true, true, Intersect, Authored)
@@ -243,7 +252,7 @@ func CanonicalizeNumeric(s *jsonschema.Schema) {
 	absorbBound(&ax, s.Maximum, false, true, Intersect, Authored)
 	absorbBound(&ax, s.ExclusiveMaximum, false, false, Intersect, Authored)
 
-	renderNumeric(s, ax.resolve(resolveFull))
+	return ax.resolve(resolveFull)
 }
 
 // renderNumeric writes a numeric interval, clearing all four keyword fields

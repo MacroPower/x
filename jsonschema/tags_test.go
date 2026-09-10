@@ -2951,6 +2951,127 @@ func TestTagConstOutsideEnumConflicts(t *testing.T) {
 	}
 }
 
+// boundedPos is a named integer whose own schema, declared through
+// WithTypeSchema, carries a floor no Go kind derives, so a field enum or const
+// on it is judged against a bound the member parse never sees.
+type boundedPos int
+
+// withBoundedPos declares boundedPos as an integer with a floor of 1.
+func withBoundedPos() jsonschema.GenerateOption {
+	one := 1.0
+
+	return jsonschema.WithTypeSchemaFor[boundedPos](jsonschema.TypeSchema{
+		Value: &jsonschema.Schema{Type: "integer", Minimum: &one},
+	})
+}
+
+// TestTagValueSetKeepsTypeBound pins that a field enum or const composes with
+// a numeric bound the type's own schema declares rather than escaping it.
+// Generation drops the type's bounds under a const or enum, which is safe
+// for a kind-derived bound because every member parses at the kind, but a
+// WithTypeSchema minimum of 1 used to vanish under enum=0|1|2 and const=0
+// with no check at all, admitting the 0 the type forbids. An enum keeps the
+// members the bound admits, in order, and a const outside it is the same
+// conflict a const outside the type's enum is, in both dialects and on an
+// element.
+func TestTagValueSetKeepsTypeBound(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		generate func() (*jsonschema.Schema, error)
+		want     string // marshaled property schema, or "" for a conflict
+	}{
+		"tag enum narrows": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V boundedPos `json:"v" jsonschema:"enum=0|1|2"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context(), withBoundedPos())
+			},
+			want: `{"type":"integer","enum":[1,2]}`,
+		},
+		"tag enum admits nothing": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V boundedPos `json:"v" jsonschema:"enum=0|-1"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context(), withBoundedPos())
+			},
+		},
+		"tag const outside the bound": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V boundedPos `json:"v" jsonschema:"const=0"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context(), withBoundedPos())
+			},
+		},
+		"tag const inside the bound": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V boundedPos `json:"v" jsonschema:"const=1"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context(), withBoundedPos())
+			},
+			want: `{"type":"integer","const":1}`,
+		},
+		"validate oneof narrows": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V boundedPos `json:"v" validate:"oneof=0 1 2"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context(), withBoundedPos(),
+					jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()))
+			},
+			want: `{"type":"integer","enum":[1,2]}`,
+		},
+		"validate eq outside the bound": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V boundedPos `json:"v" validate:"eq=0"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context(), withBoundedPos(),
+					jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()))
+			},
+		},
+		"element enum narrows": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V []boundedPos `json:"v" jsonschema:"enum=0|1|2"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context(), withBoundedPos())
+			},
+			want: `{"type":"array","items":{"type":"integer","enum":[1,2]}}`,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			s, err := tc.generate()
+			if tc.want == "" {
+				require.ErrorIs(t, err, jsonschema.ErrConstraintConflict)
+
+				return
+			}
+
+			require.NoError(t, err)
+
+			got, err := json.Marshal(s.Properties["v"])
+			require.NoError(t, err)
+			assert.JSONEq(t, tc.want, string(got))
+		})
+	}
+}
+
 // TestTagConstInsideEnumComposes pins the satisfiable half: a const the
 // enumeration admits is not a conflict, in either order.
 func TestTagConstInsideEnumComposes(t *testing.T) {

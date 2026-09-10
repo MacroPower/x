@@ -276,7 +276,10 @@ func (c *Constraints) Enum() ([]any, bool) {
 // overwriting a const already pinned to a different (numeric-aware) value --
 // whether a previous rule pinned it on the canvas or the field's type supplies
 // it on an inline base, where reconcile overlays the canvas const and a
-// disagreeing type-pinned value would otherwise be silently overwritten. For a
+// disagreeing type-pinned value would otherwise be silently overwritten. A
+// value outside an enum in force, or outside a numeric bound the inline base
+// declares, is the same conflict, since generation drops the base's bounds
+// under a const and the value must satisfy them for that to be safe. For a
 // $defs-extracted type the base is the field's provisional {$ref} payload, so a
 // const the referenced definition pins is not visible here and no conflict is
 // reported; nothing is overwritten either -- the canvas const rides beside the
@@ -297,7 +300,10 @@ func (c *Constraints) SetConst(value any) error {
 // SetEnum sets the field's enum, intersecting with an enum already in force
 // -- on the canvas from a previous rule, or on an inline type-derived base,
 // which reconcile would otherwise overwrite with the canvas value -- so two
-// enumerations compose conjunctively rather than one shadowing the other. An
+// enumerations compose conjunctively rather than one shadowing the other. A
+// numeric bound the inline base declares narrows the enum the same way, to
+// the members the bound admits, since generation drops the base's bounds
+// under an enum and every member must satisfy them for that to be safe. An
 // empty intersection is [ErrConstraintConflict]. For a $defs-extracted type
 // the definition's enum is not visible on the base (the provisional {$ref}
 // payload); the canvas enum rides beside the $ref and the conjunction

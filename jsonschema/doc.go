@@ -1022,12 +1022,15 @@
 //     minimum=5,minimum=3 keeps 5, matching how bounds from every other
 //     source compose.
 //   - A repeated enum intersects with the one in force, whether an earlier
-//     key or the field's type listed it, and keeps that listing's order. An
-//     empty intersection is [ErrConstraintConflict]. A member listed twice
-//     in one enum is kept once.
+//     key or the field's type listed it, and keeps that listing's order. A
+//     numeric bound the field's type declares narrows it the same way, to
+//     the members the bound admits. An empty intersection is
+//     [ErrConstraintConflict]. A member listed twice in one enum is kept
+//     once.
 //   - A second const disagreeing with the one pinned, or a const outside an
-//     enum in force, is [ErrConstraintConflict]. A const fully describes the
-//     allowed value, so no other value can silently win.
+//     enum in force or outside a numeric bound the field's type declares,
+//     is [ErrConstraintConflict]. A const fully describes the allowed value,
+//     so no other value can silently win.
 //   - format, pattern, and multipleOf replace what the field's type declared,
 //     since the tag names the keyword outright (a tag interpreter defers to
 //     both). A type extracted to $defs declares them on its definition, so a
@@ -1044,12 +1047,16 @@
 //
 //   - Bounds intersect order-independently. A weaker bound never loosens a
 //     stronger one.
-//   - A const or enum makes the kind-derived numeric bounds (an int8's
-//     minimum/maximum, for instance) redundant, so generation drops them. A
-//     const also subsumes an explicit bound, since it pins a single value, so
-//     generation drops that bound too. An enum only restricts the value to a
-//     set, so an explicit bound narrows it further and stays.
-//     enum=10|20,minimum=15 keeps minimum and admits only 20.
+//   - A const or enum makes the type's own numeric bounds (an int8's
+//     minimum/maximum, or a bound a type-level hook declares) redundant, so
+//     generation drops them. The values are judged against those bounds
+//     first, so the drop never admits a value the type forbids. An enum
+//     keeps only the members the bounds admit, and a const outside them is
+//     [ErrConstraintConflict]. A const also subsumes an explicit bound,
+//     since it pins a single value, so generation drops that bound too. An
+//     enum only restricts the value to a set, so an explicit bound narrows
+//     it further and stays. enum=10|20,minimum=15 keeps minimum and admits
+//     only 20.
 //   - A conflict in the discrete value set aborts generation.
 //   - An unsatisfiable range (a minimum above a maximum) renders as its
 //     impossible bounds rather than loosening.
@@ -1176,7 +1183,9 @@
 //
 //   - Against an inline override or provider value, an enum intersects
 //     with the type's, and a disagreeing const, or an intersection with
-//     nothing in it, is the conflict above.
+//     nothing in it, is the conflict above. A numeric bound the value
+//     declares narrows an enum to the members it admits and makes a const
+//     outside it the same conflict.
 //   - Against a $defs-extracted type, the declared value rides beside the
 //     $ref and the two compose conjunctively. An enum intersects and only
 //     tightens, and a disagreeing const composes to a faithfully

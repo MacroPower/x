@@ -1,6 +1,10 @@
 package constraint
 
-import "math/big"
+import (
+	"math/big"
+
+	"go.jacobcolvin.com/x/jsonschema/internal/jsonvalue"
+)
 
 // Endpoint is one side of an [Interval]: a rational limit and its strictness. A
 // nil Rat means the side is unbounded. Val carries the float64 the numeric
@@ -34,6 +38,45 @@ func intEndpoint(n int) Endpoint {
 // some.
 type Interval struct {
 	Lo, Hi Endpoint
+}
+
+// Admits reports whether a schema-authored value lies within the interval,
+// under the comparison the validator applies: the value's document form
+// ([jsonvalue.FromDocument]) compares exactly against each set endpoint, and
+// a number past the exact-comparison cap orders by magnitude class. A value
+// that is not a number (a string, a bool, null, or one with no document
+// form) is admitted, since a numeric bound judges numbers only.
+func (iv Interval) Admits(v any) bool {
+	val, ok := jsonvalue.FromDocument(v)
+	if !ok || !val.Comparable() {
+		return true
+	}
+
+	return admitsSide(val, iv.Lo, true) && admitsSide(val, iv.Hi, false)
+}
+
+// admitsSide reports whether val satisfies one endpoint of an interval. An
+// unset endpoint admits everything. An over-cap number never equals a
+// float64-derived endpoint, so its magnitude-class order decides alone.
+func admitsSide(val jsonvalue.Value, e Endpoint, lower bool) bool {
+	if !e.set() {
+		return true
+	}
+
+	var c int
+
+	if r, ok := val.Rat(); ok {
+		c = r.Cmp(e.Rat)
+	} else {
+		dec, _ := val.Dec()
+		c = dec.CmpRat(e.Rat)
+	}
+
+	if !lower {
+		c = -c
+	}
+
+	return c > 0 || (c == 0 && e.Inclusive)
 }
 
 // tighter returns the stronger of two endpoints on one side. An unset endpoint
