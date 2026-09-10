@@ -183,6 +183,12 @@ func parseFloatBound(value string, kind reflect.Kind) (Endpoint, error) {
 // 1152921504606847000, so shipping it would loosen a bound by 24. The
 // spelling is the caller's ([ParseDecimalFloat]); a literal that policy
 // admits but [numrat.ParseDecNumber] does not read is passed through.
+//
+// A literal past the cap of [numrat.MaxNumberLen] (an exponent beyond 4096
+// or more than 4096 significant digits) fails outright. Every float's
+// shortest decimal sits far inside the cap, so such a literal never names
+// the value it parses to: strconv underflows 1e-5000 to 0 with no error,
+// and shipping that 0 would replace the bound the author wrote.
 func CheckFloatLiteral(value string, kind reflect.Kind) error {
 	width := 64
 	if kind == reflect.Float32 {
@@ -195,8 +201,12 @@ func CheckFloatLiteral(value string, kind reflect.Kind) error {
 	}
 
 	dn, ok := numrat.ParseDecNumber(value)
-	if !ok || !dn.ExactlyComparable() {
+	if !ok {
 		return nil
+	}
+
+	if !dn.ExactlyComparable() {
+		return notRepresentable(value)
 	}
 
 	// The shortest decimal at the width is what a value of the kind renders

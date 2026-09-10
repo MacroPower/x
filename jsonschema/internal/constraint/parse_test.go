@@ -4,6 +4,7 @@ import (
 	"math"
 	"reflect"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -185,6 +186,40 @@ func TestParseNumericBoundNegativeZero(t *testing.T) {
 			assert.InDelta(t, 0, got.Val, 0)
 			assert.False(t, math.Signbit(got.Val), "a zero bound carries no sign")
 			assert.Equal(t, 0, got.Rat.Sign())
+		})
+	}
+}
+
+// TestParseNumericBoundOverCapLiteral pins the representability policy past
+// numrat's cap of 4096 digits or exponent: a literal ParseDecNumber reads but
+// cannot compare exactly is refused rather than shipped as whatever float64
+// rounded it to. CheckFloatLiteral used to pass such a literal through, and
+// strconv underflows 1e-5000 to 0 with no error, so minimum=1e-5000 shipped
+// the bound 0 the author never wrote. 1e-400, inside the cap, already failed;
+// the cap was the seam.
+func TestParseNumericBoundOverCapLiteral(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		value string
+		kind  reflect.Kind
+	}{
+		"exponent past the cap":          {value: "1e-5000", kind: reflect.Float64},
+		"more digits than the cap keeps": {value: "1." + strings.Repeat("0", 4200) + "1", kind: reflect.Float64},
+		"subnormal decimal past the cap": {value: "0." + strings.Repeat("0", 5000) + "1", kind: reflect.Float64},
+		"keyword domain":                 {value: "1e-5000", kind: reflect.Invalid},
+		"float32 kind":                   {value: "1e-5000", kind: reflect.Float32},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := constraint.ParseNumericBound(tc.value, tc.kind)
+			require.ErrorIs(t, err, constraint.ErrNotRepresentable)
+
+			err = constraint.CheckFloatLiteral(tc.value, tc.kind)
+			require.ErrorIs(t, err, constraint.ErrNotRepresentable)
 		})
 	}
 }
