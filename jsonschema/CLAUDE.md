@@ -166,6 +166,11 @@ is the only one that imports the parent package.
   the case counts track the method sets.
 - `TestRigExclusionsMatchTheDraw` (differentialtest): every excluded case is
   a recorded reason the draw pools honor.
+- `TestTagParamsCoverEveryKey`, `TestTaggedTypeDrawsEveryClass`,
+  `TestOptionsIsDeterministicAndDrawsEveryClass` (fuzzgen): the tagged draw
+  pairs every `tagparse.Keys()` key with parameters and reaches every hook,
+  recursive, and dialect-tag class; `TestKeysAreTheParsedVocabulary`
+  (tagparse) holds the exported vocabulary to the parser.
 
 ## Differential rigs
 

@@ -38,6 +38,7 @@ import (
 	"encoding/json/jsontext"
 	"math/big"
 	"reflect"
+	"slices"
 	"strconv"
 	"time"
 
@@ -299,6 +300,37 @@ func Blobs(n int) [][]byte {
 // every blob yields a type [reflect.StructOf] accepts and [encoding/json] can
 // marshal. A given blob always yields the same type.
 func Type(data []byte) reflect.Type {
+	return synthesize(data, drawField)
+}
+
+// TagDrawer draws the struct tag of a plain exported field of the given
+// type. It receives the cursor after the field's type was drawn and may draw
+// nothing further; [DrawTag] is the json tag draw [Type] uses.
+type TagDrawer func(c *fuzzfill.Cursor, ft reflect.Type) reflect.StructTag
+
+// DrawTag is the json tag draw of [Type], exported so a wider draw can put
+// the same json tag beside the tags it adds.
+func DrawTag(c *fuzzfill.Cursor, _ reflect.Type) reflect.StructTag {
+	return drawTag(c)
+}
+
+// Synthesize is [Type] over a wider plain-field pool: the component pool
+// with extra appended, and tags drawn by tag. The embed, fallback, and
+// unexported draws are Type's, so the constraints recorded at each pool
+// hold; the caller's extra types must be ones [reflect.StructOf] accepts as
+// a plain field type, which every named type and every composite of one is.
+// It is total and deterministic under the same argument as Type.
+func Synthesize(data []byte, extra []reflect.Type, tag TagDrawer) reflect.Type {
+	components := slices.Concat(componentTypes, extra)
+
+	return synthesize(data, func(c *fuzzfill.Cursor, used map[string]bool) (reflect.StructField, bool) {
+		return drawFieldFrom(c, used, components, tag)
+	})
+}
+
+// synthesize is the shared body of [Type] and [Synthesize]: the field count,
+// the name dedupe, and the StructOf call, with the field draw supplied.
+func synthesize(data []byte, draw func(*fuzzfill.Cursor, map[string]bool) (reflect.StructField, bool)) reflect.Type {
 	c := fuzzfill.NewCursor(data)
 
 	n := c.Intn(maxFields + 1)
@@ -310,7 +342,7 @@ func Type(data []byte) reflect.Type {
 	used := make(map[string]bool, n)
 
 	for range n {
-		f, ok := drawField(c, used)
+		f, ok := draw(c, used)
 		if !ok {
 			continue
 		}
@@ -328,6 +360,15 @@ func Type(data []byte) reflect.Type {
 // pool's collisions meaningful: a synthesized name would never match the name
 // an embed promotes.
 func drawField(c *fuzzfill.Cursor, used map[string]bool) (reflect.StructField, bool) {
+	return drawFieldFrom(c, used, componentTypes, DrawTag)
+}
+
+// drawFieldFrom is drawField over the given plain-field pool and tag draw.
+// The plain draw passes its own pool and json tag draw, so its cursor reads
+// are what they were; [Synthesize] passes a wider pool and a wider tag draw.
+func drawFieldFrom(
+	c *fuzzfill.Cursor, used map[string]bool, components []reflect.Type, tag TagDrawer,
+) (reflect.StructField, bool) {
 	if c.Intn(embedOdds) == 0 {
 		return drawEmbed(c, used)
 	}
@@ -346,7 +387,7 @@ func drawField(c *fuzzfill.Cursor, used map[string]bool) (reflect.StructField, b
 		return reflect.StructField{
 			Name:    name,
 			PkgPath: pkgPath,
-			Type:    componentTypes[c.Intn(len(componentTypes))],
+			Type:    components[c.Intn(len(components))],
 		}, true
 	}
 
@@ -355,10 +396,12 @@ func drawField(c *fuzzfill.Cursor, used map[string]bool) (reflect.StructField, b
 		return reflect.StructField{}, false
 	}
 
+	ft := components[c.Intn(len(components))]
+
 	return reflect.StructField{
 		Name: name,
-		Type: componentTypes[c.Intn(len(componentTypes))],
-		Tag:  drawTag(c),
+		Type: ft,
+		Tag:  tag(c, ft),
 	}, true
 }
 
