@@ -54,11 +54,13 @@ func buildSuiteSkips() map[string]skipReason {
 		"draft7/optional/cross-draft.json/refs to future drafts are processed as future drafts/missing bar is invalid":                     reasonCrossDraft,
 		"draft2020-12/optional/cross-draft.json/refs to historic drafts are processed as historic drafts/first item not a string is valid": reasonCrossDraft,
 
-		// The only optional/format skip. The suite reads an undefined ASCII
-		// letter escape under the ECMA 262 main grammar, which excludes
-		// UnicodeIDContinue from IdentityEscape; the format validator reads it
-		// under Annex B, which every JS engine implements for a pattern without
-		// the u flag. The surrounding regex format cases still run.
+		// The only optional/format skip, one case under each draft. The suite
+		// reads an undefined ASCII letter escape under the ECMA 262 main
+		// grammar, which excludes UnicodeIDContinue from IdentityEscape; the
+		// format validator reads it under Annex B, which every JS engine
+		// implements for a pattern without the u flag (V8 compiles /\a/ and
+		// refuses only /\a/u). The surrounding regex format cases still run.
+		`draft7/optional/format/ecmascript-regex.json/\a is not an ECMA 262 control escape`:       reasonAnnexBIdentity,
 		`draft2020-12/optional/format/ecmascript-regex.json/\a is not an ECMA 262 control escape`: reasonAnnexBIdentity,
 	}
 
@@ -111,7 +113,7 @@ var (
 	// design (Draft-07/2020-12 only, Go RE2 patterns, ECMA 262 Annex B identity
 	// escapes): only the specific cases that cannot pass are skipped, so the
 	// other cases in the same file and group still run. The required suite runs
-	// with no skips, and the optional/format suite carries exactly one.
+	// with no skips, and the optional/format suite carries one case per draft.
 	// TestSuiteSkipsAreLive guards the map against typos and stale keys by
 	// asserting each key names a real suite file, group, and test.
 	suiteSkips = buildSuiteSkips()
@@ -395,12 +397,25 @@ func runSuiteTier(t *testing.T, tier string) {
 }
 
 // TestSuite runs the JSON Schema Test Suite for draft7 and draft2020-12.
-//
-// Test suite commit: 60755c1097769e313fae3ec4d63bcc9d49b5d2d5.
+// The vendored commit is recorded in testdata/suite/COMMIT, which
+// `task jsonschema:suite:sync` writes.
 func TestSuite(t *testing.T) {
 	t.Parallel()
 
 	runSuiteTier(t, "")
+}
+
+// TestSuitePinIsRecorded asserts testdata/suite/COMMIT names one upstream
+// commit, so a vendored copy always says which commit it is and a hand-edited
+// suite cannot pass as a synced one.
+func TestSuitePinIsRecorded(t *testing.T) {
+	t.Parallel()
+
+	data, err := os.ReadFile(filepath.Join("testdata", "suite", "COMMIT"))
+	require.NoError(t, err, "the vendored suite must record its upstream commit")
+
+	pin := strings.TrimSuffix(string(data), "\n")
+	require.Regexp(t, `^[0-9a-f]{40}$`, pin, "COMMIT must hold one full commit hash")
 }
 
 // TestSuiteFormat runs optional format tests from the JSON Schema Test Suite.
