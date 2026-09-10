@@ -107,6 +107,25 @@
 "(?<a1>x)"	true	a digit inside a name
 "(?<\u0301a>x)"	false	a name opening on a combining mark
 "(?<a\u0301>x)"	true	a combining mark inside a name
+#
+# ECMA-262 22.2.1.1 refuses a capture name defined twice wherever both groups
+# can take part in one match, and ES2025 admits it across the alternatives of
+# one disjunction. RE2 accepts a repeated name, so the differential rig carves
+# that shape out; the scan once kept no names at all.
+#
+"(?<a>x)(?<a>y)"	false	one name twice in one alternative
+"(?<a>x)|(?<a>y)"	true	one name in two alternatives of the pattern
+"(?:(?<a>x)|(?<a>y))"	true	one name in two alternatives of a group
+"(?<a>x)|(?<a>y)|(?<a>z)"	true	one name in three alternatives
+"(?:(?<a>x)|y)(?<a>z)"	false	a name repeated after the group holding its first use closes
+"(?<a>x)(?:(?<a>y)|z)"	false	a name repeated inside a group after its first use
+"(?<a>(?<a>x))"	false	a name repeated inside the group of that name
+"(?<a>x|(?<a>y))"	false	a group's own name repeated in its second alternative
+"(?<a>x)|(?:(?<a>y)(?<a>z))"	false	a repeat within one alternative of a disjunction
+"(?<a>x)|(?<b>y)(?<a>z)"	true	a repeat across alternatives beside another name
+"(?<a>x)(?<\\u0061>y)"	false	one name spelled literally and as an escape
+"(?P<a>x)(?<a>y)"	false	one name in both group spellings
+"(?<a>x)\\k<a>"	true	a backreference by name defines nothing
 "(?)"	false	a group modifier naming nothing, so the '?' has nothing to repeat
 #
 # A flag run after "(?" is the shape RE2's parsePerlFlags reads: letters from

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -1205,7 +1206,10 @@ const (
 // production lets a Quantifier follow it.
 // A class range whose two ends are literal code points must run upward, the
 // early error 22.2.1.1 keeps; a range with an escape on either side is left
-// alone, since Annex B lets a class escape stand beside a literal '-'.
+// alone, since Annex B lets a class escape stand beside a literal '-'. A
+// capture name defined twice is refused where both groups can take part in
+// one match, the early error 22.2.1.1 keeps, and admitted across the
+// alternatives of one disjunction, as ES2025 reads it.
 func validateRegex(s string) error {
 	// ECMA 262 reads a pattern as code points, so a byte sequence that is
 	// not UTF-8 holds no source character; every engine refuses it. The
@@ -1215,9 +1219,9 @@ func validateRegex(s string) error {
 		return errors.New("invalid regex: invalid UTF-8")
 	}
 
-	// One entry per open group, recording whether it is a lookbehind, so the
-	// closing parenthesis knows whether a quantifier may follow it.
-	var groups []bool
+	// The open groups, with the pattern itself at the bottom so its
+	// alternatives scope capture names the way a group's do.
+	groups := []regexGroup{{}}
 
 	inClass := false
 
@@ -1299,6 +1303,7 @@ func validateRegex(s string) error {
 
 		case c == '(':
 			state = regexNothing
+			parent := &groups[len(groups)-1]
 			lookbehind := false
 
 			// A "(?" opens a non-capturing, lookaround, named, or (in RE2)
@@ -1310,31 +1315,59 @@ func validateRegex(s string) error {
 				// A "(?" that opens none of the known modifiers is a
 				// malformed group: an empty or ill-formed capture name, or
 				// nothing at all. Reading its bytes as atoms would accept it.
-				n := regexGroupModifierLen(mod)
+				n, name := regexGroupModifierLen(mod)
 				if n == 0 {
 					return errors.New("invalid regex: malformed group modifier")
+				}
+
+				// A capture name joins the alternative that holds the group,
+				// so the group's own body sees it too.
+				if name != "" {
+					if slices.Contains(parent.names, name) {
+						return errors.New("invalid regex: duplicate capture group name")
+					}
+
+					parent.names = append(parent.names, name)
 				}
 
 				lookbehind = len(mod) > 1 && mod[0] == '<' && (mod[1] == '=' || mod[1] == '!')
 				i += 1 + n
 			}
 
-			groups = append(groups, lookbehind)
+			groups = append(groups, regexGroup{
+				lookbehind: lookbehind,
+				base:       slices.Clip(parent.names),
+				names:      slices.Clip(parent.names),
+			})
 
 		case c == ')':
-			if len(groups) == 0 {
+			if len(groups) == 1 {
 				return errRegexUnbalancedParenthesis
 			}
 
+			group := groups[len(groups)-1]
+			groups = groups[:len(groups)-1]
+
+			// Every name the group defined, in any alternative, can take
+			// part in a match beside a name defined after it.
+			parent := &groups[len(groups)-1]
+			parent.names = append(parent.names, group.closed...)
+			parent.names = append(parent.names, group.names[len(group.base):]...)
+
 			state = regexAtom
-			if groups[len(groups)-1] {
+			if group.lookbehind {
 				state = regexNothing
 			}
 
-			groups = groups[:len(groups)-1]
-
 		case c == '|':
 			state = regexNothing
+
+			// The names of the alternative just closed cannot take part in
+			// a match beside those of the next one, so the next one starts
+			// from the names visible when the group opened.
+			group := &groups[len(groups)-1]
+			group.closed = append(group.closed, group.names[len(group.base):]...)
+			group.names = group.base
 
 		case c == '*', c == '+':
 			if state != regexAtom {
@@ -1381,7 +1414,7 @@ func validateRegex(s string) error {
 		i++
 	}
 
-	if len(groups) != 0 {
+	if len(groups) != 1 {
 		return errRegexUnbalancedParenthesis
 	}
 
@@ -1392,28 +1425,51 @@ func validateRegex(s string) error {
 	return nil
 }
 
+// regexGroup is one open group on validateRegex's stack. The pattern itself
+// sits at the bottom, so the top level scopes capture names the way a group
+// does.
+type regexGroup struct {
+	// The capture names visible when the group opened (base), and those
+	// plus the names defined since the group's last '|' (names). A name
+	// already in names is a duplicate: ECMA 262 22.2.1.1 refuses two groups
+	// of one name only where both can take part in a match, which two
+	// alternatives of one disjunction never do. Both slices are clipped, so
+	// an append copies rather than writing into the parent's storage.
+	base, names []string
+
+	// The names defined in the alternatives a '|' already closed, which the
+	// group hands to its parent when it closes.
+	closed []string
+
+	// Whether the group is a lookbehind, so the closing parenthesis knows
+	// whether a quantifier may follow it.
+	lookbehind bool
+}
+
 // regexGroupModifierLen returns the length of the group modifier that follows
 // "(?" at the start of s: the lookaround and non-capturing introducers ":",
 // "=", "!", "<=", and "<!", a named-capture name "<name>" (RE2 spells it
 // "P<name>"), or a flag run such as "i" or "ims-U:". It returns 0 when s
-// opens none of them, which the scan reports as a malformed group.
-func regexGroupModifierLen(s string) int {
+// opens none of them, which the scan reports as a malformed group. The
+// second result is the decoded capture name for the named forms and empty
+// for the rest.
+func regexGroupModifierLen(s string) (int, string) {
 	if s == "" {
-		return 0
+		return 0, ""
 	}
 
 	switch {
 	case s[0] == ':' || s[0] == '=' || s[0] == '!':
-		return 1
+		return 1, ""
 	case s[0] == '<' && len(s) > 1 && (s[1] == '=' || s[1] == '!'):
-		return 2
+		return 2, ""
 	case s[0] == '<':
 		return regexGroupNameLen(s, 1)
 	case s[0] == 'P' && len(s) > 1 && s[1] == '<':
 		return regexGroupNameLen(s, 2)
 	}
 
-	return regexFlagRunLen(s)
+	return regexFlagRunLen(s), ""
 }
 
 // regexFlagRunLen returns the length of the flag run at the start of s, the
@@ -1462,26 +1518,30 @@ func regexFlagRunLen(s string) int {
 }
 
 // regexGroupNameLen returns the length of s through the '>' closing a group
-// name whose first character sits at s[from], or 0 when the name is not an
-// ECMA 262 RegExpIdentifierName ending in '>'. Each character of the name is
-// a code point written literally or as a RegExpUnicodeEscapeSequence; the
-// first must be an IdentifierStartChar and every later one an
-// IdentifierPartChar, so a name never opens on a digit. Only such a run is
-// consumed, so a malformed name never swallows a parenthesis the group
-// accounting needs.
-func regexGroupNameLen(s string, from int) int {
+// name whose first character sits at s[from], with the name decoded to its
+// code points, or 0 when the name is not an ECMA 262 RegExpIdentifierName
+// ending in '>'. Each character of the name is a code point written literally
+// or as a RegExpUnicodeEscapeSequence; the first must be an
+// IdentifierStartChar and every later one an IdentifierPartChar, so a name
+// never opens on a digit. Only such a run is consumed, so a malformed name
+// never swallows a parenthesis the group accounting needs. The decoded form
+// is what two spellings of one name share, so it is what the duplicate check
+// compares.
+func regexGroupNameLen(s string, from int) (int, string) {
+	var name strings.Builder
+
 	for i := from; i < len(s); {
 		if s[i] == '>' {
 			if i == from {
-				return 0
+				return 0, ""
 			}
 
-			return i + 1
+			return i + 1, name.String()
 		}
 
 		r, size := regexGroupNameChar(s[i:])
 		if size == 0 {
-			return 0
+			return 0, ""
 		}
 
 		ok := isRegexIDPart(r)
@@ -1490,13 +1550,15 @@ func regexGroupNameLen(s string, from int) int {
 		}
 
 		if !ok {
-			return 0
+			return 0, ""
 		}
+
+		name.WriteRune(r)
 
 		i += size
 	}
 
-	return 0
+	return 0, ""
 }
 
 // regexGroupNameChar reads one character of a group name at the start of s

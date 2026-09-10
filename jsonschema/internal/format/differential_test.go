@@ -313,7 +313,32 @@ func regexCarveOut(s string) bool {
 	// run of ASCII word characters, while ECMA 262 reads the name as a
 	// RegExpIdentifierName, whose IdentifierStartChar excludes a digit, so
 	// "(?<1a>x)" is a syntax error there.
-	return digitLedCaptureName.MatchString(s)
+	if digitLedCaptureName.MatchString(s) {
+		return true
+	}
+
+	// A capture name defined twice. RE2 accepts a repeated name, while ECMA
+	// 262 22.2.1.1 refuses one wherever both groups can take part in a
+	// match. The check is coarse and skips a repeat across alternatives too,
+	// which ECMA 262 admits; skipping is always safe.
+	return repeatedCaptureName(s)
+}
+
+// repeatedCaptureName reports whether s names two capture groups alike, in
+// either group spelling. It reads the literal name only, which is every name
+// RE2 parses.
+func repeatedCaptureName(s string) bool {
+	seen := map[string]bool{}
+
+	for _, m := range captureName.FindAllStringSubmatch(s, -1) {
+		if seen[m[1]] {
+			return true
+		}
+
+		seen[m[1]] = true
+	}
+
+	return false
 }
 
 // FuzzFormatURIVsNetURL differentials the uri validator against net/url. The
@@ -773,6 +798,10 @@ var (
 	// A named group, in either spelling, whose name opens on a digit;
 	// regexCarveOut skips a pattern carrying one.
 	digitLedCaptureName = regexp.MustCompile(`\(\?P?<\d`)
+
+	// A named group in either spelling, capturing its name; the first byte
+	// is held off '=' and '!' so a lookbehind does not match.
+	captureName = regexp.MustCompile(`\(\?P?<([^>=!][^>]*)>`)
 
 	// The RFC 9562 §4 canonical textual representation: four hyphens at fixed
 	// places and hex digits of either case elsewhere.

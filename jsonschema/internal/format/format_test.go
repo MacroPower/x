@@ -168,6 +168,54 @@ func TestRegexFormatGroupNames(t *testing.T) {
 	}
 }
 
+// TestRegexFormatDuplicateGroupNames pins the duplicate capture name rule.
+// ECMA 262 22.2.1.1 refuses a name defined twice wherever both groups can
+// take part in one match, and ES2025 admits it across the alternatives of
+// one disjunction, so the scan keeps a name scope per alternative and hands
+// a closed group's names to the alternative that holds it. The scan once
+// kept no names at all and accepted "(?<a>x)(?<a>y)", which every ECMA 262
+// engine refuses.
+func TestRegexFormatDuplicateGroupNames(t *testing.T) {
+	t.Parallel()
+
+	validate := validator(t, "regex")
+
+	tests := map[string]struct {
+		instance string
+		valid    bool
+	}{
+		"twice in one alternative":                {instance: "(?<a>x)(?<a>y)", valid: false},
+		"across two alternatives":                 {instance: "(?<a>x)|(?<a>y)", valid: true},
+		"across two alternatives of a group":      {instance: "(?:(?<a>x)|(?<a>y))", valid: true},
+		"across three alternatives":               {instance: "(?<a>x)|(?<a>y)|(?<a>z)", valid: true},
+		"after the group holding it closes":       {instance: "(?:(?<a>x)|y)(?<a>z)", valid: false},
+		"inside a group after the first use":      {instance: "(?<a>x)(?:(?<a>y)|z)", valid: false},
+		"inside the group of that name":           {instance: "(?<a>(?<a>x))", valid: false},
+		"in the second alternative of its group":  {instance: "(?<a>x|(?<a>y))", valid: false},
+		"within one alternative of a disjunction": {instance: "(?<a>x)|(?:(?<a>y)(?<a>z))", valid: false},
+		"across alternatives beside another name": {instance: "(?<a>x)|(?<b>y)(?<a>z)", valid: true},
+		"spelled literally and as an escape":      {instance: `(?<a>x)(?<\u0061>y)`, valid: false},
+		"in both group spellings":                 {instance: "(?P<a>x)(?<a>y)", valid: false},
+		"backreference by name":                   {instance: `(?<a>x)\k<a>`, valid: true},
+		"two different names":                     {instance: "(?<a>x)(?<b>y)", valid: true},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := validate(tc.instance)
+			if tc.valid {
+				require.NoError(t, err,
+					"a pattern every ECMA 262 engine compiles should pass the regex validator")
+			} else {
+				require.Error(t, err,
+					"a duplicate capture name should be rejected by the regex validator")
+			}
+		})
+	}
+}
+
 // TestRegexFormatAcceptsEmptyCharacterClass covers the empty character class:
 // ECMA 262 22.2.1 defines CharacterClass as '[' [lookahead != ^] ClassContents
 // ']' where ClassContents may be empty, so "[]" (matches nothing) and "[^]"
