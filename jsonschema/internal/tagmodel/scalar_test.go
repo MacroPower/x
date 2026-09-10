@@ -317,6 +317,13 @@ func TestShapeParseScalarIntegerGrammar(t *testing.T) {
 
 				_, err := sh.ParseScalar("5", tagmodel.Policy{})
 				require.NoError(t, err, typ)
+
+				// -0 is a JSON integer and the value 0 every integer kind
+				// holds. The unsigned path used to hand it to
+				// strconv.ParseUint, which refuses the sign, so it parsed on
+				// a signed kind alone.
+				_, err = sh.ParseScalar("-0", tagmodel.Policy{})
+				require.NoError(t, err, "-0 at %s", typ)
 			}
 		})
 	}

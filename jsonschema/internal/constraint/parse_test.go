@@ -176,6 +176,7 @@ func TestParseNumericBoundNegativeZero(t *testing.T) {
 		"float kind":         {value: "-0.0", kind: reflect.Float64},
 		"float32 kind":       {value: "-0e0", kind: reflect.Float32},
 		"integer kind":       {value: "-0", kind: reflect.Int},
+		"unsigned kind":      {value: "-0", kind: reflect.Uint8},
 		"positive zero kept": {value: "0", kind: reflect.Invalid},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -394,11 +395,55 @@ func TestParseNumericBoundIntegerGrammar(t *testing.T) {
 	_, err = constraint.ParseNumericBound("-5", reflect.Uint)
 	require.Error(t, err, "a negative literal still fails at an unsigned kind")
 	require.NotErrorIs(t, err, constraint.ErrIntegerLiteral, "the spelling is fine; the range is not")
+	assert.NotContains(t, err.Error(), "strconv", "the refusal is the grammar's own, not strconv's")
 
 	for _, kind := range []reflect.Kind{reflect.Float64, reflect.Invalid} {
 		got, err := constraint.ParseNumericBound("+5", kind)
 		require.NoError(t, err, kind)
 		assert.InDelta(t, 5, got.Val, 0, kind)
+	}
+}
+
+// TestParseUnsignedLiteral pins the one unsigned parse the bounds and the
+// scalars share: -0, a JSON integer the grammar admits and the value 0 every
+// unsigned kind holds, reads as 0, while any other minus is refused with the
+// grammar's own message. The scalar path used to hand -0 to strconv.ParseUint,
+// which refuses the sign, so const=-0 failed on a uint field alone with a raw
+// strconv message.
+func TestParseUnsignedLiteral(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		value   string
+		bitSize int
+		want    uint64
+		wantErr bool
+	}{
+		"negative zero":        {value: "-0", bitSize: 8, want: 0},
+		"positive zero":        {value: "0", bitSize: 8, want: 0},
+		"in range":             {value: "255", bitSize: 8, want: 255},
+		"negative":             {value: "-1", bitSize: 8, wantErr: true},
+		"negative with digits": {value: "-10", bitSize: 64, wantErr: true},
+		"out of range":         {value: "256", bitSize: 8, wantErr: true},
+		"leading plus":         {value: "+1", bitSize: 8, wantErr: true},
+		"leading zero":         {value: "-00", bitSize: 8, wantErr: true},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := constraint.ParseUnsignedLiteral(tc.value, tc.bitSize)
+			if tc.wantErr {
+				require.Error(t, err)
+				assert.NotContains(t, err.Error(), "invalid syntax", "no raw strconv syntax message")
+
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
 	}
 }
 

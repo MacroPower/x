@@ -55,14 +55,9 @@ const maxExactInt = int64(1) << 53
 func ParseNumericBound(value string, kind reflect.Kind) (Endpoint, error) {
 	switch {
 	case numkind.IsUnsigned(kind):
-		err := CheckIntegerLiteral(value)
+		n, err := ParseUnsignedLiteral(value, 64)
 		if err != nil {
 			return Endpoint{}, err
-		}
-
-		n, err := strconv.ParseUint(value, 10, 64)
-		if err != nil {
-			return Endpoint{}, fmt.Errorf("invalid unsigned integer %q: %w", value, err)
 		}
 
 		if n > uint64(maxExactInt) {
@@ -118,6 +113,32 @@ func CheckIntegerLiteral(value string) error {
 	}
 
 	return nil
+}
+
+// ParseUnsignedLiteral parses a JSON integer literal for an unsigned kind at
+// bitSize bits: the grammar of [CheckIntegerLiteral], then the value. It is
+// the one unsigned parse the bounds and the scalars share. A -0 is the value
+// 0, the only negative spelling naming a value an unsigned kind holds, so it
+// reads as 0 here as it does on a signed kind; any other minus is refused
+// before strconv, which would otherwise report its own syntax message for a
+// spelling the grammar admits.
+func ParseUnsignedLiteral(value string, bitSize int) (uint64, error) {
+	err := CheckIntegerLiteral(value)
+	if err != nil {
+		return 0, err
+	}
+
+	digits, negative := strings.CutPrefix(value, "-")
+	if negative && digits != "0" {
+		return 0, fmt.Errorf("%q is negative, which an unsigned kind cannot hold", value)
+	}
+
+	n, err := strconv.ParseUint(digits, 10, bitSize)
+	if err != nil {
+		return 0, fmt.Errorf("invalid unsigned integer %q: %w", value, err)
+	}
+
+	return n, nil
 }
 
 // ParseDecimalFloat parses a decimal float literal under the one spelling policy

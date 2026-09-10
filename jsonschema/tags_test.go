@@ -1139,6 +1139,67 @@ func TestTagNegativeZeroBoundShipsAsZero(t *testing.T) {
 	}
 }
 
+// TestTagNegativeZeroScalarOnUnsignedField pins that -0, a JSON integer the
+// documented tag grammar admits and the value 0 every unsigned field holds,
+// parses on an unsigned field as it does on a signed one, in both dialects.
+// The bound path already read minimum=-0 on a uint8; the scalar path reached
+// strconv.ParseUint, which refuses the sign, so const=-0 on a uint field
+// failed with a raw strconv message while the same tag on an int field
+// pinned 0.
+func TestTagNegativeZeroScalarOnUnsignedField(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		generate func() (*jsonschema.Schema, error)
+		want     string // marshaled property schema
+	}{
+		"jsonschema const": {
+			generate: func() (*jsonschema.Schema, error) {
+				type doc struct {
+					V uint `json:"v" jsonschema:"const=-0"`
+				}
+
+				return jsonschema.GenerateFor[doc](t.Context())
+			},
+			want: `{"type":"integer","const":0}`,
+		},
+		"jsonschema enum": {
+			generate: func() (*jsonschema.Schema, error) {
+				type doc struct {
+					V uint8 `json:"v" jsonschema:"enum=-0|1"`
+				}
+
+				return jsonschema.GenerateFor[doc](t.Context())
+			},
+			want: `{"type":"integer","enum":[0,1]}`,
+		},
+		"validate eq": {
+			generate: func() (*jsonschema.Schema, error) {
+				type doc struct {
+					V uint `json:"v" validate:"eq=-0"`
+				}
+
+				return jsonschema.GenerateFor[doc](t.Context(),
+					jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()))
+			},
+			want: `{"type":"integer","const":0}`,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			s, err := tc.generate()
+			require.NoError(t, err)
+
+			got, err := json.Marshal(s.Properties["v"])
+			require.NoError(t, err)
+			assert.JSONEq(t, tc.want, string(got))
+		})
+	}
+}
+
 // TestTagTypeOverride pins the type= tag key: it replaces the reflected type
 // assertion, removes the nullable anyOf wrapper a pointer field generates,
 // and drops kind-derived numeric bounds when the new type is not numeric, so

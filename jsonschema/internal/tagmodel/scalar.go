@@ -118,16 +118,11 @@ func (sh Shape) ParseScalars(lits []string, pol Policy) ([]any, error) {
 func (sh Shape) parseNumber(lit string) (any, error) {
 	switch {
 	case numkind.IsUnsigned(sh.Kind):
-		err := constraint.CheckIntegerLiteral(lit)
+		// Return uint64: neither int nor float64 holds every uint64 exactly.
+		n, err := constraint.ParseUnsignedLiteral(lit, numkind.UintBitSize(sh.Kind))
 		if err != nil {
 			//nolint:wrapcheck // The shared policy owns the spelling and its message.
 			return nil, err
-		}
-
-		// Return uint64: neither int nor float64 holds every uint64 exactly.
-		n, err := strconv.ParseUint(lit, 10, numkind.UintBitSize(sh.Kind))
-		if err != nil {
-			return nil, fmt.Errorf("invalid unsigned integer %q: %w", lit, err)
 		}
 
 		return n, nil
