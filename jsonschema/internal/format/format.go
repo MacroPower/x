@@ -1393,7 +1393,7 @@ func validateRegex(s string) error {
 // regexGroupModifierLen returns the length of the group modifier that follows
 // "(?" at the start of s: the lookaround and non-capturing introducers ":",
 // "=", "!", "<=", and "<!", a named-capture name "<name>" (RE2 spells it
-// "P<name>"), or an RE2 flag run such as "i" or "ims-U:". It returns 0 when s
+// "P<name>"), or a flag run such as "i" or "ims-U:". It returns 0 when s
 // opens none of them, which the scan reports as a malformed group.
 func regexGroupModifierLen(s string) int {
 	if s == "" {
@@ -1411,16 +1411,52 @@ func regexGroupModifierLen(s string) int {
 		return regexGroupNameLen(s, 2)
 	}
 
-	n := 0
-	for n < len(s) && (isASCIILetter(s[n]) || s[n] == '-') {
-		n++
+	return regexFlagRunLen(s)
+}
+
+// regexFlagRunLen returns the length of the flag run at the start of s, the
+// form RE2's parsePerlFlags reads after "(?": letters from "imsU", at most
+// one '-' with a letter on its far side, and a ':' (consumed) or ')' (left
+// for the group accounting) closing the run. ECMA 262's modifiers "(?ims-ims:"
+// are a subset of the same shape. A run holding any other byte, a bare '-',
+// or no letter at all is no modifier, so the function returns 0 and the scan
+// reports a malformed group.
+func regexFlagRunLen(s string) int {
+	sawFlag := false
+	negated := false
+
+	for n := range len(s) {
+		switch s[n] {
+		case 'i', 'm', 's', 'U':
+			sawFlag = true
+		case '-':
+			if negated {
+				return 0
+			}
+
+			negated = true
+			sawFlag = false
+
+		case ':':
+			if !sawFlag {
+				return 0
+			}
+
+			return n + 1
+
+		case ')':
+			if !sawFlag {
+				return 0
+			}
+
+			return n
+
+		default:
+			return 0
+		}
 	}
 
-	if n < len(s) && s[n] == ':' {
-		n++
-	}
-
-	return n
+	return 0
 }
 
 // regexGroupNameLen returns the length of s through the '>' closing a group

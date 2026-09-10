@@ -63,6 +63,52 @@ func TestRegexFormatAcceptsECMA262Constructs(t *testing.T) {
 	}
 }
 
+// TestRegexFormatFlagRuns pins the flag run the scan reads after "(?". The
+// scan once accepted any run of ASCII letters and hyphens there, so "(?xyz:a)",
+// "(?a)", "(?-)", and "(?-:a)" passed the format although neither an ECMA 262
+// engine nor RE2 compiles them. The run is held to RE2's parsePerlFlags shape,
+// which ECMA 262's "(?ims-ims:" modifiers fit inside: letters from "imsU", at
+// most one '-' with a letter after it, and a ':' or ')' closing the run.
+func TestRegexFormatFlagRuns(t *testing.T) {
+	t.Parallel()
+
+	validate := validator(t, "regex")
+
+	tests := map[string]struct {
+		instance string
+		valid    bool
+	}{
+		"flag run closed by a parenthesis":     {instance: "(?i)a", valid: true},
+		"flag run closed by a colon":           {instance: "(?i:a)", valid: true},
+		"every flag with a negation":           {instance: "(?ims-U:a)", valid: true},
+		"negated run":                          {instance: "(?-i:a)", valid: true},
+		"repeated flag":                        {instance: "(?ii)a", valid: true},
+		"unknown flag letters":                 {instance: "(?xyz:a)", valid: false},
+		"single unknown flag":                  {instance: "(?a)", valid: false},
+		"bare hyphen":                          {instance: "(?-)", valid: false},
+		"hyphen with no flag before the colon": {instance: "(?-:a)", valid: false},
+		"hyphen with no flag after it":         {instance: "(?i-)", valid: false},
+		"second hyphen":                        {instance: "(?i--m)", valid: false},
+		"flag run interrupted by a letter":     {instance: "(?ia)", valid: false},
+		"unterminated flag run":                {instance: "(?i", valid: false},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := validate(tc.instance)
+			if tc.valid {
+				require.NoError(t, err,
+					"a flag run every engine reads should pass the regex validator")
+			} else {
+				require.Error(t, err,
+					"a group no engine compiles should be rejected by the regex validator")
+			}
+		})
+	}
+}
+
 // TestRegexFormatAcceptsEmptyCharacterClass covers the empty character class:
 // ECMA 262 22.2.1 defines CharacterClass as '[' [lookahead != ^] ClassContents
 // ']' where ClassContents may be empty, so "[]" (matches nothing) and "[^]"

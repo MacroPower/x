@@ -73,5 +73,22 @@
 "(?<>a)"	false	an empty capture name, which no engine accepts
 "(?<a-b>x)"	false	a capture name outside the identifier grammar
 "(?)"	false	a group modifier naming nothing, so the '?' has nothing to repeat
+#
+# A flag run after "(?" is the shape RE2's parsePerlFlags reads: letters from
+# "imsU", at most one '-' with a letter after it, and a ':' or ')' closing the
+# run. ECMA-262's modifiers "(?ims-ims:" are a subset of it. Any other run
+# after "(?" is a group no engine compiles; the scan once read every run of
+# ASCII letters and hyphens as a flag run and accepted all of these.
+#
+"(?i)a"	true	a flag run closed by ')'
+"(?ims-U:a)"	true	every RE2 flag, a negation, and a ':' closing the run
+"(?-i:a)"	true	a negated flag run
+"(?xyz:a)"	false	letters no engine reads as flags
+"(?a)"	false	a single letter no engine reads as a flag
+"(?-)"	false	a '-' with no flag on its far side
+"(?-:a)"	false	a '-' with no flag before the ':'
+"(?i-)"	false	a negation with no flag after it
+"(?i--m)"	false	a second '-' in one run
+"(?ia)"	false	a flag run interrupted by a letter that is no flag
 "[ab]{2}"	true	a class is quantifiable
 "\\d+"	true	an escape is quantifiable
