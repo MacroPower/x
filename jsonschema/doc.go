@@ -1000,6 +1000,10 @@
 //     its own shape, so a coerced or text-marshaling element gets the same
 //     treatment a coerced field does.
 //   - Nested sequences descend to the innermost element schema.
+//   - A slice or array type extracted to $defs, whether it is the field's
+//     type or an element's, holds its element schema on the definition, so
+//     the enum lands on a copy of the definition rendered inline, as a
+//     replaced format does; every other occurrence keeps the reference.
 //   - const, default, and examples remain whole-value constraints, so a
 //     scalar value for one of them is an error on a sequence field. A null
 //     value for default or examples names the sequence occurrence's own null

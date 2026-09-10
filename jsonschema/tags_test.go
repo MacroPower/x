@@ -1669,6 +1669,48 @@ func TestTagEnumOnSequenceFields(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, []any{"monday", "tuesday"}, s.Properties["day"].Enum)
 	})
+
+	// A slice type extracted to $defs holds its element schema on the
+	// definition. The tag once saw no element behind the $ref and refused
+	// the enum, so adding a JSONSchemaExtend method to a named slice type
+	// broke every enum tag on a field of it.
+	t.Run("slice type extracted to defs", func(t *testing.T) {
+		t.Parallel()
+
+		type T struct {
+			Codes extractedList `json:"codes" jsonschema:"enum=1|2"`
+			Plain extractedList `json:"plain"`
+		}
+
+		s, err := jsonschema.GenerateFor[T](t.Context())
+		require.NoError(t, err)
+
+		got, err := json.Marshal(s.Properties["codes"])
+		require.NoError(t, err)
+		assert.JSONEq(t, `{"type":"array","items":{"type":"integer","enum":[1,2]},"minItems":1}`, string(got),
+			"the enum lands on a copy of the definition, with its own keywords")
+
+		assert.Equal(t, "#/$defs/extractedList", s.Properties["plain"].Ref,
+			"an untagged occurrence keeps the reference")
+		assert.Nil(t, s.Defs["extractedList"].Items.Enum, "the definition carries no enum")
+	})
+
+	t.Run("slice of an extracted slice type", func(t *testing.T) {
+		t.Parallel()
+
+		type T struct {
+			Grid []extractedList `json:"grid" jsonschema:"enum=1|2"`
+		}
+
+		s, err := jsonschema.GenerateFor[T](t.Context())
+		require.NoError(t, err)
+
+		items := itemsOf(s, "grid")
+		require.Len(t, items, 1)
+		assert.Empty(t, items[0].Ref, "the element takes a copy of its definition")
+		require.NotNil(t, items[0].Items)
+		assert.Equal(t, []any{int64(1), int64(2)}, items[0].Items.Enum)
+	})
 }
 
 func TestTagEnumExamplesEmptySegment(t *testing.T) {

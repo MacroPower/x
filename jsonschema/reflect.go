@@ -1469,7 +1469,7 @@ func applyTypeOverrideDirective(fieldNode *node, directives []tagparse.Directive
 // inlineTaggedRef turns a reference whose jsonschema tag reaches into the
 // referenced definition into a copy of that definition's body, so the tag
 // applies to the copy the way it applies to an inline occurrence of the
-// type, while every other occurrence keeps the reference. Two directives
+// type, while every other occurrence keeps the reference. Three directives
 // reach in. The tag's format, pattern, and multipleOf replace what the
 // field's type declared, but a type extracted to $defs declares them on its
 // definition, where a sibling keyword beside the $ref would conjoin with the
@@ -1479,23 +1479,93 @@ func applyTypeOverrideDirective(fieldNode *node, directives []tagparse.Directive
 // container kind keeps its element or value nodes, and one naming the leaf
 // body's own type keeps the definition's keywords. A reference to a struct
 // definition stays a reference under a type= pair and becomes a leaf, the
-// documented fate of an override on it. It runs in the build phase, so the
+// documented fate of an override on it. An enum on a sequence lands on the
+// element schemas, which a definition holds beneath its body, so a sequence
+// body is copied for the tag to reach, whether the field names the type or
+// an element beneath the field does. It runs in the build phase, so the
 // null pass decides the copy from the facts the entry recorded for the type
 // as it decides an inline occurrence, and the naming pass sees an entry no
 // occurrence refers to as the orphan it is. A verbatim body is emitted as
 // authored, so it stays referenced.
 func (g *run) inlineTaggedRef(n *node, directives []tagparse.Directive) {
-	if n.kind != kindRef || n.def.body == nil || n.def.body.verbatim {
+	enum := tagHasEnum(directives)
+
+	if body := refBody(n); body != nil {
+		switch {
+		case tagOverridesType(directives) && body.kind != kindObject,
+			body.kind == kindValue && tagReplacesKeyword(directives, body.payload),
+			enum && sequenceKind(body.kind):
+			n.inlineBody(g.draft)
+		}
+	}
+
+	if enum {
+		g.inlineSequenceElements(n, map[*defEntry]bool{})
+	}
+}
+
+// inlineSequenceElements copies a sequence body into every reference the
+// tag's element rules reach beneath n: a list's element and a tuple's
+// positions, at every depth, so a nested enum descends to the innermost
+// element schema as it does through inline sequences. An entry already
+// copied on the path stays a reference, so a self-referential sequence
+// terminates and the tag reports the recursion.
+func (g *run) inlineSequenceElements(n *node, onPath map[*defEntry]bool) {
+	var children []*node
+
+	switch n.kind {
+	case kindList:
+		if n.items != nil {
+			children = []*node{n.items}
+		}
+
+	case kindTuple:
+		children = n.prefix
+	case kindValue, kindObject, kindMap, kindRef:
 		return
 	}
 
-	body := n.def.body
+	for _, c := range children {
+		e := c.def
 
-	switch {
-	case tagOverridesType(directives) && body.kind != kindObject,
-		body.kind == kindValue && tagReplacesKeyword(directives, body.payload):
-		n.inlineBody(g.draft)
+		if body := refBody(c); body == nil || !sequenceKind(body.kind) || onPath[e] {
+			continue
+		}
+
+		c.inlineBody(g.draft)
+
+		onPath[e] = true
+		g.inlineSequenceElements(c, onPath)
+		delete(onPath, e)
 	}
+}
+
+// refBody returns the body a reference node can take inline: the entry's
+// body when it is built and not verbatim, nil for every other node.
+func refBody(n *node) *node {
+	if n.kind != kindRef || n.def.body == nil || n.def.body.verbatim {
+		return nil
+	}
+
+	return n.def.body
+}
+
+// sequenceKind reports whether a node kind carries element nodes the tag's
+// element rules reach.
+func sequenceKind(k nodeKind) bool {
+	return k == kindList || k == kindTuple
+}
+
+// tagHasEnum reports whether the tag's directives carry an enum key, the
+// one directive the tag lands on a sequence's elements.
+func tagHasEnum(directives []tagparse.Directive) bool {
+	for _, d := range directives {
+		if d.Key == keyword.Enum {
+			return true
+		}
+	}
+
+	return false
 }
 
 // inlineBody replaces a reference with a copy of its definition's body in
