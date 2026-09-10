@@ -38,6 +38,14 @@ func FuzzParseSchemaValueExactRepair(f *testing.F) {
 	f.Add([]byte(`{"multipleOf":1e-320}`))
 	f.Add([]byte(`{"properties":{"a":{"enum":[1e21,1e-9,-0.0]}}}`))
 
+	// Out-of-range and precision-losing literals in every data member
+	// position: a property's default, examples under $defs, a const under
+	// an unknown keyword, and the same three past the float64 range.
+	f.Add([]byte(`{"properties":{"a":{"default":9007199254740993,"examples":[1e400,-1e400]}}}`))
+	f.Add([]byte(`{"$defs":{"d":{"examples":[0.1,1e-400,123456789012345678901234567890]}}}`))
+	f.Add([]byte(`{"x-vendor":{"const":1e400},"items":{"const":-0.0}}`))
+	f.Add([]byte(`{"definitions":{"d":{"default":{"n":9007199254740993},"const":[1e400]}}}`))
+
 	f.Fuzz(func(t *testing.T, data []byte) {
 		var doc any
 

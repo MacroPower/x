@@ -188,6 +188,11 @@ is the only one that imports the parent package.
   the shape carries no constraint. A refusal must be one a hook, a dialect, a
   conflict, or v2 reports. `FuzzFillNeverPanics` (fuzzfill) fills the same
   draw under every option set.
+- `FuzzCompileAgreesWithMetaschema`: a vendored suite schema mutated one way
+  is refused by `Compile` exactly when its draft's metaschema refuses it,
+  outside `metaschemaTolerances` (what the Schema struct cannot see) and
+  `vetBeyondMetaschema` (the checks the metaschema cannot express, each a
+  sentinel).
 - `FuzzIntervalAdmitsVsBigRat`, `FuzzComposeMultipleOfVsBigRat`,
   `FuzzParseNumericBoundVsStrconv`, `FuzzParseUnsignedLiteralVsStrconv`
   (constraint): the numeric algebra agrees with `math/big` and `strconv`.

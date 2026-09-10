@@ -296,8 +296,8 @@ type suiteFile struct {
 // metaschema map per call. Every draft and tier directory must hold at least
 // one file, so an emptied directory fails whichever test calls this, not only
 // the one that owns that tier.
-func suiteFiles(t *testing.T) []suiteFile {
-	t.Helper()
+func suiteFiles(tb testing.TB) []suiteFile {
+	tb.Helper()
 
 	var files []suiteFile
 
@@ -309,8 +309,8 @@ func suiteFiles(t *testing.T) []suiteFile {
 			}
 
 			matches, err := filepath.Glob(filepath.Join(dir, "*.json"))
-			require.NoError(t, err)
-			require.NotEmpty(t, matches, "no suite files in %s", dir)
+			require.NoError(tb, err)
+			require.NotEmpty(tb, matches, "no suite files in %s", dir)
 
 			for _, path := range matches {
 				fileName := filepath.Base(path)
@@ -439,15 +439,15 @@ func TestSuiteOptional(t *testing.T) {
 }
 
 // loadSuiteGroups reads one suite file and decodes its test groups.
-func loadSuiteGroups(t *testing.T, path string) []suiteGroup {
-	t.Helper()
+func loadSuiteGroups(tb testing.TB, path string) []suiteGroup {
+	tb.Helper()
 
 	data, err := os.ReadFile(path)
-	require.NoError(t, err)
+	require.NoError(tb, err)
 
 	var groups []suiteGroup
 
-	require.NoError(t, json.Unmarshal(data, &groups))
+	require.NoError(tb, json.Unmarshal(data, &groups))
 
 	return groups
 }
