@@ -267,7 +267,12 @@ func (f *filler) fill(rv reflect.Value, depth int) {
 		return
 	}
 
-	if f.cfg.full {
+	// The frame that first puts a type on the path owns its mark and is the
+	// only one that clears it. A struct or array re-enters a type by value
+	// while an outer frame of it is still live (X holds *Y, Y holds X by
+	// value), and a mark that frame cleared would let a pointer or container
+	// of the outer frame expand the type again, without bound.
+	if f.cfg.full && !f.path[rv.Type()] {
 		f.path[rv.Type()] = true
 		defer delete(f.path, rv.Type())
 	}

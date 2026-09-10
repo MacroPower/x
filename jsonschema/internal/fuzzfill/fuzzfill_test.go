@@ -169,6 +169,36 @@ func TestFillWithFullStopsWhereATypeRecurs(t *testing.T) {
 	assert.NotNil(t, val.Label, "a pointer to another type on the same path must fill")
 }
 
+// detourX and detourY re-enter detourX by value through a pointer detour:
+// detourX holds *detourY, and detourY holds detourX by value, so the fill
+// reaches an inner detourX while the outer one is still on the path.
+type detourX struct {
+	P *detourY
+	Q *detourX
+}
+
+type detourY struct{ V detourX }
+
+// TestFillWithFullOwnsThePathMark pins which frame clears a type's path mark
+// under the option: the one that set it. A by-value re-entry of detourX
+// (through P, then V) must leave the outer frame's mark in place, so the
+// outer Q, a pointer to the same type, stays nil. A re-entry that cleared
+// the mark once let Q expand into a fresh detourX, and the fill recursed
+// through P and Q one level deeper each time until the stack overflowed,
+// which no recover catches.
+func TestFillWithFullOwnsThePathMark(t *testing.T) {
+	t.Parallel()
+
+	var val detourX
+
+	fuzzfill.Fill(reflect.ValueOf(&val), rampBlob(), fuzzfill.WithFull())
+
+	require.NotNil(t, val.P, "a pointer to a type not yet on the path must fill")
+	assert.Nil(t, val.P.V.P, "the inner detourX sees detourY on the path")
+	assert.Nil(t, val.P.V.Q, "the inner detourX sees detourX on the path")
+	assert.Nil(t, val.Q, "the outer detourX must still see itself on the path after the re-entry")
+}
+
 // TestFillDefaultDrawIsGolden pins what the default path fills from a fixed
 // blob. Fill reads the nil-container bit only under WithNilContainers, which
 // keeps every committed fuzz corpus entry decoding to one stable value; this

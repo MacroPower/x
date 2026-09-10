@@ -1023,6 +1023,61 @@ func TestGenerateFor_RecursiveArray(t *testing.T) {
 	}`, string(got))
 }
 
+// detourX and detourY re-enter detourX by value through a pointer detour:
+// detourX holds *detourY, and detourY holds detourX by value, a shape
+// encoding/json/v2 marshals.
+type detourX struct {
+	P *detourY `json:"p"`
+	Q *detourX `json:"q"`
+}
+
+type detourY struct {
+	V detourX `json:"v"`
+}
+
+// TestGenerateFor_PointerDetourReentry pins that generation returns on a
+// type the v2 probe's full fill re-enters by value while an outer frame of
+// it is still live. The fill once let the inner detourX clear the outer
+// frame's path mark, so the outer q expanded into a fresh detourX and the
+// fill recursed until the stack overflowed, a fatal fault no recover
+// catches; the bare struct skipped the type probe, and any wrapper around
+// it reached it. Each shape must generate a schema its marshaled value
+// satisfies.
+func TestGenerateFor_PointerDetourReentry(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		typ      reflect.Type
+		instance any
+	}{
+		"bare struct": {
+			typ:      reflect.TypeFor[detourX](),
+			instance: detourX{P: &detourY{V: detourX{Q: &detourX{}}}},
+		},
+		"map member": {
+			typ:      reflect.TypeFor[struct{ M map[string]detourX }](),
+			instance: struct{ M map[string]detourX }{M: map[string]detourX{"a": {P: &detourY{}}}},
+		},
+		"slice element": {
+			typ:      reflect.TypeFor[[]detourY](),
+			instance: []detourY{{V: detourX{Q: &detourX{}}}},
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			s, err := jsonschema.Generate(t.Context(), tc.typ)
+			require.NoError(t, err)
+
+			data, err := json.Marshal(tc.instance)
+			require.NoError(t, err)
+			require.NoError(t, validateJSON(t.Context(), s, data))
+		})
+	}
+}
+
 // selfEmbeddingStruct embeds a pointer to itself. The standard library marshals
 // selfEmbeddingStruct{X: 5} as {"x":5}: the embedded pointer promotes its own X
 // at a deeper level, where the outer X shadows it. The field collector must

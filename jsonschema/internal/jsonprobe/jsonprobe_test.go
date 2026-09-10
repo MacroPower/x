@@ -54,6 +54,28 @@ type outerWithDuplicateEmbed struct {
 	C int `json:"c"`
 }
 
+// detourX and detourY re-enter detourX by value through a pointer detour:
+// detourX holds *detourY, and detourY holds detourX by value. V2 marshals
+// the shape, so the probe must reach a verdict on it.
+type detourX struct {
+	P *detourY
+	Q *detourX
+}
+
+type detourY struct{ V detourX }
+
+// recursiveShapes are the self-referential types the agreement rig adds to
+// the fuzzshape population, which [reflect.StructOf] cannot express. Each is
+// a shape the full fill once mishandled: the pointer detour re-entered
+// detourX by value and cleared the outer frame's path mark, so the fill
+// recursed without bound.
+var recursiveShapes = map[string]reflect.Type{
+	"pointer detour":            reflect.TypeFor[detourX](),
+	"pointer detour by pointer": reflect.TypeFor[*detourX](),
+	"pointer detour in map":     reflect.TypeFor[map[string]detourX](),
+	"pointer detour in slice":   reflect.TypeFor[[]detourY](),
+}
+
 func field(t *testing.T, typ reflect.Type, tag string) reflect.StructField {
 	t.Helper()
 
@@ -345,6 +367,36 @@ func TestType(t *testing.T) {
 	}
 }
 
+// TestTypeTerminatesOnPointerDetourReentry pins that the probe returns on a
+// type the full fill re-enters by value while an outer frame of it is still
+// live. The fill once let the inner detourX clear the outer frame's path
+// mark, so the outer Q expanded into a fresh detourX and the fill recursed
+// until the stack overflowed, a fatal fault no recover catches, so this test
+// kills the binary on regression. V2 marshals every shape here, so the
+// verdict is no refusal.
+func TestTypeTerminatesOnPointerDetourReentry(t *testing.T) {
+	t.Parallel()
+
+	for name, typ := range recursiveShapes {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			p := New(nil)
+
+			require.NoError(t, p.Type(typ))
+
+			if typ.Kind() == reflect.Struct {
+				require.NoError(t, p.Struct(typ))
+
+				for sf := range typ.Fields() {
+					_, err := p.Field(sf)
+					require.NoError(t, err)
+				}
+			}
+		})
+	}
+}
+
 // TestHonorsCallerOptions pins that the caller's option set reaches the
 // probe: under FormatNilMapAsNull a nil map is null, which the shape of the
 // output shows.
@@ -426,9 +478,11 @@ func TestHonorsCallerOptions(t *testing.T) {
 	assert.JSONEq(t, `{"M":null}`, string(out))
 }
 
-// TestAgreesWithV2 is the agreement rig. Over the fuzzshape population, the
-// probe's combined struct-and-fields verdict must match whether v2 itself
-// marshals a full value of the type, with the type's own marshalers running.
+// TestAgreesWithV2 is the agreement rig. Over the fuzzshape population and
+// the recursiveShapes roster, the probe's verdict must match whether v2
+// itself marshals a full value of the type, with the type's own marshalers
+// running. A struct answers through its declaration and its fields, the way
+// the generator asks; any other type answers through [Probe.Type].
 func TestAgreesWithV2(t *testing.T) {
 	t.Parallel()
 
@@ -438,13 +492,28 @@ func TestAgreesWithV2(t *testing.T) {
 
 	for i, blob := range fuzzshape.Blobs(2048) {
 		typ := fuzzshape.Type(blob)
+		requireAgreement(t, p, typ, fillOpts, fmt.Sprintf("blob %d", i))
+	}
 
-		val := reflect.New(typ)
-		fuzzfill.Fill(val, fillBlob, fillOpts...)
+	for name, typ := range recursiveShapes {
+		requireAgreement(t, p, typ, fillOptions, name)
+	}
+}
 
-		_, marshalErr := json.Marshal(val.Interface())
+// requireAgreement asserts that the probe's verdict on typ is v2's on a value
+// of typ filled under fillOpts, labeling a disagreement with label.
+func requireAgreement(t *testing.T, p *Probe, typ reflect.Type, fillOpts []fuzzfill.Option, label string) {
+	t.Helper()
 
-		probeErr := p.Struct(typ)
+	val := reflect.New(typ)
+	fuzzfill.Fill(val, fillBlob, fillOpts...)
+
+	_, marshalErr := json.Marshal(val.Interface())
+
+	var probeErr error
+
+	if typ.Kind() == reflect.Struct {
+		probeErr = p.Struct(typ)
 		for sf := range typ.Fields() {
 			if probeErr != nil {
 				break
@@ -456,12 +525,14 @@ func TestAgreesWithV2(t *testing.T) {
 
 			_, probeErr = p.Field(sf)
 		}
+	} else {
+		probeErr = p.Type(typ)
+	}
 
-		if marshalErr == nil {
-			assert.NoErrorf(t, probeErr, "blob %d: v2 marshals %s but the probe refuses it", i, typ)
-		} else {
-			assert.Errorf(t, probeErr, "blob %d: v2 refuses %s (%v) but the probe accepts it", i, typ, marshalErr)
-		}
+	if marshalErr == nil {
+		assert.NoErrorf(t, probeErr, "%s: v2 marshals %s but the probe refuses it", label, typ)
+	} else {
+		assert.Errorf(t, probeErr, "%s: v2 refuses %s (%v) but the probe accepts it", label, typ, marshalErr)
 	}
 }
 
