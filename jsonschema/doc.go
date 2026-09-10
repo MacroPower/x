@@ -1827,11 +1827,13 @@
 // [ErrDuplicatePropertyOrder], [ErrUnknownFormat], or, for a fetched
 // document, [ErrInvalidID] or [ErrMisplacedVocabulary]).
 //
-// A validation run and [Inline] both fail the referencing ref with an error
-// wrapping [ErrRefResolve] and that sentinel. [Compile] reports the bare
-// sentinel, framing a violation inside an unknown-keyword schema under the
-// failing reference and a fetched document's under that document's own
-// locator.
+// A fetched document's violation fails the referencing ref at every entry
+// point, [Compile] included, with an error wrapping [ErrRefResolve] and that
+// sentinel, framed under the referencing ref and locating the fault at the
+// fetched document's own locator. A violation inside an unknown-keyword
+// schema fails the referencing ref the same way in a validation run and
+// [Inline], while [Compile] reports the bare sentinel for it, framed under
+// the failing reference.
 //
 // The order is fixed, so a document carrying both an identifier collision and
 // a structural violation fails with [ErrIDCollision]. Documents are fetched in
