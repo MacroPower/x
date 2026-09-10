@@ -59,6 +59,14 @@ type Profile struct {
 	// nothing, so its domain is outside this policy and the identifier pass
 	// skips it, as the resolution walk does.
 	InertIDs bool
+	// Fragment reports that the tree is a fragment of a document the run
+	// already holds (a JSON-pointer target materialized from an unknown
+	// keyword or a value keyword's internals), which carries no document
+	// base of its own. A $id in it registers the key a reference reaches
+	// it by but establishes no base URI, so every child resolves against
+	// the base in effect at the fragment's position, the reading the
+	// JSON-form pointer walk gives a $id it crosses below the typed tree.
+	Fragment bool
 	// Draft7 reports whether the run resolves under Draft-07, which
 	// [Freeze]'s identifier walk reads: a fragment-only $id is the anchor
 	// spelling, $anchor and $dynamicAnchor are unknown keywords, and a

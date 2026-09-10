@@ -120,12 +120,15 @@ type Materialize func(node any) (*jsonschema.Schema, error)
 // base, the same reading [schemavet.ScopeOfJSON] gives a typed node, and
 // returns the base its children inherit. Base already carries schema's own
 // $id, so the walk rebases only below it; the target's own $id is left to the
-// caller during registration. A "$id" string inside a non-schema keyword's
-// payload (examples, default, const) or an unknown keyword is plain instance
-// data, never a resource boundary, and leaves base untouched; a target
-// reached through such data keeps the base of its nearest enclosing schema
-// resource. A caller whose walk treats $id as inert (a retrieval-base walk)
-// passes a nil rebase, and every crossed $id leaves base untouched.
+// caller during registration, where it names the target for a reference
+// and rebases nothing, since a pointer target is a fragment of the document
+// the walk started in. A "$id" string inside a non-schema keyword's payload
+// (examples, default, const) or an unknown keyword is plain instance data,
+// never a resource boundary, and leaves base untouched; a target reached
+// through such data keeps the base of its nearest enclosing schema resource,
+// and so does every reference below it, whichever pointer reaches the node.
+// A caller whose walk treats $id as inert (a retrieval-base walk) passes a
+// nil rebase, and every crossed $id leaves base untouched.
 func SchemaAtJSONForm(
 	schema *jsonschema.Schema, segments []string, base uriref.DocKey,
 	rebase func(obj map[string]any, base uriref.DocKey) uriref.DocKey,

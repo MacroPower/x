@@ -1814,7 +1814,10 @@
 //     already holds rather than a document of its own. Two such schemas
 //     claiming one key resolve in the order references reach them, and such a
 //     schema skips this check altogether, since the check needs a document
-//     base no pointer target carries.
+//     base no pointer target carries. A $id such a schema carries, at its
+//     root or below, names it for a reference but establishes no base URI:
+//     every reference inside it absolutizes against the base in effect where
+//     the unknown keyword sits, whichever pointer reaches the schema.
 //
 // The structural checks run last: field structure, type names, non-negative
 // bounds, under [Draft2020] the Draft-07 items array, and, when the

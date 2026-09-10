@@ -53,8 +53,9 @@ type Frozen struct {
 // $dynamicAnchor register nothing, and a $id beside a $ref
 // registers nothing and rebases nothing, since the draft ignores every
 // sibling of $ref; under [Profile.InertIDs] no $id registers or rebases at
-// all. A key two nodes claim within the document resolves to the first the
-// walk reaches.
+// all; and under [Profile.Fragment] every $id registers but rebases nothing.
+// A key two nodes claim within the document resolves to the first the walk
+// reaches.
 func Freeze(s *Schema, subject string, base uriref.DocKey, profile Profile) (*Frozen, error) {
 	tree, cyc := schemaclone.CloneTree(s)
 	if cyc != nil {
@@ -249,10 +250,13 @@ func identifiers(s *Schema, parent uriref.DocKey, profile Profile) declared {
 // anchor and nothing under 2020-12, declared within the enclosing document
 // for a fragment-only $id and within the document the URI part names
 // otherwise, where the URI part registers and rebases as it would without
-// the fragment; and an $id that does not resolve to a key registers no URI
-// and leaves the scope on the parent base. The anchor takes the decoded
-// fragment text, the same form a reference's fragment resolves by, so an
-// escaped spelling registers under the name a reference reaches it by.
+// the fragment; an $id that does not resolve to a key registers no URI
+// and leaves the scope on the parent base; and under [Profile.Fragment] the
+// URI part registers but leaves the scope on the parent base, since a
+// fragment carries no document base for a $id to replace. The anchor takes
+// the decoded fragment text, the same form a reference's fragment resolves
+// by, so an escaped spelling registers under the name a reference reaches
+// it by.
 func applyID(d *declared, s *Schema, parent uriref.DocKey, profile Profile) {
 	ignoreID := profile.Draft7 && s.Ref != ""
 	if s.ID == "" || profile.InertIDs || ignoreID {
@@ -273,7 +277,10 @@ func applyID(d *declared, s *Schema, parent uriref.DocKey, profile Profile) {
 	}
 
 	d.uri, d.hasURI = key, true
-	d.scope = key
+
+	if !profile.Fragment {
+		d.scope = key
+	}
 }
 
 // ScopeOfJSON reads the base a child of a JSON-form schema object inherits: the

@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json/v2"
 	"fmt"
+	"slices"
+	"sort"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -44,6 +47,104 @@ func TestJSONPointerFallbackThroughDataKeepsDocumentBase(t *testing.T) {
 	require.NoError(t, v.Validate(t.Context(), map[string]any{"x": "hello"}))
 	require.Error(t, v.Validate(t.Context(), map[string]any{"x": 42}),
 		"the fetched sub-schema must constrain x to a string")
+}
+
+// TestJSONPointerFallbackTargetIDRebasesNothing pins that a schema reached
+// through an unknown keyword resolves its own relative $ref against one
+// base, whichever JSON Pointer reaches it. The node /x-defs/a/properties/b is
+// reached directly by one pointer, where the JSON-form walk crosses a's $id
+// as data, and through its parent /x-defs/a by another, where the freeze
+// once applied a's $id as a live base, so the one node asked the resolver
+// for two documents. A pointer target is a fragment of the document it sits
+// in: its $id names it for a reference and rebases nothing, so both paths
+// absolutize z.json against the root, and a reference naming a's $id still
+// reaches a. The typed spelling with $defs keeps honoring a's $id.
+func TestJSONPointerFallbackTargetIDRebasesNothing(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		doc  string
+		want []string // every URI the resolver is asked for, sorted
+	}{
+		"unknown keyword": {
+			doc: `{
+				"$id": "http://x/root",
+				"x-defs": {
+					"a": {
+						"$id": "http://y/a/",
+						"properties": {"b": {"$ref": "z.json"}}
+					}
+				},
+				"properties": {
+					"p": {"$ref": "#/x-defs/a/properties/b"},
+					"q": {"$ref": "#/x-defs/a"},
+					"r": {"$ref": "http://y/a/"}
+				}
+			}`,
+			want: []string{"http://x/z.json"},
+		},
+		"typed position": {
+			doc: `{
+				"$id": "http://x/root",
+				"$defs": {
+					"a": {
+						"$id": "http://y/a/",
+						"properties": {"b": {"$ref": "z.json"}}
+					}
+				},
+				"properties": {
+					"p": {"$ref": "#/$defs/a/properties/b"},
+					"q": {"$ref": "#/$defs/a"},
+					"r": {"$ref": "http://y/a/"}
+				}
+			}`,
+			want: []string{"http://y/a/z.json"},
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			schema, err := jsonschema.ParseSchema([]byte(tc.doc))
+			require.NoError(t, err)
+
+			var (
+				mu    sync.Mutex
+				asked []string
+			)
+
+			resolver := jsonschema.RefResolverFunc(func(_ context.Context, uri string) (*jsonschema.Schema, error) {
+				mu.Lock()
+				defer mu.Unlock()
+
+				asked = append(asked, uri)
+
+				return &jsonschema.Schema{Type: "string"}, nil
+			})
+
+			for _, entry := range []string{"compile", "inline"} {
+				asked = nil
+
+				switch entry {
+				case "compile":
+					v, err := jsonschema.Compile(t.Context(), schema, jsonschema.WithRefResolver(resolver))
+					require.NoError(t, err)
+
+					require.NoError(t, v.Validate(t.Context(), map[string]any{"p": "s", "q": map[string]any{"b": "s"}}))
+					require.Error(t, v.Validate(t.Context(), map[string]any{"q": map[string]any{"b": 1}}),
+						"the fetched document constrains b through the parent target")
+
+				case "inline":
+					_, err := jsonschema.Inline(t.Context(), schema, jsonschema.WithRefResolver(resolver))
+					require.NoError(t, err)
+				}
+
+				sort.Strings(asked)
+				assert.Equal(t, tc.want, slices.Compact(asked), "%s asked one document per node", entry)
+			}
+		})
+	}
 }
 
 // BenchmarkValidateFallbackEnum validates a 10,000-element array of strings

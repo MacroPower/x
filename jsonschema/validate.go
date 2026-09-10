@@ -1215,13 +1215,19 @@ func (v *validator) remoteFetch(sess *refresolve.Session, cow bool) refresolve.F
 // each JSON-pointer fallback target it materializes. A target carved out of
 // raw JSON in an unknown keyword never passed through a document-level vet,
 // so it is frozen and checked at materialization, where the compile-time
-// session, the per-run sessions, and the inliner all run it.
+// session, the per-run sessions, and the inliner all run it. The target is
+// a fragment of a document the run already holds, so the freeze runs under
+// [schemavet.Profile.Fragment]: a $id it carries registers the key a
+// reference reaches it by and rebases nothing, so one node resolves its own
+// references against one base whichever pointer reaches it.
 //
 // The per-run vet wraps a violation in [ErrRefResolve], so it surfaces
 // through the referencing ref exactly like a malformed-document violation.
 // The compile-time vet passes wrap false, since refWalkError frames the bare
 // sentinel under the failing reference.
 func newFallbackVet(profile schemavet.Profile, wrap bool) refresolve.FallbackVet {
+	profile.Fragment = true
+
 	return func(sc *Schema, base uriref.DocKey, locator string) (schemavet.Node, error) {
 		node, err := schemavet.FreezeNode(sc, locator, base, profile)
 		if err != nil {

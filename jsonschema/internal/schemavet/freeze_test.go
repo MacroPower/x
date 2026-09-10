@@ -314,6 +314,30 @@ func TestFreezeTables(t *testing.T) {
 		deepID, _ := f.ID(deep)
 		assert.Equal(t, rootURI, f.NodeBase(deepID).String())
 	})
+
+	// A fragment registers every $id as a key but rebases nothing, so its
+	// anchors and children hang off the base in effect at its position.
+	t.Run("fragment", func(t *testing.T) {
+		t.Parallel()
+
+		f, err := schemavet.Freeze(src(), "the fragment", bk(t, rootURI), schemavet.Profile{Fragment: true})
+		require.NoError(t, err)
+
+		nested, ok := f.At("/$defs/nested")
+		require.True(t, ok)
+
+		deep, ok := f.At("/$defs/nested/properties/deep")
+		require.True(t, ok)
+
+		assert.Same(t, nested, f.URIs()[bk(t, "https://example.test/nested.json")], "a fragment's $id registers")
+		assert.Same(t, nested, f.Anchors()[ak(t, rootURI, "n")], "anchors hang off the fragment's base")
+		assert.Same(t, deep, f.Anchors()[ak(t, rootURI, "d")])
+
+		nestedID, _ := f.ID(nested)
+		deepID, _ := f.ID(deep)
+		assert.Equal(t, rootURI, f.ScopeBase(nestedID).String(), "a fragment's $id rebases no child")
+		assert.Equal(t, rootURI, f.NodeBase(deepID).String())
+	})
 }
 
 // TestFreezeAtFollowsSubschemaEdgesOnly pins that At answers typed positions

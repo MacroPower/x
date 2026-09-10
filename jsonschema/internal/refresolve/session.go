@@ -245,7 +245,12 @@ func (s *Session) LookupDynamicAnchor(key uriref.AnchorKey) (*jsonschema.Schema,
 // FallbackVet freezes and vets each schema the JSON-pointer fallback
 // materializes, before the session registers it. It receives the base URI
 // in effect at the target's position, which the target's own identifiers
-// resolve against, and the locator a violation names. On success it returns
+// resolve against, and the locator a violation names. The target is a
+// fragment of a document the session already holds, so the vet freezes it
+// under [schemavet.Profile.Fragment]: a $id in it registers the key a
+// reference reaches it by but rebases nothing, and every reference in it
+// absolutizes against that base whichever pointer reached the node, the
+// reading the JSON-form walk gives a $id it crosses. On success it returns
 // the minted [schemavet.Node], whose tree the session registers and hands
 // back as the resolution's target. A non-nil error rejects the target, so
 // the resolution reports the error and [Result.TargetRejected] instead of a
@@ -398,13 +403,14 @@ func (s *Session) resolveJSONPointerViaJSON(
 }
 
 // vetFallback runs the session's [FallbackVet] over a materialized target, or
-// freezes the target under an empty profile where a test installed none.
+// freezes the target as a fragment under an otherwise empty profile where a
+// test installed none.
 func (s *Session) vetFallback(target *jsonschema.Schema, base uriref.DocKey, locator string) (schemavet.Node, error) {
 	if s.fallbackVet != nil {
 		return s.fallbackVet(target, base, locator)
 	}
 
-	return schemavet.FreezeNode(target, locator, base, schemavet.Profile{InertIDs: s.reg.inertIDs})
+	return schemavet.FreezeNode(target, locator, base, schemavet.Profile{InertIDs: s.reg.inertIDs, Fragment: true})
 }
 
 // FallbackTarget pairs a schema the JSON-pointer fallback materialized with the
