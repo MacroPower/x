@@ -42,9 +42,12 @@ var (
 	// run time. The interpreter refuses both rather than emitting a schema
 	// for a tag the library cannot load.
 	ErrKeysPlacement = errors.New("validate tag: keys must immediately follow a dive into a map")
-	// ErrEndkeysPlacement reports an endkeys tag with no keys block open.
-	// Go-playground refuses the tag, so the interpreter refuses it too
-	// rather than emitting a schema for a tag the library cannot load.
+	// ErrEndkeysPlacement reports an endkeys tag with no keys block open
+	// and a part after it. Go-playground's parser panics on that endkeys,
+	// so the interpreter refuses it too rather than emitting a schema for a
+	// tag the library cannot load. A trailing endkeys with no block open is
+	// not an error: the parser returns on it and the chain ends, so the
+	// interpreter skips it.
 	ErrEndkeysPlacement = errors.New("validate tag: endkeys closes no keys block")
 	// ErrRepeatedKeyword reports two validators in one tag that both set one
 	// schema keyword (email and url both name format, alpha and numeric both
@@ -179,10 +182,15 @@ func applyParts(parts []string, field jsonschema.FieldContext, afterDive bool, c
 			continue
 		}
 
-		// An endkeys outside a block closes nothing; go-playground refuses
-		// the tag.
+		// An endkeys outside a block closes nothing. Go-playground's parser
+		// panics on one unless it is the last part, where it returns and the
+		// chain ends, so a trailing endkeys is a no-op here too.
 		if part == endkeysTag {
-			return ErrEndkeysPlacement
+			if idx != len(parts)-1 {
+				return ErrEndkeysPlacement
+			}
+
+			continue
 		}
 
 		// A control tag governs when validation runs rather than expressing

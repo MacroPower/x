@@ -341,7 +341,9 @@
 // as outside one, as go-playground refuses it, and so is a keys after a dive
 // into a slice or array, since only go-playground's map branch reads a block
 // and the others dereference a nil validation. An endkeys with no keys block
-// open is an error too ([ErrEndkeysPlacement]). A control tag, dive,
+// open is an error too ([ErrEndkeysPlacement]) unless it is the last part
+// of the tag, where go-playground's parser ends the chain and the
+// interpreter skips it. A control tag, dive,
 // keys, and endkeys are each matched as a whole
 // part, as go-playground matches them, so one carrying a parameter
 // (omitempty=) is an unrecognized validator rather than the tag it starts

@@ -167,7 +167,9 @@ func spellingExclusions() []spellingExclusion {
 			return strings.Contains(tag, "|")
 		}},
 		{reason: reasonKeysBlockUnmodeled, catches: func(tag string, _ spellingKind, _ string, _ error) bool {
-			return spells(tag, "keys") || spells(tag, "endkeys")
+			// An endkeys with no keys before it opens no block, so both
+			// sides read the tag the same way and the rig compares it.
+			return spells(tag, "keys")
 		}},
 		{reason: reasonCrossFieldUnmodeled, catches: func(tag string, _ spellingKind, _ string, _ error) bool {
 			return anyPart(tag, func(key, _ string) bool {
@@ -751,6 +753,9 @@ func spellingSeeds() []spellingSeed {
 		spellingSeed{tag: "min=3,", kind: integer},
 		spellingSeed{tag: "required, min=3", kind: integer},
 		spellingSeed{tag: "eq=a ", kind: str},
+		spellingSeed{tag: "required,endkeys", kind: str},
+		spellingSeed{tag: "endkeys,min=1", kind: str},
+		spellingSeed{tag: "dive,endkeys", kind: sequence},
 		spellingSeed{tag: "eq= ", kind: str},
 		spellingSeed{tag: "min=3 ", kind: integer},
 		spellingSeed{tag: "dive,min=2", kind: sequence},
@@ -864,6 +869,8 @@ func TestSpellingExclusionsAreReasoned(t *testing.T) {
 			kind: "map[string]int",
 			want: reasonKeysBlockUnmodeled,
 		},
+		"trailing endkeys is compared": {tag: "required,endkeys", kind: "string", want: ""},
+		"stray endkeys is compared":    {tag: "endkeys,min=1", kind: "string", want: ""},
 		"cross-field":                  {tag: "eqfield=Other", kind: "string", want: reasonCrossFieldUnmodeled},
 		"required_if":                  {tag: "required_if=Other x", kind: "string", want: reasonCrossFieldUnmodeled},
 		"trailing comma":               {tag: "min=3,", kind: "int", want: reasonPartLenient},

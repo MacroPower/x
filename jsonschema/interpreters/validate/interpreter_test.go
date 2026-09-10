@@ -3365,6 +3365,26 @@ func TestValidateInterpreterGoPlaygroundParity(t *testing.T) {
 
 		_, err := jsonschema.GenerateFor[Bare](t.Context(), opt)
 		require.ErrorIs(t, err, validate.ErrEndkeysPlacement)
+
+		// A trailing endkeys is the one placement go-playground loads: its
+		// parser panics only when a part follows, and returns on the last
+		// one, so the chain ends there. The interpreter used to refuse it
+		// and reject a tag the library accepts.
+		type Trailing struct {
+			F string `json:"f" validate:"required,endkeys"`
+		}
+
+		s, err := jsonschema.GenerateFor[Trailing](t.Context(), opt)
+		require.NoError(t, err)
+		assert.Equal(t, new(1), s.Properties["f"].MinLength,
+			"the parts before a trailing endkeys still apply")
+
+		type Doubled struct {
+			F map[string]string `json:"f" validate:"dive,keys,min=1,endkeys,endkeys"`
+		}
+
+		_, err = jsonschema.GenerateFor[Doubled](t.Context(), opt)
+		require.NoError(t, err, "a second endkeys in last place closes nothing and ends the chain")
 	})
 
 	t.Run("a structural key with a parameter inside a block is refused", func(t *testing.T) {
