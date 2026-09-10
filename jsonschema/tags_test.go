@@ -4105,6 +4105,96 @@ func TestTagTypeOverrideKeepsChildNodes(t *testing.T) {
 	})
 }
 
+// extractedList is a named slice type extracted to $defs, so a field of it
+// is a reference rather than an inline list node.
+type extractedList []int
+
+func (extractedList) JSONSchemaExtend(
+	_ context.Context, _ jsonschema.TypeContext, ts *jsonschema.TypeSchema,
+) error {
+	ts.Value.MinItems = new(1)
+
+	return nil
+}
+
+// extractedMap is a named map type extracted to $defs.
+type extractedMap map[string]int
+
+func (extractedMap) JSONSchemaExtend(
+	_ context.Context, _ jsonschema.TypeContext, ts *jsonschema.TypeSchema,
+) error {
+	ts.Value.MaxProperties = new(2)
+
+	return nil
+}
+
+// TestTagTypeOverrideOnExtractedTypeKeepsChildNodes pins that a type= pair
+// on a field whose slice, map, or provider-declared type was extracted to
+// $defs applies to a copy of the definition, so an override keeping the
+// container kind keeps the element or value schema and the definition's own
+// keywords, as it does on the inline type. The override once treated the
+// reference as a leaf, so type=array on an extracted slice rendered a bare
+// {"type": "array"} with no element schema.
+func TestTagTypeOverrideOnExtractedTypeKeepsChildNodes(t *testing.T) {
+	t.Parallel()
+
+	type doc struct {
+		A extractedList `json:"a" jsonschema:"type=array"`
+		B extractedList `json:"b"`
+		M extractedMap  `json:"m" jsonschema:"type=object"`
+		P inlinedBlob   `json:"p" jsonschema:"type=string"`
+		S alpha.Widget  `json:"s" jsonschema:"type=object"`
+	}
+
+	s, err := jsonschema.GenerateFor[doc](t.Context())
+	require.NoError(t, err)
+
+	tests := map[string]struct {
+		prop string
+		want string
+	}{
+		"array keeps the element schema and the extender's bound": {
+			prop: "a",
+			want: `{"type":"array","items":{"type":"integer"},"minItems":1}`,
+		},
+		"object keeps the value schema and the extender's bound": {
+			prop: "m",
+			want: `{"type":"object","additionalProperties":{"type":"integer"},"maxProperties":2}`,
+		},
+		"the leaf's own type keeps the definition's keywords": {
+			prop: "p",
+			want: `{"type":"string","contentEncoding":"base64","format":"blob"}`,
+		},
+		"a struct definition is a leaf object": {
+			prop: "s",
+			want: `{"type":"object"}`,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := json.Marshal(s.Properties[tc.prop])
+			require.NoError(t, err)
+			assert.JSONEq(t, tc.want, string(got))
+		})
+	}
+
+	assert.Equal(t, "#/$defs/extractedList", s.Properties["b"].Ref, "an untagged occurrence keeps the reference")
+	assert.Contains(t, s.Defs, "extractedList")
+	assert.NotContains(t, s.Defs, "extractedMap", "a definition no occurrence refers to is dropped")
+
+	v, err := jsonschema.Compile(t.Context(), s)
+	require.NoError(t, err)
+
+	require.NoError(t, v.ValidateJSON(t.Context(),
+		[]byte(`{"a":[1],"b":[1],"m":{"x":1},"p":"aGk=","s":{}}`)))
+	require.Error(t, v.ValidateJSON(t.Context(),
+		[]byte(`{"a":["x"],"b":[1],"m":{"x":1},"p":"aGk=","s":{}}`)),
+		"the element schema constrains the overridden field")
+}
+
 // TestInterpreterNullLiteralOnAnOverriddenField pins that the null-literal
 // scan still reaches a field a type= pair rebuilt. The rebuilt node used to
 // carry no field origin, which the scan reads as "not a field", so an

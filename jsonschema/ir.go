@@ -381,6 +381,59 @@ func assignFieldOrigins(n *node, origin *fieldOrigin) {
 	}
 }
 
+// cloneTree returns a private copy of the tree beneath n, for an occurrence
+// that takes a definition's body inline. Every node in the copy holds a
+// clone of its payload and none of the marks the original earned as a body
+// or an occurrence of its own: no canvas, origin, null decision, or hooked
+// mark, since the field build allocates the copy's canvases and origins and
+// the null pass decides it as it does any inline occurrence. A struct
+// property is a field node of its own, so its canvas is allocated here and
+// it keeps the origin it was built with. A reference stays a reference to
+// the same entry, so the copy ends at every $ref and a recursive body
+// terminates. The value copy a type= pair kept on a property is shared; it
+// is read only.
+func (n *node) cloneTree(draft Draft) *node {
+	if n == nil {
+		return nil
+	}
+
+	c := *n
+	c.payload = schemaclone.Clone(n.payload)
+	c.authored = nil
+	c.origin = nil
+	c.null = nullDecision{}
+	c.hooked = false
+	c.isBody = false
+	c.items = n.items.cloneTree(draft)
+	c.ghostWon = slices.Clone(n.ghostWon)
+
+	if n.prefix != nil {
+		c.prefix = make([]*node, len(n.prefix))
+		for i, p := range n.prefix {
+			c.prefix[i] = p.cloneTree(draft)
+		}
+	}
+
+	if n.props != nil {
+		c.props = slices.Clone(n.props)
+		for i := range c.props {
+			p := &c.props[i]
+			p.schema = p.schema.cloneTree(draft)
+			allocCanvasTree(p.schema, draft)
+			assignFieldOrigins(p.schema, n.props[i].schema.origin)
+		}
+	}
+
+	if n.embeds != nil {
+		c.embeds = slices.Clone(n.embeds)
+		for i := range c.embeds {
+			c.embeds[i].branch = c.embeds[i].branch.cloneTree(draft)
+		}
+	}
+
+	return &c
+}
+
 // refNode builds a kindRef node linking to e, recording the occurrence's
 // pointer-ness. [run.resolveNullability] later combines it with the def
 // entry's recorded stance: a pointer occurrence of a NullForbidden type still
@@ -768,7 +821,9 @@ func (n *node) view(draft Draft) *Schema {
 // keeps a list's element node or a tuple's prefix nodes, an object keeps a
 // map's value node or a struct's properties, embeds, and fallback value node.
 // Each kept node still carries its own null decision, canvas, and hooks. Any
-// other pairing is a leaf.
+// other pairing is a leaf. A reference reaching here names a struct
+// definition or a verbatim body; [run.inlineTaggedRef] resolved every other
+// reference to a copy of its body before the pair applies.
 func (n *node) overrideType(typeName string) {
 	if n.overrode == nil {
 		replaced := *n

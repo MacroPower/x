@@ -1381,14 +1381,14 @@ func (g *run) buildFieldSchema(
 	fieldNode.isField = true
 
 	// The jsonschema tag's directives that reach into a definition apply
-	// here, as facts of the graph: a replacing keyword turns a reference into
-	// a copy of the definition's body, and the type= pair rewrites the node.
-	// The tag's other directives wait for the null pass. A malformed tag is
-	// reported where the tag is applied, in [run.applyFieldTag], which parses
-	// it again.
+	// here, as facts of the graph: a replacing keyword or a type= pair turns
+	// a reference into a copy of the definition's body, and the pair then
+	// rewrites the node. The tag's other directives wait for the null pass.
+	// A malformed tag is reported where the tag is applied, in
+	// [run.applyFieldTag], which parses it again.
 	directives := fieldDirectives(fi)
 
-	inlineReplacedRef(fieldNode, directives)
+	g.inlineTaggedRef(fieldNode, directives)
 
 	// Allocate the authored canvas for the field and every sequence/map element
 	// beneath it. Field-level processing (the comment provider, the jsonschema
@@ -1466,49 +1466,69 @@ func applyTypeOverrideDirective(fieldNode *node, directives []tagparse.Directive
 	}
 }
 
-// inlineReplacedRef turns a reference whose tag replaces a keyword the
-// referenced definition declares into a copy of that definition's body. The
-// jsonschema tag's format, pattern, and multipleOf replace what the field's
-// type declared, but a type extracted to $defs declares them on its
+// inlineTaggedRef turns a reference whose jsonschema tag reaches into the
+// referenced definition into a copy of that definition's body, so the tag
+// applies to the copy the way it applies to an inline occurrence of the
+// type, while every other occurrence keeps the reference. Two directives
+// reach in. The tag's format, pattern, and multipleOf replace what the
+// field's type declared, but a type extracted to $defs declares them on its
 // definition, where a sibling keyword beside the $ref would conjoin with the
-// definition's instead. The occurrence becomes an inline leaf of the type,
-// so the overlay replaces the keyword the way it does for an inline type,
-// while every other occurrence keeps the reference. It runs in the build
-// phase, so the null pass decides the copy from the facts the entry
-// recorded for the type (its container kind and stance, folded with the
-// occurrence's own) as it decides an inline occurrence, and the naming pass
-// sees an entry no occurrence refers to as the orphan it is. A verbatim
-// body is emitted as authored, so it stays referenced; so does a body that
-// is not a leaf, which declares no replaceable keyword of its own.
-func inlineReplacedRef(n *node, directives []tagparse.Directive) {
-	if n.kind != kindRef || n.def.body == nil {
+// definition's instead; a leaf body one of them replaces is copied. A type=
+// pair is a transform over the reflected node, so it applies to a copy of
+// the body rather than to the bare $ref: an override that keeps the body's
+// container kind keeps its element or value nodes, and one naming the leaf
+// body's own type keeps the definition's keywords. A reference to a struct
+// definition stays a reference under a type= pair and becomes a leaf, the
+// documented fate of an override on it. It runs in the build phase, so the
+// null pass decides the copy from the facts the entry recorded for the type
+// as it decides an inline occurrence, and the naming pass sees an entry no
+// occurrence refers to as the orphan it is. A verbatim body is emitted as
+// authored, so it stays referenced.
+func (g *run) inlineTaggedRef(n *node, directives []tagparse.Directive) {
+	if n.kind != kindRef || n.def.body == nil || n.def.body.verbatim {
 		return
 	}
 
 	body := n.def.body
-	if body.kind != kindValue || body.verbatim || !tagReplacesKeyword(directives, body.payload) {
-		return
-	}
 
-	n.inlineLeafBody()
+	switch {
+	case tagOverridesType(directives) && body.kind != kindObject,
+		body.kind == kindValue && tagReplacesKeyword(directives, body.payload):
+		n.inlineBody(g.draft)
+	}
 }
 
-// inlineLeafBody replaces a reference to a leaf body with a copy of the body
-// in place. The copy takes the entry's container kind and stance, so the
-// null pass reads the facts a reference would have read off the entry: the
-// entry's stance where it declares one, the node's own otherwise, matching
-// the precedence the reference applies.
-func (n *node) inlineLeafBody() {
+// inlineBody replaces a reference with a copy of its definition's body in
+// place, keeping the position's own facts: its field mark and pointer-ness.
+// The copy takes the entry's container kind and stance, so the null pass
+// reads the facts a reference would have read off the entry: the entry's
+// stance where it declares one, the node's own otherwise, matching the
+// precedence the reference applies.
+func (n *node) inlineBody(draft Draft) {
 	e := n.def
-
-	n.payload = schemaclone.Clone(e.body.payload)
-	n.def = nil
-	n.kind = kindValue
-	n.occ.container = e.container
+	pointer, stance, isField := n.occ.pointer, n.stance, n.isField
 
 	if e.nullability != NullFromReflection {
-		n.stance = e.nullability
+		stance = e.nullability
 	}
+
+	*n = *e.body.cloneTree(draft)
+
+	n.isField = isField
+	n.occ = occurrence{pointer: pointer, container: e.container}
+	n.stance = stance
+}
+
+// tagOverridesType reports whether the tag's directives carry a type= pair
+// naming a JSON type, the pairs [applyTypeOverrideDirective] applies.
+func tagOverridesType(directives []tagparse.Directive) bool {
+	for _, d := range directives {
+		if d.Key == keyword.Type && typename.Valid(d.Value) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // tagReplacesKeyword reports whether the tag's directives set a replacing
