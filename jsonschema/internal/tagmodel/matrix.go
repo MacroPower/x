@@ -330,11 +330,11 @@ func fillNonZero() {
 	// A text-marshaled or opaque value has no emptiness the schema can name.
 	// A declared object is in the same position: its Go value is a struct or
 	// override whose zero is not the empty object a minProperties floor would
-	// assert against, so only the parent's required entry applies.
-	ignore(OpNonZero, FormTextString, "a text-marshaled value has no schema-expressible zero")
-	ignore(OpNonZero, FormOpaque, "an opaque value has no schema-expressible zero")
-	ignore(OpNonZero, FormDeclaredObject,
-		"a declared object's zero is not the empty object; only the parent's required entry applies")
+	// assert against. The null half still holds on each: a nil pointer or
+	// interface marshals as null, which go-playground's required rejects.
+	apply(OpNonZero, FormTextString, nonZeroForbidNull)
+	apply(OpNonZero, FormOpaque, nonZeroForbidNull)
+	apply(OpNonZero, FormDeclaredObject, nonZeroForbidNull)
 }
 
 // fillStringKeywords fills the four first-wins string-keyword rows, which apply

@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -3454,4 +3455,53 @@ func TestOneOfOnJSONNumberRefusesNonJSONToken(t *testing.T) {
 	s, err := jsonschema.GenerateFor[Good](t.Context(), opt)
 	require.NoError(t, err)
 	assert.Len(t, s.Properties["n"].Enum, 2)
+}
+
+// TestValidateInterpreter_RequiredForbidsNullOnOpaqueShapes pins that required
+// on a nilable occurrence whose zero the schema cannot name still forbids the
+// null a nil marshals to. Go-playground's required rejects a nil pointer or
+// interface whatever it points at, so a pointer to a struct, a pointer to a
+// text-marshaling type, an interface, and a pointer element under
+// dive,required each reject the null instance, with no floor or forbidden
+// zero beside it.
+func TestValidateInterpreter_RequiredForbidsNullOnOpaqueShapes(t *testing.T) {
+	t.Parallel()
+
+	type Inner struct {
+		A string `json:"a"`
+	}
+
+	type Doc struct {
+		P   *Inner     `json:"p"   validate:"required"`
+		T   *time.Time `json:"t"   validate:"required"`
+		Any any        `json:"any" validate:"required"`
+		Els []*Inner   `json:"els" validate:"dive,required"`
+	}
+
+	s, err := jsonschema.GenerateFor[Doc](t.Context(),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
+	)
+	require.NoError(t, err)
+
+	v, err := jsonschema.Compile(t.Context(), s)
+	require.NoError(t, err)
+
+	const valid = `{"p":{"a":""},"t":"2020-01-01T00:00:00Z","any":1,"els":[{"a":""}]}`
+
+	require.NoError(t, v.ValidateJSON(t.Context(), []byte(valid)),
+		"a non-nil occurrence holding the zero value passes go-playground's required")
+
+	for name, instance := range map[string]string{
+		"pointer to struct": `{"p":null,"t":"2020-01-01T00:00:00Z","any":1,"els":[]}`,
+		"pointer to time":   `{"p":{"a":""},"t":null,"any":1,"els":[]}`,
+		"interface":         `{"p":{"a":""},"t":"2020-01-01T00:00:00Z","any":null,"els":[]}`,
+		"pointer element":   `{"p":{"a":""},"t":"2020-01-01T00:00:00Z","any":1,"els":[null]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			require.Error(t, v.ValidateJSON(t.Context(), []byte(instance)),
+				"go-playground's required rejects the nil this null encodes")
+		})
+	}
 }

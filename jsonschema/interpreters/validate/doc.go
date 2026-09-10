@@ -36,14 +36,15 @@
 //   - required: adds the field to the parent's "required" array, even where
 //     json:",omitempty" or json:",omitzero" would normally exclude it. A
 //     property whose value is null satisfies that entry on its own, so wherever
-//     the field's shape has a non-zero form the interpreter also forbids null:
-//     a string, number, bool, slice, map, or []byte, as a pointer or bare. A
-//     pointer is nilable, and so are a bare slice, map, and []byte, each of
-//     which carries a null branch of its own. Encoding/json writes null for a
-//     nil value, which go-playground's required rejects. Where the occurrence
-//     admits no null, as under a type schema declaring NullForbidden, the
-//     interpreter writes no forbidden null and the type rejects a null
-//     instance on its own.
+//     the occurrence admits null the interpreter also forbids it: a string,
+//     number, bool, slice, map, []byte, struct, text-marshaling type, or
+//     interface, as a pointer or bare. A pointer is nilable, and so are a
+//     bare slice, map, and []byte, each of which carries a null branch of its
+//     own, and so is an interface. Encoding/json writes null for a nil value,
+//     which go-playground's required rejects. Where the occurrence admits no
+//     null, as under a type schema declaring NullForbidden, the interpreter
+//     writes no forbidden null and the type rejects a null instance on its
+//     own. A raw JSON value is the one shape that forbids nothing, below.
 //
 //     A non-pointer field also gets a type-specific non-zero constraint:
 //     minLength: 1 for strings, minItems: 1 for slices,
@@ -58,17 +59,19 @@
 //     value, which may be zero.
 //
 //     A shape with no non-zero form the schema can express gets the required
-//     entry and nothing else, not even the forbidden null: a struct, a
-//     text-marshaling type, an opaque value such as an interface, and a raw
-//     JSON value. A reference to a $defs entry takes the form the definition
-//     declares, so a reference to a struct definition is in this list while
-//     a reference to a string definition gets the string floor beside its
-//     $ref. A byte slice falls on one side or
-//     the other, depending on its schema. A []byte encodes as a base64 string
-//     and gets minLength: 1 on that string, while a byte-slice type whose
-//     schema is not a string (json.RawMessage) gets neither the floor nor the
-//     forbidden null, since a RawMessage holding the literal null is a non-nil
-//     value go-playground accepts.
+//     entry and the forbidden null alone: a struct, a text-marshaling type
+//     such as [time.Time], and an opaque value such as an interface. A nil
+//     pointer to one, or a nil interface, marshals as null, which
+//     go-playground's required rejects, while a non-nil one may hold the zero
+//     value and passes there, so no floor or forbidden zero follows the null.
+//     A reference to a $defs entry takes the form the definition declares, so
+//     a reference to a struct definition is in this list while a reference to
+//     a string definition gets the string floor beside its $ref. A byte slice
+//     falls on one side or the other, depending on its schema. A []byte
+//     encodes as a base64 string and gets minLength: 1 on that string, while
+//     a byte-slice type whose schema is not a string (json.RawMessage) gets
+//     neither the floor nor the forbidden null, since a RawMessage holding
+//     the literal null is a non-nil value go-playground accepts.
 //
 //     A dive carries the whole rule onto the element schemas, so
 //     dive,required on a [][]string forbids null and floors the size on each

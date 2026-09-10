@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
@@ -281,9 +282,10 @@ func requiredNullableSeeds() [][2][]byte {
 // the full biconditional applies. The rows it adds over
 // FuzzValidatorRequiredPointerConstraints are the six carrying a collection,
 // three pointer-scalar pairings that roster omits (a coerced number under a
-// bare required, a bool under required with ne, and a repeated required), and
-// the type-schema forbid row, the only WithTypeSchema occurrence any roster in
-// this package carries. Every other pointer-scalar row is a shape and rule that
+// bare required, a bool under required with ne, and a repeated required), the
+// three whose schema names no zero (a pointer to a struct, a pointer to a
+// time.Time, and an interface), and the type-schema forbid row, the only
+// WithTypeSchema occurrence any roster in this package carries. Every other pointer-scalar row is a shape and rule that
 // target already compares under the same draw, so a failure on one of those
 // reads as a regression in the shared driver rather than a new find. The
 // roster is fixed, so the target compiles every row once and draws an index
@@ -548,10 +550,10 @@ func TestWidenedDifferentialReachesStrictAgreement(t *testing.T) {
 const forbidRowKey = "type-derived subschema forbid"
 
 // requiredNullableShapes are the one-field shapes required is checked against
-// on its own: the pointer occurrences that admit null, and the bare slice,
-// map, and byte slice, whose nil marshals as its empty instance under
-// encoding/json/v2 and meets required's size floor instead. One field per
-// struct makes a verdict attributable. The schema verdict is per object, so a
+// on its own: the pointer occurrences that admit null, the interface, and the
+// bare slice, map, and byte slice, whose nil marshals as its empty instance
+// under encoding/json/v2 and meets required's size floor instead. One field
+// per struct makes a verdict attributable. The schema verdict is per object, so a
 // sibling field that correctly rejects the nil's encoding would mask another
 // field that wrongly accepts it, and the zero value of a one-field struct is
 // the nil these shapes need.
@@ -569,6 +571,11 @@ const forbidRowKey = "type-derived subschema forbid"
 // validators judge by one predicate. The bare container rows carry no second
 // rule, because their schema admits no null at all; they pin only that the
 // size floor lands and rejects a nil container's marshaled empty instance.
+//
+// The struct, time, and interface rows carry the forbidden null alone. Their
+// schema names no zero, and go-playground's required on a pointer or
+// interface asks only that it be non-nil, so the null is the whole of what
+// the two validators judge there.
 func requiredNullableShapes() map[string]reflect.Type {
 	field := func(typ reflect.Type, jsonTag, rule string) reflect.Type {
 		return reflect.StructOf([]reflect.StructField{{
@@ -605,6 +612,9 @@ func requiredNullableShapes() map[string]reflect.Type {
 		"coerced with ne":   field(reflect.TypeFor[*int](), "v,string", "required,ne=3"),
 		"slice with ne":     field(reflect.TypeFor[*[]int](), "v", "required,ne=2"),
 		"repeated required": field(reflect.TypeFor[*string](), "v", "required,required"),
+		"pointer to struct": field(reflect.TypeFor[*requiredObject](), "v", "required"),
+		"pointer to time":   field(reflect.TypeFor[*time.Time](), "v", "required"),
+		"interface":         field(reflect.TypeFor[any](), "v", "required"),
 		// A bare slice, map, or byte slice is nil-able in Go, but its nil
 		// marshals as its empty instance under encoding/json/v2, so its schema
 		// admits no null; required contributes the size floor, which is what
@@ -619,6 +629,13 @@ func requiredNullableShapes() map[string]reflect.Type {
 // than a value, so the field arrives with a not the forbidden null cannot merge
 // into.
 type forbiddingWord string
+
+// requiredObject is the struct the pointer-to-struct roster row points at. A
+// named type reaches the schema through a $defs reference, the spelling under
+// which required has to forbid the null beside the $ref.
+type requiredObject struct {
+	A string `json:"a"`
+}
 
 // forbiddingWordSchema returns the generate option declaring forbiddingWord's
 // schema, a string whose own not forbids a minLength subschema.

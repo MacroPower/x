@@ -555,6 +555,20 @@ func nonZeroForbidNumber(t Target, _ Rule, _ Policy) error {
 	return nil
 }
 
+// nonZeroForbidNull is the non-zero assertion on a shape whose zero the schema
+// cannot name: a text-marshaled value, an opaque value, and a declared object.
+// The forbidden null is the whole assertion there, bare or behind a pointer.
+// A nil pointer or interface marshals as null, which go-playground's required
+// rejects, while a non-nil one may hold the zero value and passes there, so
+// nothing follows the null. A declared object's zero is a struct, not the
+// empty object a minProperties floor would assert against, and the other two
+// have no emptiness the vocabulary spells.
+func nonZeroForbidNull(t Target, _ Rule, _ Policy) error {
+	nonZeroNullOnly(t)
+
+	return nil
+}
+
 // nonZeroTrue is the non-zero assertion on a boolean, where the only non-zero
 // value is true. A const another rule (or the type) pinned to false can never
 // satisfy it, so the impossible pair is reported rather than resolved by

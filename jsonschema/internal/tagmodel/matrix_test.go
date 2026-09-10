@@ -232,16 +232,16 @@ func TestMatrixGolden(t *testing.T) {
 		|non-zero assertion / array -> apply
 		|non-zero assertion / base64 byte string -> apply
 		|non-zero assertion / boolean -> apply
-		|non-zero assertion / declared object -> ignore: a declared object's zero is not the empty object; only the parent's required entry applies
+		|non-zero assertion / declared object -> apply
 		|non-zero assertion / number -> apply
 		|non-zero assertion / object -> apply
-		|non-zero assertion / opaque value -> ignore: an opaque value has no schema-expressible zero
+		|non-zero assertion / opaque value -> apply
 		|non-zero assertion / raw byte slice -> ignore: an unconstrained raw JSON value has no faithful non-zero form, not even a forbidden null
 		|non-zero assertion / string -> apply
 		|non-zero assertion / string-coerced boolean -> apply
 		|non-zero assertion / string-coerced number -> apply
 		|non-zero assertion / string-coerced string -> apply
-		|non-zero assertion / text-marshaled string -> ignore: a text-marshaled value has no schema-expressible zero
+		|non-zero assertion / text-marshaled string -> apply
 		|non-zero assertion / unresolved reference -> reject: non-zero assertion cannot be checked against a reference whose definition is not readable here
 		|pattern / array -> reject: pattern is not supported on a array
 		|pattern / base64 byte string -> apply

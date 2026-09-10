@@ -3749,18 +3749,21 @@ func TestInterpreterNullForbidOnARecursiveStancedType(t *testing.T) {
 }
 
 // TestValidateRequiredOnARecursiveStancedType pins that the built-in dialect
-// cannot reach the canvas scan at all. The constraint matrix ignores a non-zero
+// cannot reach the canvas scan at all. The constraint matrix gives a non-zero
 // rule on a declared object, which a reference to a struct definition
-// classifies as, so required on a self-referential pointer
-// adds the required entry and forbids nothing, whichever stance the type
-// carries.
+// classifies as, the forbidden null and nothing else, and it writes that null
+// under not, which the scan leaves alone. So required on a self-referential
+// pointer adds the required entry and forbids null where the occurrence
+// admits one, and forbids nothing under a stance whose reference carries no
+// null branch to forbid.
 func TestValidateRequiredOnARecursiveStancedType(t *testing.T) {
 	t.Parallel()
 
 	tests := map[string]struct {
-		stance []jsonschema.GenerateOption
+		stance     []jsonschema.GenerateOption
+		wantForbid bool
 	}{
-		"no stance": {},
+		"no stance": {wantForbid: true},
 		"null forbidden": {
 			stance: []jsonschema.GenerateOption{
 				forbidNullStance[interpNullRequired](),
@@ -3787,7 +3790,12 @@ func TestValidateRequiredOnARecursiveStancedType(t *testing.T) {
 
 			got, err := json.Marshal(def.Properties["next"])
 			require.NoError(t, err)
-			assert.NotContains(t, string(got), `"not"`)
+
+			if tc.wantForbid {
+				assert.Contains(t, string(got), `"not":{"const":null}`)
+			} else {
+				assert.NotContains(t, string(got), `"not"`)
+			}
 		})
 	}
 }
