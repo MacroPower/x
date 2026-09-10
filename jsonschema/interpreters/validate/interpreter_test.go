@@ -3586,3 +3586,61 @@ func TestValidateInterpreter_StringRuleOnCoercedKindRefused(t *testing.T) {
 		assert.Equal(t, `^[0-9]+$`, s.Properties["n"].Pattern)
 	})
 }
+
+// TestValidateInterpreter_ParameterKeepsWhitespace pins that whitespace inside
+// a parameter survives the part trim. Go-playground splits the key from the
+// parameter and never trims the parameter (cache.go), so eq=a followed by a
+// space compares against "a " and eq= followed by a space against the single
+// space. A padded key is still trimmed, the documented widening over
+// go-playground, which refuses it.
+func TestValidateInterpreter_ParameterKeepsWhitespace(t *testing.T) {
+	t.Parallel()
+
+	opt := jsonschema.WithTagInterpreter("validate", validate.NewInterpreter())
+
+	type Doc struct {
+		Trailing string `json:"trailing" validate:"eq=a "`
+		Space    string `json:"space"    validate:"eq= "`
+		Leading  string `json:"leading"  validate:"eq= a"`
+		Key      string `json:"key"      validate:" min=3"`
+		OneOf    string `json:"oneof"    validate:"oneof=a b "`
+	}
+
+	s, err := jsonschema.GenerateFor[Doc](t.Context(), opt)
+	require.NoError(t, err)
+
+	// A padded number is a parameter go-playground's strconv refuses, so
+	// the literal is refused here rather than read as the trimmed number.
+	type Padded struct {
+		F string `json:"f" validate:"min=3 "`
+	}
+
+	_, err = jsonschema.GenerateFor[Padded](t.Context(), opt)
+	require.ErrorContains(t, err, `"3 "`)
+
+	for name, want := range map[string]any{
+		"trailing": "a ",
+		"space":    " ",
+		"leading":  " a",
+	} {
+		prop := s.Properties[name]
+		require.NotNil(t, prop.Const, "%s pins no const", name)
+		assert.Equal(t, want, *prop.Const, "%s must pin the padded literal", name)
+	}
+
+	assert.Equal(t, new(3), s.Properties["key"].MinLength,
+		"a padded key is trimmed and its parameter read")
+	assert.Equal(t, []any{"a", "b"}, s.Properties["oneof"].Enum,
+		"oneof tokenizes on whitespace, so a trailing space adds no token")
+
+	v, err := jsonschema.Compile(t.Context(), s)
+	require.NoError(t, err)
+
+	const padded = `{"trailing":"a ","space":" ","leading":" a","key":"abc","oneof":"a"}`
+
+	require.NoError(t, v.ValidateJSON(t.Context(), []byte(padded)),
+		"go-playground compares against the padded parameters")
+	require.Error(t, v.ValidateJSON(t.Context(),
+		[]byte(`{"trailing":"a","space":" ","leading":" a","key":"abc","oneof":"a"}`)),
+		`go-playground rejects "a" against eq=a followed by a space`)
+}

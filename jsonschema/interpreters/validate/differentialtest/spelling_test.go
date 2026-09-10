@@ -148,7 +148,7 @@ const (
 	reasonOneOfTokenUnmatchable   = "a oneof with no token, or a token no value's text can equal, is refused where go-playground accepts a rule that matches nothing"
 	reasonFloatSpellingNonDecimal = "a non-decimal or non-finite float spelling is refused where go-playground reads it through strconv"
 	reasonBoolSpelling            = "a boolean spelling other than true or false is refused where go-playground reads it through strconv.ParseBool"
-	reasonPartLenient             = "a blank, dash, or space-padded part is skipped or trimmed here where go-playground refuses the tag"
+	reasonPartLenient             = "a blank or dash part is skipped and a space-padded key is trimmed here where go-playground refuses the tag"
 	reasonOneOfSequenceRetarget   = "oneof on a sequence retargets onto the element schemas by design, where go-playground panics"
 	reasonByteSliceElements       = "a byte slice is one base64 string: go-playground counts its bytes, which the base64 length cannot express, and reaches elements the schema cannot"
 	reasonControlTagSkipped       = "a control tag governs when go-playground runs and has no schema form, so the schema is the stricter side on the values it skips"
@@ -176,8 +176,11 @@ func spellingExclusions() []spellingExclusion {
 			})
 		}},
 		{reason: reasonPartLenient, catches: func(tag string, _ spellingKind, _ string, _ error) bool {
+			// A padded parameter is not lenient: both sides read the
+			// literal with its whitespace, so the rig compares it.
 			for part := range strings.SplitSeq(tag, ",") {
-				if part == "" || part == "-" || strings.TrimSpace(part) != part {
+				key, _, _ := strings.Cut(part, "=")
+				if part == "" || part == "-" || strings.TrimSpace(key) != key {
 					return true
 				}
 			}
@@ -747,6 +750,9 @@ func spellingSeeds() []spellingSeed {
 		spellingSeed{tag: "", kind: str},
 		spellingSeed{tag: "min=3,", kind: integer},
 		spellingSeed{tag: "required, min=3", kind: integer},
+		spellingSeed{tag: "eq=a ", kind: str},
+		spellingSeed{tag: "eq= ", kind: str},
+		spellingSeed{tag: "min=3 ", kind: integer},
 		spellingSeed{tag: "dive,min=2", kind: sequence},
 		spellingSeed{tag: "min=abc", kind: integer},
 		spellingSeed{tag: "email", kind: integer},
@@ -862,7 +868,9 @@ func TestSpellingExclusionsAreReasoned(t *testing.T) {
 		"required_if":                  {tag: "required_if=Other x", kind: "string", want: reasonCrossFieldUnmodeled},
 		"trailing comma":               {tag: "min=3,", kind: "int", want: reasonPartLenient},
 		"space after comma":            {tag: "required, min=3", kind: "int", want: reasonPartLenient},
+		"space after a bare key":       {tag: "required ", kind: "string", want: reasonPartLenient},
 		"dash part":                    {tag: "-,min=3", kind: "int", want: reasonPartLenient},
+		"padded parameter is compared": {tag: "eq=a ", kind: "string", want: ""},
 		"oneof on bool":                {tag: "oneof=true false", kind: "bool", want: ""},
 		"oneof on float":               {tag: "oneof=1 2", kind: "float64", want: ""},
 		"oneof on a sequence":          {tag: "oneof=a b", kind: "[]string", want: reasonOneOfSequenceRetarget},

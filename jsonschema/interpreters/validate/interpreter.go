@@ -130,7 +130,13 @@ func applyParts(parts []string, field jsonschema.FieldContext, afterDive bool) e
 	applied := map[tagmodel.Op]string{}
 
 	for idx := range parts {
-		part := strings.TrimSpace(parts[idx])
+		// The whole-part matches below read the part trimmed, a widening
+		// over go-playground, which refuses a padded key. The parameter is
+		// cut from the untrimmed part further down and keeps its whitespace,
+		// since go-playground compares against the padded literal.
+		raw := parts[idx]
+
+		part := strings.TrimSpace(raw)
 		if part == "" || part == "-" {
 			continue
 		}
@@ -201,19 +207,22 @@ func applyParts(parts []string, field jsonschema.FieldContext, afterDive bool) e
 		// survives, since unescapeParam runs after this split.
 		orGroup := false
 
-		if i := strings.IndexByte(part, '|'); i >= 0 {
+		if i := strings.IndexByte(raw, '|'); i >= 0 {
 			// An empty first alternative is a tag go-playground refuses
 			// outright; dropping the whole group would silently weaken the
 			// schema instead.
-			if strings.TrimSpace(part[:i]) == "" {
+			if strings.TrimSpace(raw[:i]) == "" {
 				return fmt.Errorf("validate tag: empty OR alternative in %q", part)
 			}
 
 			orGroup = true
-			part = strings.TrimSpace(part[:i])
+			raw = raw[:i]
+			part = strings.TrimSpace(raw)
 		}
 
-		key, value, hasValue := strings.Cut(part, "=")
+		key, value, hasValue := strings.Cut(raw, "=")
+
+		key = strings.TrimSpace(key)
 		if hasValue {
 			// Tags split blindly on commas, pipes, and equals, then the
 			// documented escapes in the param value only are unescaped:
