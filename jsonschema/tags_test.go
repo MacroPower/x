@@ -310,7 +310,7 @@ func TestParseFloatRejectsImpreciseIntegerBound(t *testing.T) {
 	}
 
 	_, err := jsonschema.GenerateFor[TooBig](t.Context())
-	require.ErrorContains(t, err, "exceeds exact float64 precision")
+	require.ErrorIs(t, err, jsonschema.ErrBoundNotRepresentable)
 
 	// An integer above 2^53 whose float64 is binary-exact but whose shortest
 	// decimal differs is still rejected: 2^60 would ship (and enforce) as the
@@ -321,7 +321,6 @@ func TestParseFloatRejectsImpreciseIntegerBound(t *testing.T) {
 
 	_, err = jsonschema.GenerateFor[BinaryExact](t.Context())
 	require.ErrorIs(t, err, jsonschema.ErrBoundNotRepresentable)
-	require.ErrorContains(t, err, "exceeds exact float64 precision")
 
 	// An integer above 2^53 that IS the float64's own shortest decimal is
 	// accepted unchanged: it ships and enforces as exactly the authored value.
@@ -341,7 +340,7 @@ func TestParseFloatRejectsImpreciseIntegerBound(t *testing.T) {
 	}
 
 	_, err = jsonschema.GenerateFor[ExpForm](t.Context())
-	require.ErrorContains(t, err, "exceeds exact float64 precision")
+	require.ErrorIs(t, err, jsonschema.ErrBoundNotRepresentable)
 
 	// An exponent-form integer that IS representable is accepted.
 	type ExpRepresentable struct {
@@ -2080,7 +2079,7 @@ func TestTagScalarAfterTypeOverride(t *testing.T) {
 
 				return jsonschema.GenerateFor[T](t.Context())
 			},
-			err: "invalid integer",
+			err: "not exactly representable",
 		},
 		"explicit uniqueItems conflicts with a string override": {
 			generate: func() (*jsonschema.Schema, error) {

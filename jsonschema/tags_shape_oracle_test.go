@@ -1053,8 +1053,7 @@ func TestTagCoercedScalarIsRangeChecked(t *testing.T) {
 	}
 
 	_, err := jsonschema.GenerateFor[T](t.Context())
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "out of range")
+	require.ErrorIs(t, err, jsonschema.ErrBoundNotRepresentable)
 }
 
 // TestTagRepeatedBoundIntersects pins that repeating a bound key in one tag

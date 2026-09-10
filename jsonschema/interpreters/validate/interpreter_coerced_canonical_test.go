@@ -103,8 +103,8 @@ func TestValidateInterpreter_StringCoercedRangeChecked(t *testing.T) {
 			t.Parallel()
 
 			s, err := gen(t.Context())
-			require.Error(t, err, "a value the Go type cannot hold must be rejected")
-			assert.Contains(t, err.Error(), "out of range")
+			require.ErrorIs(t, err, jsonschema.ErrBoundNotRepresentable,
+				"a value the Go type cannot hold must be rejected")
 			assert.Nil(t, s)
 		})
 	}

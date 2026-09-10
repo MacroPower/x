@@ -67,14 +67,9 @@ func ParseNumericBound(value string, kind reflect.Kind) (Endpoint, error) {
 		return numericEndpoint(float64(n), new(big.Rat).SetUint64(n)), nil
 
 	case numkind.IsInteger(kind):
-		err := CheckIntegerLiteral(value)
+		n, err := ParseSignedLiteral(value, 64)
 		if err != nil {
 			return Endpoint{}, err
-		}
-
-		n, err := strconv.ParseInt(value, 10, 64)
-		if err != nil {
-			return Endpoint{}, fmt.Errorf("invalid integer %q: %w", value, err)
 		}
 
 		if n < -maxExactInt || n > maxExactInt {
@@ -121,7 +116,8 @@ func CheckIntegerLiteral(value string) error {
 // 0, the only negative spelling naming a value an unsigned kind holds, so it
 // reads as 0 here as it does on a signed kind; any other minus is refused
 // before strconv, which would otherwise report its own syntax message for a
-// spelling the grammar admits.
+// spelling the grammar admits. A literal past the width is refused with
+// [ErrNotRepresentable], since no value of the kind renders as it.
 func ParseUnsignedLiteral(value string, bitSize int) (uint64, error) {
 	err := CheckIntegerLiteral(value)
 	if err != nil {
@@ -134,8 +130,35 @@ func ParseUnsignedLiteral(value string, bitSize int) (uint64, error) {
 	}
 
 	n, err := strconv.ParseUint(digits, 10, bitSize)
+	if errors.Is(err, strconv.ErrRange) {
+		return 0, notRepresentable(value)
+	}
+
 	if err != nil {
 		return 0, fmt.Errorf("invalid unsigned integer %q: %w", value, err)
+	}
+
+	return n, nil
+}
+
+// ParseSignedLiteral parses a JSON integer literal for a signed kind at
+// bitSize bits: the grammar of [CheckIntegerLiteral], then the value. It is
+// the one signed parse the bounds and the scalars share, so a literal past
+// the width is refused with [ErrNotRepresentable] at every kind, as the
+// unsigned parse and the float width check refuse theirs.
+func ParseSignedLiteral(value string, bitSize int) (int64, error) {
+	err := CheckIntegerLiteral(value)
+	if err != nil {
+		return 0, err
+	}
+
+	n, err := strconv.ParseInt(value, 10, bitSize)
+	if errors.Is(err, strconv.ErrRange) {
+		return 0, notRepresentable(value)
+	}
+
+	if err != nil {
+		return 0, fmt.Errorf("invalid integer %q: %w", value, err)
 	}
 
 	return n, nil
@@ -148,13 +171,20 @@ func ParseUnsignedLiteral(value string, bitSize int) (uint64, error) {
 // values encoding/json cannot marshal and no JSON number can equal.
 //
 // It is the spelling half only. A bound and a field value both then apply
-// the width check of [CheckFloatLiteral]. Both start here.
+// the width check of [CheckFloatLiteral]. Both start here. A literal past
+// float64's range is the one refusal shared with that check, since no value
+// of any float kind renders as it, so it carries [ErrNotRepresentable] here
+// as a float32 overflow does there.
 func ParseDecimalFloat(value string) (float64, error) {
 	if strings.ContainsAny(value, "_xX") {
 		return 0, fmt.Errorf("invalid number %q: not a decimal number", value)
 	}
 
 	n, err := strconv.ParseFloat(value, 64)
+	if errors.Is(err, strconv.ErrRange) {
+		return 0, notRepresentable(value)
+	}
+
 	if err != nil {
 		return 0, fmt.Errorf("invalid number %q: %w", value, err)
 	}
@@ -217,6 +247,12 @@ func CheckFloatLiteral(value string, kind reflect.Kind) error {
 	}
 
 	f, err := strconv.ParseFloat(value, width)
+	if errors.Is(err, strconv.ErrRange) {
+		// Past the width's range is the same refusal as inexact at the
+		// width: no value of the kind renders as the literal.
+		return notRepresentable(value)
+	}
+
 	if err != nil {
 		return fmt.Errorf("invalid number %q: %w", value, err)
 	}
@@ -244,7 +280,7 @@ func CheckFloatLiteral(value string, kind reflect.Kind) error {
 // notRepresentable wraps [ErrNotRepresentable] with the value, so both the
 // sentinel and the offending literal reach the caller for its own phrasing.
 func notRepresentable(value string) error {
-	return fmt.Errorf("bound %s is %w", value, ErrNotRepresentable)
+	return fmt.Errorf("%s is %w", value, ErrNotRepresentable)
 }
 
 // SizeRule is the kind of length/count bound a value expresses, so

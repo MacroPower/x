@@ -85,7 +85,7 @@ func TestValidateInterpreter_SequenceOneOfStringCoercedRangeChecked(t *testing.T
 	}
 
 	s, err := jsonschema.GenerateFor[Form](t.Context(), validateInterp())
-	require.Error(t, err, "a value the element type cannot hold must be rejected")
-	assert.Contains(t, err.Error(), "out of range")
+	require.ErrorIs(t, err, jsonschema.ErrBoundNotRepresentable,
+		"a value the element type cannot hold must be rejected")
 	assert.Nil(t, s)
 }

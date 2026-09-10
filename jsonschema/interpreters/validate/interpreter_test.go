@@ -15,6 +15,7 @@ import (
 	jsonv1 "encoding/json"
 
 	"go.jacobcolvin.com/x/jsonschema"
+	"go.jacobcolvin.com/x/jsonschema/internal/constraint"
 	"go.jacobcolvin.com/x/jsonschema/interpreters/validate"
 )
 
@@ -2829,10 +2830,9 @@ func TestValidateInterpreter_NumericValueOverflowErrors(t *testing.T) {
 	t.Parallel()
 
 	// An eq/ne/oneof/len value for a sized integer field is range-checked against
-	// the field's Go type, so a value the field can never hold overflows during
-	// parsing and surfaces as an error (wrapping strconv.ErrRange), mirroring the
-	// jsonschema-tag path. An out-of-range value never reaches an unsatisfiable or
-	// inert schema.
+	// the field's Go type, so a value the field can never hold is refused as
+	// not representable, the same refusal the jsonschema-tag path reports. An
+	// out-of-range value never reaches an unsatisfiable or inert schema.
 	type eqInt8 struct {
 		Value int8 `json:"value" validate:"eq=200"`
 	}
@@ -2943,8 +2943,8 @@ func TestValidateInterpreter_NumericValueOverflowErrors(t *testing.T) {
 			if tc.err {
 				require.Error(t, err,
 					"an out-of-range value overflows during parsing")
-				require.ErrorIs(t, err, strconv.ErrRange,
-					"the overflow wraps strconv.ErrRange like the jsonschema-tag path")
+				require.ErrorIs(t, err, constraint.ErrNotRepresentable,
+					"the overflow is the width refusal the jsonschema-tag path reports")
 
 				return
 			}

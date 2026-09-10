@@ -2,14 +2,12 @@ package tagparse
 
 import (
 	"encoding/json/v2"
-	"errors"
 	"fmt"
 	"reflect"
 	"slices"
 
 	"github.com/google/jsonschema-go/jsonschema"
 
-	"go.jacobcolvin.com/x/jsonschema/internal/constraint"
 	"go.jacobcolvin.com/x/jsonschema/internal/jsonvalue"
 	"go.jacobcolvin.com/x/jsonschema/internal/keyword"
 	"go.jacobcolvin.com/x/jsonschema/internal/tagmodel"
@@ -427,7 +425,7 @@ func (s *applyState) applyConstraint(rule tagmodel.KeyRule, key, value string) e
 
 	err = tagmodel.Apply(s.target(shape), bound, tagPolicy)
 	if err != nil {
-		return s.wrapApplyError(key, value, err)
+		return s.wrapApplyError(key, err)
 	}
 
 	// An enum on a sequence retargets to the element canvases, where each
@@ -442,19 +440,10 @@ func (s *applyState) applyConstraint(rule tagmodel.KeyRule, key, value string) e
 	return nil
 }
 
-// wrapApplyError gives a model error this dialect's phrasing. The
-// exact-representability rejection keeps its own wording, which names the
-// remedy, while still wrapping the shared sentinel so [errors.Is] identity to
-// the public ErrBoundNotRepresentable holds.
-func (s *applyState) wrapApplyError(key, value string, err error) error {
-	if errors.Is(err, constraint.ErrNotRepresentable) {
-		return fmt.Errorf(
-			"jsonschema tag: key %q: integer bound %q exceeds exact float64 "+
-				"precision (>2^53); use const for an exact extreme value: %w",
-			key, value, constraint.ErrNotRepresentable,
-		)
-	}
-
+// wrapApplyError gives a model error this dialect's phrasing. The model's
+// own message names the literal and the refusal, and the shared sentinels
+// it wraps keep their [errors.Is] identity to the public ones.
+func (s *applyState) wrapApplyError(key string, err error) error {
 	return fmt.Errorf("jsonschema tag: key %q: %w", key, err)
 }
 

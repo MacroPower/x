@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
-	"strconv"
 
 	"go.jacobcolvin.com/x/jsonschema/internal/constraint"
 	"go.jacobcolvin.com/x/jsonschema/internal/numkind"
@@ -128,17 +127,12 @@ func (sh Shape) parseNumber(lit string) (any, error) {
 		return n, nil
 
 	case numkind.IsInteger(sh.Kind):
-		err := constraint.CheckIntegerLiteral(lit)
+		// Return int64, not a platform int, so a value above 2^31-1 survives on
+		// a 32-bit build.
+		n, err := constraint.ParseSignedLiteral(lit, numkind.IntBitSize(sh.Kind))
 		if err != nil {
 			//nolint:wrapcheck // The shared policy owns the spelling and its message.
 			return nil, err
-		}
-
-		// Return int64, not a platform int, so a value above 2^31-1 survives on
-		// a 32-bit build.
-		n, err := strconv.ParseInt(lit, 10, numkind.IntBitSize(sh.Kind))
-		if err != nil {
-			return nil, fmt.Errorf("invalid integer %q: %w", lit, err)
 		}
 
 		return n, nil

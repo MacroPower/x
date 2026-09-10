@@ -38,12 +38,14 @@ var (
 	// recognizable through this one.
 	ErrConstraintConflict = tagmodel.ErrConflict
 
-	// ErrBoundNotRepresentable reports a numeric bound the schema's *float64
-	// cannot ship exactly: an integer the float64's shortest-decimal
-	// interpretation (the value the schema renders and the validator enforces)
-	// does not reproduce, so storing it would silently change the constraint.
-	// It is the single exact-representability policy every dialect's numeric
-	// bounds parse through.
+	// ErrBoundNotRepresentable reports a numeric literal no value of its
+	// field renders as: a bound the schema's *float64 cannot ship exactly (an
+	// integer the float64's shortest-decimal interpretation, the value the
+	// schema renders and the validator enforces, does not reproduce), or a
+	// bound or scalar past the width of the field's own kind, such as 200 on
+	// an int8 or 1e300 on a float32. Storing either would silently change
+	// the constraint. It is the single exact-representability policy every
+	// dialect's numeric literals parse through.
 	ErrBoundNotRepresentable = constraint.ErrNotRepresentable
 )
 
