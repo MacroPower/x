@@ -233,7 +233,10 @@
 //     comparison) cannot express, so it is an error rather than being silently
 //     weakened. On a shape with no array to constrain -- a string, number,
 //     bool, or struct -- unique is likewise an error; a map is the one
-//     exception, documented under the map constraints below.
+//     exception, documented under the map constraints below. A slice,
+//     array, or map whose elements a map cannot key (a map, slice, or func
+//     element, behind a pointer or not) is an error too ([ErrUniqueKind]),
+//     since go-playground hashes each element and panics there.
 //   - oneof=a b c: enum on the item schemas, parsed against the element type
 //     (each element must be one of the values; [][]T descends to the innermost
 //     element schema). A []byte field has no item schema (it encodes as a

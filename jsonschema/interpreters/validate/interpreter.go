@@ -83,6 +83,16 @@ var (
 		"go-playground runs a string validator on a non-string kind against the Go value, not its text",
 	)
 
+	// ErrUniqueKind reports unique on a slice, array, or map whose elements
+	// a map cannot key: a map, slice, or function element, behind a pointer
+	// or not. Go-playground hashes each element to find a repeat and panics
+	// there, so the interpreter refuses the tag rather than emit a
+	// uniqueItems go-playground could never check, or stay silent on a map
+	// go-playground could never walk.
+	ErrUniqueKind = errors.New(
+		"go-playground hashes each element for unique, which a map, slice, or func element panics on",
+	)
+
 	// The oneOfSplitRegexp pattern matches one oneof token, mirroring
 	// go-playground/validator's own splitter (`'[^']*'|\S+`): a single-quoted
 	// run (one value even with spaces) or an unquoted whitespace-delimited run.
@@ -374,6 +384,10 @@ func applyValidator(
 		return fmt.Errorf("validate tag: %s: %w: %s", key, ErrStringRuleKind, shape.Elem)
 	}
 
+	if bound.Op == tagmodel.OpUnique && !uniqueHashable(field.Type) {
+		return fmt.Errorf("validate tag: %s: %w: %s", key, ErrUniqueKind, field.Type)
+	}
+
 	if bound.Op.Overwrites() {
 		if prev, ok := applied[bound.Op]; ok {
 			return fmt.Errorf("%w: %s and %s", ErrRepeatedKeyword, prev, key)
@@ -432,6 +446,28 @@ func readsGoValueNotText(shape tagmodel.Shape, op tagmodel.Op) bool {
 	default:
 		return isCoercedForm(shape.Form) && readsGoKindAsText(shape.Kind)
 	}
+}
+
+// uniqueHashable reports whether go-playground can run unique over a value
+// of t: it keys a map by the element type, behind one pointer level, so an
+// element a map cannot key panics there, in a slice, an array, or the values
+// of a map alike. A shape with no element passes, since the model judges
+// unique on it.
+func uniqueHashable(t reflect.Type) bool {
+	for t != nil && t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+
+	if t == nil || (t.Kind() != reflect.Slice && t.Kind() != reflect.Array && t.Kind() != reflect.Map) {
+		return true
+	}
+
+	elem := t.Elem()
+	if elem.Kind() == reflect.Pointer {
+		elem = elem.Elem()
+	}
+
+	return elem.Comparable()
 }
 
 // checkOneOf rejects a oneof go-playground could never run or match on the

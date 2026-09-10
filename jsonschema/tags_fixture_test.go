@@ -404,6 +404,13 @@ type crossShape struct {
 	// an inert keyword. The equivalence pairing skips it; each dialect's own
 	// tests pin its half.
 	uniqueDiverges bool
+	// The uniqueUnhashable flag marks a shape where uniqueness splits on the
+	// reference library: go-playground hashes each element to find a repeat
+	// and panics on a slice element, so the validate dialect refuses the tag
+	// (validate.ErrUniqueKind) while the jsonschema tag's uniqueItems=true
+	// names the keyword. The equivalence pairing pins the split instead of
+	// the schema.
+	uniqueUnhashable bool
 	// The enumDiverges flag marks a shape where the enumeration splits on the
 	// reference library rather than the model: go-playground panics on oneof
 	// against a bool or a float, so the validate dialect refuses the tag
@@ -451,6 +458,11 @@ func crossShapes() []crossShape {
 	boolShape := with(bl, "bool", reflect.TypeFor[bool](), "v")
 	boolShape.enumDiverges = true
 
+	// Go-playground hashes each element for unique and panics on a slice
+	// element, so the validate dialect refuses what uniqueItems=true names.
+	nestedShape := sized(str, "nested string slice", reflect.TypeFor[[][]string]())
+	nestedShape.uniqueUnhashable = true
+
 	return []crossShape{
 		with(str, "string", reflect.TypeFor[string](), "v"),
 		with(num, "int8", reflect.TypeFor[int8](), "v"),
@@ -458,7 +470,7 @@ func crossShapes() []crossShape {
 		boolShape,
 		with(num, "pointer to int", reflect.TypeFor[*int](), "v"),
 		sized(num, "slice of int8", reflect.TypeFor[[]int8]()),
-		sized(str, "nested string slice", reflect.TypeFor[[][]string]()),
+		nestedShape,
 		byteShape,
 		with(str, "raw message", reflect.TypeFor[jsontext.Value](), "v"),
 		mapShape,
@@ -557,7 +569,19 @@ func TestCrossDialectEquivalence(t *testing.T) {
 			// must agree on the keyword or on the rejection -- except the one
 			// shape whose cell is an ignore, where the NamedKeywords policy
 			// deliberately splits the outcome (see crossShape.uniqueDiverges).
-			if !sh.uniqueDiverges {
+			switch {
+			case sh.uniqueUnhashable:
+				t.Run("uniqueness diverges by element", func(t *testing.T) {
+					t.Parallel()
+
+					_, err := generateWithTag(t, sh, "jsonschema", "uniqueItems=true")
+					require.NoError(t, err, "the jsonschema tag names the keyword")
+
+					_, err = generateWithTag(t, sh, "validate", "unique")
+					require.ErrorIs(t, err, validate.ErrUniqueKind, "the validate dialect refuses the element")
+				})
+
+			case !sh.uniqueDiverges:
 				pairs["element uniqueness"] = [2]string{"uniqueItems=true", "unique"}
 			}
 
