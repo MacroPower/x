@@ -1237,6 +1237,16 @@ func validateRegex(s string) error {
 	classPrev := rune(-1)
 	classDash := false
 
+	// Every capture name the pattern defines, the names its "\k<name>"
+	// references spell, and whether a "\k" spells no reference at all. A
+	// pattern with a named group reads "\k" as a named backreference alone,
+	// so the three are judged together once the scan has seen every group.
+	defined := map[string]bool{}
+
+	var refs []string
+
+	bareK := false
+
 	// Whether the last class atom was a class escape such as "\d", and
 	// whether a '-' after one has opened an Annex B union. B.1.2's
 	// NonemptyClassRanges lets a class escape stand on either side of a '-',
@@ -1291,6 +1301,27 @@ func validateRegex(s string) error {
 			err := validateRegexEscape(r, size)
 			if err != nil {
 				return err
+			}
+
+			// A "\k<name>" is consumed whole, so its name reaches the check
+			// below decoded the way a group name is. Any other "\k", inside
+			// a class included, is an identity escape only while the
+			// pattern defines no capture name.
+			if r == 'k' {
+				n, name := 0, ""
+				if !inClass && i+2 < len(s) && s[i+2] == '<' {
+					n, name = regexGroupNameLen(s[i+2:], 1)
+				}
+
+				if n == 0 {
+					bareK = true
+				} else {
+					refs = append(refs, name)
+					i += 2 + n
+					state = regexAtom
+
+					continue
+				}
 			}
 
 			// Inside a class the escape is decoded to the code units it
@@ -1396,6 +1427,7 @@ func validateRegex(s string) error {
 					}
 
 					parent.names = append(parent.names, name)
+					defined[name] = true
 				}
 
 				lookbehind = len(mod) > 1 && mod[0] == '<' && (mod[1] == '=' || mod[1] == '!')
@@ -1492,6 +1524,22 @@ func validateRegex(s string) error {
 
 	if inClass {
 		return errors.New("invalid regex: unterminated character class")
+	}
+
+	// With a capture name defined, ECMA 262 22.2.1 parses every "\k" as a
+	// named backreference (the grammar's N parameter is set), so a "\k"
+	// that spells no "<name>" and a name no group defines are syntax
+	// errors, wherever in the pattern the group sits.
+	if len(defined) > 0 {
+		if bareK {
+			return errors.New("invalid regex: \\k spells no named reference")
+		}
+
+		for _, ref := range refs {
+			if !defined[ref] {
+				return errors.New("invalid regex: named reference to no capture group")
+			}
+		}
 	}
 
 	return nil

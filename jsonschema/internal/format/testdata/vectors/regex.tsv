@@ -169,6 +169,23 @@
 "x{1,2}{3}"	false	a second quantifier has nothing to repeat
 "x*+"	false	a '+' after a quantifier is no lazy suffix
 #
+# ECMA-262 22.2.1 parses a pattern with a named group under the N parameter,
+# where "\k" is a named backreference and nothing else, while a pattern with
+# no named group reads "\k" as an Annex B identity escape. The scan once read
+# every "\k" as an identity escape.
+#
+"\\k"	true	an identity escape where no group is named
+"\\k<a>"	true	an identity escape followed by literals where no group is named
+"(?<a>x)\\k"	false	a bare "\k" once a group is named
+"(?<a>x)\\k<b>"	false	a reference to a name no group defines
+"(?<a>x)\\k<>"	false	a reference spelling an empty name
+"(?<a>x)\\k<a"	false	a reference with no closing '>'
+"\\k<b>(?<a>x)"	false	the undefined name checked over the whole pattern
+"\\k<a>(?<a>x)"	true	a forward reference to a name defined later
+"(?<a>x)[\\k]"	false	inside a class "\k" is no ClassEscape once a group is named
+"(?<\\u0061>x)\\k<a>"	true	a reference by the decoded name of an escaped spelling
+"(?<a>x)\\k<a>*"	true	a named backreference is quantifiable
+#
 # ECMA-262 22.2.1 reads a class range's ends as the code units its ClassAtoms
 # stand for, an escape decoded to its value and a code point past the BMP
 # split into its surrogate pair as a pattern without the u flag reads it, and

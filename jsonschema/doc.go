@@ -1599,11 +1599,13 @@
 //     in one match and admitted across the alternatives of one disjunction,
 //     as ES2025 reads it, so "(?<a>x)|(?<a>y)" passes and "(?<a>x)(?<a>y)"
 //     does not. It accepts backreferences and lookaround, since ECMA-262 has
-//     them and Go's RE2 does not, and every ASCII character is a valid
-//     ECMA-262 Annex B identity escape, so it accepts "\a" and "\_" (and a
-//     bare "\c", an Annex B ExtendedAtom in its own right). The format
-//     therefore accepts patterns RE2 rejects. This is independent of the
-//     pattern keyword, which does use RE2.
+//     them and Go's RE2 does not; once a group is named, every "\k" must
+//     spell "\k<name>" with a name some group defines, as ECMA-262 parses
+//     the pattern then, and until one is, "\k" is an identity escape. Every
+//     ASCII character is a valid ECMA-262 Annex B identity escape, so it
+//     accepts "\a" and "\_" (and a bare "\c", an Annex B ExtendedAtom in its
+//     own right). The format therefore accepts patterns RE2 rejects. This is
+//     independent of the pattern keyword, which does use RE2.
 //   - uri-template accepts the RFC 6570 op-reserve operators ("{=path}",
 //     "{!x}", "{|x*}") and a prefix modifier on any varspec ("{keys:1}").
 //     Both are valid under the RFC's ABNF and fail only during expansion,
