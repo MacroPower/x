@@ -779,11 +779,17 @@ func (fc FieldContext) Constraints() *Constraints {
 // it there. A caller-built context has no backing node, so its null admission
 // falls back to the pointer-derived answer.
 //
-// A type= pair in the jsonschema tag never reaches this method. The generator
-// rewrites an overridden field in place as a non-nullable, non-reference node
-// before it runs the tag interpreters, so an interpreter classifies against
-// the overridden payload and never against the shape the field carried before
-// the override.
+// A type= pair in the jsonschema tag displaces the field's Go type. The
+// generator rewrites an overridden field in place as a non-nullable,
+// non-reference node before it runs the tag interpreters, and this method
+// classifies that node as the named JSON type: the shape carries the named
+// type's [Form] and the kind its scalar literals parse at, the same
+// classification the tag's own keys after the pair use, and never the shape
+// the field carried before the override. An int64 field under type=string
+// is a string field here, whose scalars parse as text, rather than the
+// json:",string" coerced number a string-typed base over a numeric kind
+// would otherwise read as. The declared Go type and its element type stay
+// on the shape for a reader of the declaration.
 //
 // The decision this method reports is final. The generator runs every tag
 // interpreter after it has decided the null admission of every occurrence,
@@ -812,9 +818,21 @@ func (fc FieldContext) Constraints() *Constraints {
 func (fc FieldContext) Shape() Shape {
 	shape := tagmodel.ShapeOfQuoted(fc.Type, fc.Base, fc.quotedString(), fc.defPayload())
 
-	if fc.node != nil {
-		shape.Nullable = fc.node.null.admit
+	if fc.node == nil {
+		return shape
 	}
+
+	// An overridden node's payload names the JSON type the pair installed,
+	// and the named type displaces the Go type, so the form and the scalar
+	// kind are the named type's; nothing else tells a type=string override
+	// apart from a json:",string" coercion, since both present a
+	// string-typed base over a numeric kind.
+	if fc.node.overrode != nil {
+		named := tagmodel.ShapeForTypeName(fc.node.payload.Type)
+		shape.Form, shape.Kind = named.Form, named.Kind
+	}
+
+	shape.Nullable = fc.node.null.admit
 
 	return shape
 }

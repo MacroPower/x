@@ -578,6 +578,12 @@
 //     a [WithJSONOptions] format flag), so [ShapeOf] reports only the pointer
 //     occurrences as admitting null. A context the generator did not build
 //     falls back to the same answer.
+//   - The JSON type a jsonschema tag's type= pair installed. The pair
+//     displaces the Go type, so the shape carries the named type's [Form]
+//     and the kind its scalars parse at, the classification the tag's own
+//     keys after the pair use: an int64 field under type=string is a string
+//     field to an interpreter, whose scalars parse as text, rather than a
+//     json:",string" coerced number.
 //
 // The generator decides every occurrence's null admission before any
 // field-level hook runs, so a [Nullability] stance a type-level hook records

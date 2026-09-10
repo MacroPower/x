@@ -320,6 +320,107 @@ func TestTagInterpreterFieldContextOwner(t *testing.T) {
 // kind, the shape that requires a cycle guard in every deref loop.
 type cyclicPtr *cyclicPtr
 
+// TestFieldContextShapeReadsATypeOverride pins that an interpreter classifies
+// an overridden field against the JSON type the jsonschema tag's type= pair
+// installed, the shape the tag's own later keys parse against, rather than
+// the field's Go kind. An int64 field under type=string once classified as a
+// json:",string" coerced number, so an interpreter's oneof of "15m" failed
+// as "not a JSON integer" and its bounds were refused as unsupported on a
+// coerced field.
+func TestFieldContextShapeReadsATypeOverride(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		generate func(interp jsonschema.TagInterpreter) (*jsonschema.Schema, error)
+		form     jsonschema.Form
+		kind     reflect.Kind
+		nullable bool
+	}{
+		"int64 as string": {
+			generate: func(interp jsonschema.TagInterpreter) (*jsonschema.Schema, error) {
+				type doc struct {
+					Dur int64 `json:"dur" jsonschema:"type=string" shape:"x"`
+				}
+
+				return jsonschema.GenerateFor[doc](t.Context(), jsonschema.WithTagInterpreter("shape", interp))
+			},
+			form: jsonschema.FormString,
+			kind: reflect.String,
+		},
+		"pointer string as integer": {
+			generate: func(interp jsonschema.TagInterpreter) (*jsonschema.Schema, error) {
+				type doc struct {
+					N *string `json:"n" jsonschema:"type=integer" shape:"x"`
+				}
+
+				return jsonschema.GenerateFor[doc](t.Context(), jsonschema.WithTagInterpreter("shape", interp))
+			},
+			form: jsonschema.FormNumber,
+			kind: reflect.Int64,
+		},
+		"slice as array": {
+			generate: func(interp jsonschema.TagInterpreter) (*jsonschema.Schema, error) {
+				type doc struct {
+					L []int `json:"l" jsonschema:"type=array" shape:"x"`
+				}
+
+				return jsonschema.GenerateFor[doc](t.Context(), jsonschema.WithTagInterpreter("shape", interp))
+			},
+			form: jsonschema.FormArray,
+			kind: reflect.Invalid,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var got jsonschema.Shape
+
+			interp := jsonschema.TagInterpreterFunc(
+				func(_ context.Context, field jsonschema.FieldContext, _ jsonschema.Tag) error {
+					got = field.Shape()
+
+					return nil
+				},
+			)
+
+			_, err := tc.generate(interp)
+			require.NoError(t, err)
+
+			assert.Equal(t, tc.form, got.Form)
+			assert.Equal(t, tc.kind, got.Kind, "the overridden JSON type decides the kind a scalar parses at")
+			assert.Equal(t, tc.nullable, got.Nullable, "an overridden field admits no null")
+			assert.NotNil(t, got.Type, "the declared Go type stays on the shape")
+		})
+	}
+}
+
+// TestFieldContextConstraintsUnderATypeOverride pins that an interpreter's
+// rule on an overridden field parses and applies against the installed JSON
+// type, so a oneof of duration strings on an int64 field under type=string
+// lands as a string enum the generated schema enforces.
+func TestFieldContextConstraintsUnderATypeOverride(t *testing.T) {
+	t.Parallel()
+
+	type doc struct {
+		Dur int64 `json:"dur" jsonschema:"type=string" oneof:"15m 30m"`
+	}
+
+	interp := jsonschema.TagInterpreterFunc(
+		func(_ context.Context, field jsonschema.FieldContext, _ jsonschema.Tag) error {
+			return field.Constraints().Apply(jsonschema.OpOneOf, jsonschema.AxisAuto, "15m", "30m")
+		},
+	)
+
+	s, err := jsonschema.GenerateFor[doc](t.Context(), jsonschema.WithTagInterpreter("oneof", interp))
+	require.NoError(t, err)
+
+	assert.Equal(t, []any{"15m", "30m"}, s.Properties["dur"].Enum)
+	require.NoError(t, jsonschema.Validate(t.Context(), s, map[string]any{"dur": "15m"}))
+	require.Error(t, jsonschema.Validate(t.Context(), s, map[string]any{"dur": "45m"}))
+}
+
 // TestFieldContextElementContextsCyclicPointer pins that ElementContexts
 // terminates on a field whose type is a cyclic pointer. A WithTypeSchema
 // override lets generation build a node for the type (bypassing the
