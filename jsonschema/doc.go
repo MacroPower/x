@@ -84,8 +84,9 @@
 //     or [JSONSchemaExtender] method.
 //   - [ErrConflictingTypeSchema] reports a malformed [TypeSchema] from a
 //     type-level hook: more than one of Value, Verbatim, or Ref set, a Ref
-//     naming a type that is not extractable to $defs, or a Ref alias chain
-//     that cycles back to its own type.
+//     naming a type that is not extractable to $defs (a Ref naming a type
+//     declared through Verbatim takes that verbatim schema instead), or a
+//     Ref alias chain that cycles back to its own type.
 //   - [ErrInvalidDefaultsInstance] reports a [WithDefaultsFrom] instance that
 //     does not match the generated root type or does not marshal to a JSON
 //     object.

@@ -653,11 +653,14 @@ func checkTypeSchemaExclusive(t reflect.Type, ts TypeSchema) error {
 // rather than a payload $ref-string scan. The referenced type must be
 // extractable (a struct or a type extracted to $defs); a non-extractable target
 // would inline a copy and lose the reachability guarantee, so it is rejected.
-// With definitions disabled the alias takes the inline node every other
-// reference takes, and a circular target still resolves to a $ref. The
-// alias's own stance rides on the node, where the null pass applies it
-// after the target's recorded stance and before the occurrence's
-// pointer-ness.
+// A target declared through [TypeSchema.Verbatim] has no definition to keep
+// reachable, so the alias takes the verbatim node the target resolves to,
+// emitted as authored. With definitions disabled the alias takes the inline
+// node every other reference takes, and a circular target still resolves to
+// a $ref. The alias's own stance rides on the node, where the null pass
+// applies it after the target's recorded stance and before the occurrence's
+// pointer-ness; a verbatim node carries no null encoding, so the stance
+// changes nothing there.
 func (g *run) refTypeOverride(t reflect.Type, ts TypeSchema, pointer bool) (*node, error) {
 	// The alias resolves through schemaForType, which consults the override
 	// chain again for the target; a Ref naming its own type, directly or through
@@ -679,11 +682,11 @@ func (g *run) refTypeOverride(t reflect.Type, ts TypeSchema, pointer bool) (*nod
 		return nil, err
 	}
 
-	// With definitions enabled an extractable target always resolves to a
-	// reference; without them only a circular one does, and an extractable
-	// target's inline node is the alias's schema as it is any other
-	// occurrence's.
-	if ref.kind != kindRef && (g.definitions || !extractable(numkind.DerefType(ts.Ref))) {
+	// With definitions enabled an extractable target resolves to a reference
+	// unless a Verbatim declaration answers for it, which is never extracted;
+	// without them only a circular one does, and an extractable target's
+	// inline node is the alias's schema as it is any other occurrence's.
+	if ref.kind != kindRef && !ref.verbatim && (g.definitions || !extractable(numkind.DerefType(ts.Ref))) {
 		return nil, fmt.Errorf(
 			"%w: type %s Ref %s does not name an extractable type "+
 				"(a named struct, or a named type implementing JSONSchemaProvider or JSONSchemaExtender)",

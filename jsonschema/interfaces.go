@@ -111,7 +111,9 @@ type TypeSchema struct {
 	// non-extractable Ref is [ErrConflictingTypeSchema], as is an alias chain
 	// that cycles back to its own type (a self-Ref, or a mutual A -> B -> A
 	// chain). With [WithDefinitions] disabled the alias inlines its target
-	// as every other reference does. A pointer type names its element type:
+	// as every other reference does. A target declared through Verbatim has
+	// no definition, so the alias takes the verbatim schema itself, emitted
+	// as authored. A pointer type names its element type:
 	// the pointer level is no occurrence fact, so only the occurrence's own
 	// pointer-ness and the stances decide whether the alias admits null. A
 	// Ref alias may itself name an aliased type; along such a chain the

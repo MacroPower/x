@@ -2799,6 +2799,62 @@ func TestGenerateFor_TypeSchemaRefWithDefinitionsFalse(t *testing.T) {
 	}
 }
 
+// TestGenerateFor_TypeSchemaRefToVerbatimTarget pins that a Ref alias naming
+// a named struct declared through TypeSchema.Verbatim takes the verbatim
+// schema, under definitions enabled as under disabled. The alias once
+// demanded a $ref node from the target's resolution, which a Verbatim
+// declaration never produces, and refused the alias as naming a type that
+// is not extractable although the target is a named struct.
+func TestGenerateFor_TypeSchemaRefToVerbatimTarget(t *testing.T) {
+	t.Parallel()
+
+	type target struct {
+		A int `json:"a"`
+	}
+
+	type alias struct{}
+
+	type doc struct {
+		T target `json:"t"`
+		L alias  `json:"l"`
+		P *alias `json:"p"`
+	}
+
+	tests := map[string]struct {
+		definitions bool
+	}{
+		"definitions enabled":  {definitions: true},
+		"definitions disabled": {definitions: false},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			s, err := jsonschema.GenerateFor[doc](t.Context(),
+				jsonschema.WithDefinitions(tc.definitions),
+				jsonschema.WithTypeSchemaFor[target](jsonschema.TypeSchema{
+					Verbatim: &jsonschema.Schema{Type: "object", Description: "verbatim"},
+				}),
+				jsonschema.WithTypeSchemaFor[alias](jsonschema.TypeSchema{
+					Ref: reflect.TypeFor[target](),
+				}),
+			)
+			require.NoError(t, err, "the Ref target is a named struct")
+
+			want := `{"type":"object","description":"verbatim"}`
+
+			for _, prop := range []string{"t", "l", "p"} {
+				got, err := json.Marshal(s.Properties[prop])
+				require.NoError(t, err)
+				assert.JSONEq(t, want, string(got), "property %q takes the verbatim schema with no null encoding", prop)
+			}
+
+			assert.Empty(t, s.Defs, "a verbatim declaration is never extracted")
+		})
+	}
+}
+
 func TestGenerateFor_TypeSchemaRefSelfCycleRejected(t *testing.T) {
 	t.Parallel()
 
