@@ -168,4 +168,33 @@
 "(^)*"	true	a group holding an assertion is quantifiable
 "x{1,2}{3}"	false	a second quantifier has nothing to repeat
 "x*+"	false	a '+' after a quantifier is no lazy suffix
+#
+# ECMA-262 22.2.1 reads a class range's ends as the code units its ClassAtoms
+# stand for, an escape decoded to its value and a code point past the BMP
+# split into its surrogate pair as a pattern without the u flag reads it, and
+# Annex B lets a class escape stand beside a literal '-'. The scan once left
+# every range with an escaped end unchecked.
+#
+"[\\x30-\\x41]"	true	hex escapes in order
+"[\\x41-\\x30]"	false	hex escapes out of order
+"[\\x-0]"	false	"\x" with no hex digits is the identity escape 'x', above '0'
+"[\\u0041-\\u0030]"	false	four-digit escapes out of order
+"[\\u{41}-a]"	false	"\u{41}" is 'u' and literals without the u flag, so '}' opens the range
+"[\\101-\\100]"	false	legacy octal escapes out of order
+"[\\0-a]"	true	the NUL escape below 'a'
+"[\\c1-\\c0]"	false	Annex B control escapes over digits, out of order
+"[\\c-a]"	false	a "\c" before '-' is a literal backslash, then 'c' opens a range above 'a'
+"[\\c_-a]"	true	an Annex B control escape over '_' below 'a'
+"[\\b-\\t]"	true	backspace below tab
+"[\\t-\\b]"	false	tab above backspace
+"[\\d-\\x30]"	true	a class escape makes the '-' literal
+"[\\--a]"	true	an escaped '-' is a literal that opens a range from itself
+"[\\/-!]"	false	an escaped '/' above '!'
+"[a-\U0001f600]"	true	a range up to a high surrogate
+"[\U0001f600-\U0001f601]"	false	two surrogate pairs, whose middle units run downward
+"[\\ud83d-\\ude00]"	true	a surrogate pair spelled as two escapes, in order
+"[\\d-- 0]"	true	the '-' after a class escape and the '-' after that form an Annex B union, so the space opens nothing
+"[\\d-\\w-a]"	true	a union of two class escapes, then a literal '-' and 'a'
+"[\\dx-a]"	false	a literal after a class escape opens a range of its own
+"[0-\\d-- 0]"	false	a class escape closing a union opens no second one, so the next '-' pair is a range out of order
 "(?<a>)(?:|(?<a>))"	false	a name repeated in a later alternative of a group after its first use, which V8 alone compiles

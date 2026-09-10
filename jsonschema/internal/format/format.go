@@ -1201,18 +1201,21 @@ const (
 // "{m,n}" must not exceed the second. A '{' that opens no braced quantifier
 // form is an Annex B ExtendedPatternCharacter, so "a{,5}" and "a{2,1" stay
 // literal. The assertions '^' and '$' and the word-boundary escapes "\b" and
-// A class range whose two ends are literal code points must run upward, the
-// early error 22.2.1.1 keeps; a range with an escape on either side is left
-// alone, since Annex B lets a class escape stand beside a literal '-'. A
-// capture name defined twice is refused where both groups can take part in
-// one match, the early error 22.2.1.1 keeps, and admitted across the
-// alternatives of one disjunction, as ES2025 reads it.
 // "\B" take no quantifier, since Term derives an Assertion on its own, and
 // neither does a lookbehind; a lookahead does, which Annex B's
 // QuantifiableAssertion covers. A group modifier is the ES2025
 // "(?ims-ims:" form, each flag at most once and a ':' closing the run, so a
 // bare "(?i)" and RE2's "(?P<name>" spelling are refused as every engine
 // refuses them.
+// A class range must run upward, the early error 22.2.1.1 keeps. Its ends
+// are read as UTF-16 code units, as an engine reads a pattern without the u
+// flag, so a code point past the BMP is a surrogate pair of two atoms, and
+// an escape is decoded to its value, so "[\x41-\x30]" is out of order and
+// "[\x-0]" too, since "\x" with no hex digits is the identity escape 'x'. A
+// class escape such as "\d" beside a '-' makes the '-' literal, as Annex B
+// reads it. A capture name defined twice is refused where both groups can
+// take part in one match, the early error 22.2.1.1 keeps, and admitted
+// across the alternatives of one disjunction, as ES2025 reads it.
 func validateRegex(s string) error {
 	// ECMA 262 reads a pattern as code points, so a byte sequence that is
 	// not UTF-8 holds no source character; every engine refuses it. The
@@ -1234,6 +1237,45 @@ func validateRegex(s string) error {
 	classPrev := rune(-1)
 	classDash := false
 
+	// Whether the last class atom was a class escape such as "\d", and
+	// whether a '-' after one has opened an Annex B union. B.1.2's
+	// NonemptyClassRanges lets a class escape stand on either side of a '-',
+	// the "range" then meaning the union of the three, so the atom after
+	// that '-' is consumed with no order check and opens nothing.
+	classEscapePrev := false
+	classUnion := false
+
+	// The classAtom closure takes one UTF-16 code unit of class content, or
+	// a class escape, which opens a range when it is a raw '-' with a
+	// literal before it and no ']' after, closes a range when one is open,
+	// and otherwise stands as the literal the next '-' may open a range
+	// from.
+	classAtom := func(u rune, classEscape, opensRange bool) error {
+		switch {
+		case classUnion:
+			classPrev, classDash, classEscapePrev, classUnion = -1, false, false, false
+		case classEscape:
+			// A class escape closing an open range ends that Annex B union;
+			// one standing alone may open the next.
+			classPrev, classDash, classEscapePrev = -1, false, !classDash
+		case opensRange && classEscapePrev:
+			classEscapePrev, classUnion = false, true
+		case opensRange && classPrev >= 0 && !classDash:
+			classDash = true
+		case classDash:
+			if u < classPrev {
+				return errors.New("invalid regex: class range out of order")
+			}
+
+			classPrev, classDash = -1, false
+
+		default:
+			classPrev, classEscapePrev = u, false
+		}
+
+		return nil
+	}
+
 	state := regexNothing
 
 	for i := 0; i < len(s); {
@@ -1251,12 +1293,35 @@ func validateRegex(s string) error {
 				return err
 			}
 
+			// Inside a class the escape is decoded to the code units it
+			// stands for, so a range it bounds is checked like any other,
+			// while a class escape stands beside a '-' with no range.
+			if inClass {
+				units, n, classEscape := regexClassEscape(s[i+1:])
+				i += 1 + n
+
+				if classEscape {
+					err := classAtom(0, true, false)
+					if err != nil {
+						return err
+					}
+
+					continue
+				}
+
+				for _, u := range units {
+					err := classAtom(u, false, false)
+					if err != nil {
+						return err
+					}
+				}
+
+				continue
+			}
+
 			i += 1 + size
 			state = regexAtom
 
-			// An escape's value is not read, so a range it bounds goes
-			// unchecked.
-			classPrev, classDash = -1, false
 			// Outside a class "\b" and "\B" are word-boundary assertions,
 			// which no quantifier may follow; inside one "\b" is a
 			// backspace, an ordinary class member.
@@ -1281,19 +1346,13 @@ func validateRegex(s string) error {
 			}
 
 			r, size := utf8.DecodeRuneInString(s[i:])
+			opensRange := c == '-' && i+1 < len(s) && s[i+1] != ']'
 
-			switch {
-			case c == '-' && classPrev >= 0 && !classDash && i+1 < len(s) && s[i+1] != ']':
-				classDash = true
-			case classDash:
-				if r < classPrev {
-					return errors.New("invalid regex: class range out of order")
+			for _, u := range regexCodeUnits(r) {
+				err := classAtom(u, false, opensRange)
+				if err != nil {
+					return err
 				}
-
-				classPrev, classDash = -1, false
-
-			default:
-				classPrev = r
 			}
 
 			i += size
@@ -1302,7 +1361,7 @@ func validateRegex(s string) error {
 
 		case c == '[':
 			inClass = true
-			classPrev, classDash = -1, false
+			classPrev, classDash, classEscapePrev, classUnion = -1, false, false, false
 
 			// A leading '^' negates the class and is no class atom, so it
 			// bounds no range.
@@ -1782,6 +1841,95 @@ func validateRegexEscape(c rune, size int) error {
 	}
 
 	return nil
+}
+
+// regexCodeUnits returns the UTF-16 code units of r, the atoms an engine
+// reads a class literal as without the u flag: one for a BMP code point and
+// the surrogate pair for any other.
+func regexCodeUnits(r rune) []rune {
+	if r < 0x10000 {
+		return []rune{r}
+	}
+
+	hi, lo := utf16.EncodeRune(r)
+
+	return []rune{hi, lo}
+}
+
+// regexClassEscape reads the escape that follows a backslash inside a class,
+// where s holds the pattern from the byte after the backslash, and returns
+// the code units the escape stands for, the number of bytes it consumed
+// after the backslash, and whether it is a class escape ("\d" and its
+// kin), which stands for no unit and makes a neighboring '-' literal. The
+// readings are ECMA 262 22.2.1 ClassEscape with Annex B's additions for a
+// pattern without the u flag: a legacy octal escape, "\c" followed by a digit
+// or '_', "\x" and "\u" with too few hex digits as the identity escapes 'x'
+// and 'u', and a "\c" followed by anything else as a literal backslash with
+// the 'c' left to read as the next atom.
+func regexClassEscape(s string) ([]rune, int, bool) {
+	r, size := utf8.DecodeRuneInString(s)
+
+	switch r {
+	case 'd', 'D', 's', 'S', 'w', 'W':
+		return nil, size, true
+	case 'b':
+		return []rune{'\b'}, size, false
+	case 'f':
+		return []rune{'\f'}, size, false
+	case 'n':
+		return []rune{'\n'}, size, false
+	case 'r':
+		return []rune{'\r'}, size, false
+	case 't':
+		return []rune{'\t'}, size, false
+	case 'v':
+		return []rune{'\v'}, size, false
+	case 'c':
+		if len(s) > 1 && (isASCIILetter(s[1]) || (s[1] >= '0' && s[1] <= '9') || s[1] == '_') {
+			return []rune{rune(s[1]) % 32}, 2, false
+		}
+
+		return []rune{'\\'}, 0, false
+
+	case '0', '1', '2', '3', '4', '5', '6', '7':
+		return regexLegacyOctal(s)
+	case 'x':
+		if len(s) >= 3 {
+			if v, ok := regexHexValue(s[1:3]); ok {
+				return []rune{v}, 3, false
+			}
+		}
+
+	case 'u':
+		if len(s) >= 5 {
+			if v, ok := regexHexValue(s[1:5]); ok {
+				return []rune{v}, 5, false
+			}
+		}
+	}
+
+	return regexCodeUnits(r), size, false
+}
+
+// regexLegacyOctal reads the Annex B LegacyOctalEscapeSequence at the start
+// of s: up to three octal digits when the first is 0 to 3 and up to two
+// otherwise, which keeps the value under 256. A lone "\0" is the NUL escape,
+// the same reading.
+func regexLegacyOctal(s string) ([]rune, int, bool) {
+	limit := 2
+	if s[0] <= '3' {
+		limit = 3
+	}
+
+	n := 0
+	value := rune(0)
+
+	for n < limit && n < len(s) && s[n] >= '0' && s[n] <= '7' {
+		value = value*8 + rune(s[n]-'0')
+		n++
+	}
+
+	return []rune{value}, n, false
 }
 
 // validateRelativeJSONPointer validates a Relative JSON Pointer per
