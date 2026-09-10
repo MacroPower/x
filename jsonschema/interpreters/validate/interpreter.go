@@ -60,6 +60,19 @@ var (
 	// one value; on either kind the jsonschema tag's enum= lists the values.
 	ErrOneOfKind = errors.New("go-playground loads oneof only on a string or integer kind")
 
+	// ErrStringRuleKind reports a format, pattern, or content validator on a
+	// numeric or bool kind whose instance is a string: a json:",string" field
+	// or a type that marshals itself as text. Go-playground runs every string
+	// validator against the Go value by kind, never against the text the
+	// field marshals, so number and numeric accept every such field and the
+	// rest reject every one. A keyword over the marshaled text would agree
+	// with neither, so the interpreter refuses the tag. The refusal keys on
+	// the Go kind, so a quoted [encoding/json.Number], a string kind, keeps
+	// its string validators.
+	ErrStringRuleKind = errors.New(
+		"go-playground runs a string validator on a numeric or bool kind against the Go value, not its text",
+	)
+
 	// The oneOfSplitRegexp pattern matches one oneof token, mirroring
 	// go-playground/validator's own splitter (`'[^']*'|\S+`): a single-quoted
 	// run (one value even with spaces) or an unquoted whitespace-delimited run.
@@ -282,6 +295,17 @@ func applyValidator(
 		return fmt.Errorf("validate tag: %s: %w", reason, err)
 	}
 
+	// A string validator on a numeric or bool kind reads the Go value in
+	// go-playground, so the string schema a coerced field takes is not the
+	// value it judges. The model applies the keyword to any string instance,
+	// which is right for a dialect naming the keyword outright, so the
+	// kind check lives here with the other go-playground kind rules. The
+	// native number and bool forms need no check: the model rejects a
+	// string keyword there for want of a string.
+	if bound.Op.IsStringKeyword() && isCoercedForm(shape.Form) && readsGoKindAsText(shape.Kind) {
+		return fmt.Errorf("validate tag: %s: %w: %s", key, ErrStringRuleKind, shape.Elem)
+	}
+
 	if bound.Op.Overwrites() {
 		if prev, ok := applied[bound.Op]; ok {
 			return fmt.Errorf("%w: %s and %s", ErrRepeatedKeyword, prev, key)
@@ -303,6 +327,23 @@ func applyValidator(
 	}
 
 	return nil
+}
+
+// isCoercedForm reports whether a form is a numeric or bool value whose
+// instance is a string: a json:",string" field or a type marshaling itself
+// as text.
+func isCoercedForm(form tagmodel.Form) bool {
+	return form == tagmodel.FormCoercedNumber || form == tagmodel.FormCoercedBool
+}
+
+// readsGoKindAsText reports whether go-playground judges a string validator on
+// the kind without the text the field marshals: every integer, float, and
+// bool kind. Its isNumber and isNumeric return true on a numeric kind before
+// reading anything, and the other string validators run their regex over
+// reflect's description of a non-string value, which no marshaled text
+// equals.
+func readsGoKindAsText(kind reflect.Kind) bool {
+	return numkind.IsInteger(kind) || numkind.IsFloat(kind) || kind == reflect.Bool
 }
 
 // checkOneOf rejects a oneof go-playground could never run or match on the

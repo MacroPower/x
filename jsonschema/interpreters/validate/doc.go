@@ -162,6 +162,15 @@
 // quoted instance -- so they are rejected with an error rather than silently
 // dropped as an inert numeric keyword on a string schema.
 //
+// The format, pattern, and content tags are errors on such a field too
+// ([ErrStringRuleKind]). Go-playground runs every string validator against
+// the Go value by kind rather than against the text the field marshals, so
+// number and numeric accept every numeric field and the other string
+// validators reject every one, whatever the text says. A keyword over that
+// text would agree with neither verdict. The refusal keys on the Go kind, so
+// a quoted [encoding/json.Number], a string kind whose text go-playground
+// does read, keeps its string validators.
+//
 // A json:",string" string field double-encodes (the value abc marshals as the
 // JSON string "\"abc\""), so its scalar rules (eq, ne, oneof, and required's
 // non-zero check) compare against that quoted text, while the rules that would

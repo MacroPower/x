@@ -3505,3 +3505,84 @@ func TestValidateInterpreter_RequiredForbidsNullOnOpaqueShapes(t *testing.T) {
 		})
 	}
 }
+
+// TestValidateInterpreter_StringRuleOnCoercedKindRefused pins that a string
+// validator on a json:",string" numeric or bool field, or on a numeric type
+// marshaling itself as text, is refused rather than emitted against the
+// serialized text. Go-playground's isNumber and isNumeric return true on
+// every numeric kind without reading any text, so a pattern over that text
+// rejected the -5 and 1e+21 go-playground accepts, and its other string
+// validators match reflect's description of a non-string value, which no
+// text equals. A quoted json.Number is a string kind there and keeps the
+// validator.
+func TestValidateInterpreter_StringRuleOnCoercedKindRefused(t *testing.T) {
+	t.Parallel()
+
+	opt := jsonschema.WithTagInterpreter("validate", validate.NewInterpreter())
+
+	refused := map[string]func(context.Context) (*jsonschema.Schema, error){
+		"number on a coerced int": func(ctx context.Context) (*jsonschema.Schema, error) {
+			type F struct {
+				N int `json:"n,string" validate:"number"`
+			}
+
+			return jsonschema.GenerateFor[F](ctx, opt)
+		},
+		"numeric on a coerced float": func(ctx context.Context) (*jsonschema.Schema, error) {
+			type F struct {
+				N float64 `json:"n,string" validate:"numeric"`
+			}
+
+			return jsonschema.GenerateFor[F](ctx, opt)
+		},
+		"alpha on a text-marshaling bool": func(ctx context.Context) (*jsonschema.Schema, error) {
+			type F struct {
+				B onOff `json:"b" validate:"alpha"`
+			}
+
+			return jsonschema.GenerateFor[F](ctx, opt)
+		},
+		"email on a coerced int": func(ctx context.Context) (*jsonschema.Schema, error) {
+			type F struct {
+				N int `json:"n,string" validate:"email"`
+			}
+
+			return jsonschema.GenerateFor[F](ctx, opt)
+		},
+		"base64 on a text-marshaling int": func(ctx context.Context) (*jsonschema.Schema, error) {
+			type F struct {
+				N levelText `json:"n" validate:"base64"`
+			}
+
+			return jsonschema.GenerateFor[F](ctx, opt)
+		},
+		"number on a text-marshaling element under dive": func(ctx context.Context) (*jsonschema.Schema, error) {
+			type F struct {
+				N []levelText `json:"n" validate:"dive,number"`
+			}
+
+			return jsonschema.GenerateFor[F](ctx, opt)
+		},
+	}
+
+	for name, generate := range refused {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := generate(t.Context())
+			require.ErrorIs(t, err, validate.ErrStringRuleKind)
+		})
+	}
+
+	t.Run("number on a quoted json.Number is kept", func(t *testing.T) {
+		t.Parallel()
+
+		type F struct {
+			N jsonv1.Number `json:"n,string" validate:"number"`
+		}
+
+		s, err := jsonschema.GenerateFor[F](t.Context(), opt)
+		require.NoError(t, err)
+		assert.Equal(t, `^[0-9]+$`, s.Properties["n"].Pattern)
+	})
+}
