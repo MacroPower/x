@@ -3289,13 +3289,66 @@ func TestValidateInterpreterGoPlaygroundParity(t *testing.T) {
 		_, err = jsonschema.GenerateFor[Blank](t.Context(), opt)
 		require.ErrorIs(t, err, validate.ErrKeysPlacement)
 
-		// A keys inside a block is key-side grammar, skipped with the rest
-		// of the block.
+		// A keys inside a block is key-side grammar, but the block it opens
+		// closes on the same first endkeys as the outer one: go-playground's
+		// collector stops there whatever opened before, so the second
+		// endkeys is stray and, with a part after it, refused. The
+		// interpreter used to count depth and emit maxLength 3 for a tag
+		// go-playground cannot load.
 		type Nested struct {
 			F map[string]string `json:"f" validate:"dive,keys,dive,keys,min=1,endkeys,endkeys,max=3"`
 		}
 
-		s, err := jsonschema.GenerateFor[Nested](t.Context(), opt)
+		_, err = jsonschema.GenerateFor[Nested](t.Context(), opt)
+		require.ErrorIs(t, err, validate.ErrEndkeysPlacement)
+
+		// With one endkeys the nested block and the outer one close together,
+		// and the part after it reaches the map values.
+		type NestedOnce struct {
+			F map[string]string `json:"f" validate:"dive,keys,dive,keys,min=1,endkeys,max=3"`
+		}
+
+		s, err := jsonschema.GenerateFor[NestedOnce](t.Context(), opt)
+		require.NoError(t, err)
+		assert.Equal(t, new(3), s.Properties["f"].AdditionalProperties.MaxLength)
+
+		// Go-playground parses the block with the same grammar, so a keys
+		// inside it must follow a dive too.
+		type NestedNoDive struct {
+			F map[string]string `json:"f" validate:"dive,keys,keys,min=1,endkeys"`
+		}
+
+		_, err = jsonschema.GenerateFor[NestedNoDive](t.Context(), opt)
+		require.ErrorIs(t, err, validate.ErrKeysPlacement)
+	})
+
+	t.Run("keys after a dive into a slice is refused", func(t *testing.T) {
+		t.Parallel()
+
+		// Only go-playground's map branch of dive reads a keys block; the
+		// slice and array branches hand the keys marker to traverseField,
+		// which dereferences its nil validation. The interpreter used to
+		// accept the tag and emit a clean schema for it.
+		type Slice struct {
+			F []string `json:"f" validate:"dive,keys,endkeys"`
+		}
+
+		_, err := jsonschema.GenerateFor[Slice](t.Context(), opt)
+		require.ErrorIs(t, err, validate.ErrKeysPlacement)
+		require.ErrorContains(t, err, "descends into a array")
+
+		type Array struct {
+			F [2]string `json:"f" validate:"dive,keys,min=1,endkeys"`
+		}
+
+		_, err = jsonschema.GenerateFor[Array](t.Context(), opt)
+		require.ErrorIs(t, err, validate.ErrKeysPlacement)
+
+		type Map struct {
+			F map[string]string `json:"f" validate:"dive,keys,min=1,endkeys,max=3"`
+		}
+
+		s, err := jsonschema.GenerateFor[Map](t.Context(), opt)
 		require.NoError(t, err)
 		assert.Equal(t, new(3), s.Properties["f"].AdditionalProperties.MaxLength)
 	})

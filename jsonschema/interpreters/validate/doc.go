@@ -333,11 +333,15 @@
 // conditional validators (eqfield, required_if, skip_unless, ...), control tags
 // that govern when validation runs (omitempty, structonly, ...), and the
 // constraints inside a keys...endkeys block (map-key constraints are not
-// modeled). A keys with no endkeys runs to the end of the tag, as it does in
-// go-playground, so every later constraint is a key constraint and is
-// skipped. A keys not immediately following a dive is an error
-// ([ErrKeysPlacement]), as go-playground refuses it, and so is an endkeys
-// with no keys block open ([ErrEndkeysPlacement]). A control tag, dive,
+// modeled). A block runs from the keys to the first endkeys, or to the end
+// of the tag when none follows, as go-playground's parser collects it, so
+// every part between is a key constraint and is skipped, and a keys inside
+// the block closes on that same first endkeys. A keys not immediately
+// following a dive is an error ([ErrKeysPlacement]), inside a block as much
+// as outside one, as go-playground refuses it, and so is a keys after a dive
+// into a slice or array, since only go-playground's map branch reads a block
+// and the others dereference a nil validation. An endkeys with no keys block
+// open is an error too ([ErrEndkeysPlacement]). A control tag, dive,
 // keys, and endkeys are each matched as a whole
 // part, as go-playground matches them, so one carrying a parameter
 // (omitempty=) is an unrecognized validator rather than the tag it starts

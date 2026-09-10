@@ -34,11 +34,14 @@ var (
 	// vocabulary gap rather than a refusal of the tag.
 	ErrUnrecognizedValidator = errors.New("validate tag: unrecognized validator")
 
-	// ErrKeysPlacement reports a keys tag that does not immediately follow a
-	// dive. Go-playground opens a key block only there and refuses the tag
-	// anywhere else, so the interpreter refuses it too rather than emitting a
-	// schema for a tag the library cannot load.
-	ErrKeysPlacement = errors.New("validate tag: keys must immediately follow dive")
+	// ErrKeysPlacement reports a keys tag go-playground cannot open a key
+	// block on: one that does not immediately follow a dive, inside a block
+	// as much as outside one, or one whose dive descends into a slice or
+	// array. Go-playground's parser refuses the first, and only its map
+	// branch reads a block, so the second dereferences a nil validation at
+	// run time. The interpreter refuses both rather than emitting a schema
+	// for a tag the library cannot load.
+	ErrKeysPlacement = errors.New("validate tag: keys must immediately follow a dive into a map")
 	// ErrEndkeysPlacement reports an endkeys tag with no keys block open.
 	// Go-playground refuses the tag, so the interpreter refuses it too
 	// rather than emitting a schema for a tag the library cannot load.
@@ -112,24 +115,21 @@ func (i *Interpreter) Interpret(_ context.Context, field jsonschema.FieldContext
 	// constraint (e.g. "oneof=a|b,required" would drop required).
 	parts := strings.Split(tag.Value, ",")
 
-	return applyParts(parts, field, false)
+	return applyParts(parts, field, false, tagmodel.FormUnset)
 }
 
 // applyParts applies a sequence of validator tag parts to a field. The
-// afterDive flag says whether parts starts right after a dive, which is the
-// one place a keys block may open.
-func applyParts(parts []string, field jsonschema.FieldContext, afterDive bool) error {
-	// The open keys blocks. A keys inside a block opens a nested one, and
-	// each endkeys closes the innermost, so the depth says whether a part
-	// is key-side grammar and whether an endkeys has a block to close.
-	keysDepth := 0
-
+// afterDive flag says whether parts starts right after a dive, and container
+// is the form that dive descended into ([tagmodel.FormUnset] at the field
+// level). Together they name the one place a keys block may open: the part
+// right after a dive into a map.
+func applyParts(parts []string, field jsonschema.FieldContext, afterDive bool, container tagmodel.Form) error {
 	// The keyword-setting validators applied so far, keyed by the keyword
 	// each sets, so a second validator naming the same keyword is refused
 	// rather than dropped. An element level starts its own record.
 	applied := map[tagmodel.Op]string{}
 
-	for idx := range parts {
+	for idx := 0; idx < len(parts); idx++ {
 		// The whole-part matches below read the part trimmed, a widening
 		// over go-playground, which refuses a padded key. The parameter is
 		// cut from the untrimmed part further down and keeps its whitespace,
@@ -143,12 +143,8 @@ func applyParts(parts []string, field jsonschema.FieldContext, afterDive bool) e
 
 		// The parts go-playground matches whole come first, before the OR
 		// split, since its parser switches on the whole comma group and only
-		// the default branch splits on the pipe. A dive inside a
-		// keys...endkeys block is a key-side dive (e.g. dive,keys,dive,endkeys
-		// for collection-typed map keys), which is not modeled; it must be
-		// skipped by the keys-depth guard below rather than treated as a
-		// value-element dive. Only handle dive outside the block.
-		if part == diveTag && keysDepth == 0 {
+		// the default branch splits on the pipe.
+		if part == diveTag {
 			// Descend into the element type. A trailing dive applies nothing
 			// to the elements, a no-op as in go-playground, but the descent
 			// itself still needs elements to reach: go-playground panics on a
@@ -157,35 +153,36 @@ func applyParts(parts []string, field jsonschema.FieldContext, afterDive bool) e
 			return applyDive(parts[idx+1:], field)
 		}
 
-		// Map key validators: constraints between keys and endkeys apply to
-		// the map's keys (not modeled here) and are skipped. A keys with no
-		// endkeys runs to the end of the tag, as it does in go-playground,
-		// which collects every later part into the key block; applying them
-		// to the value schema instead would emit a constraint the tag never
-		// places there. Go-playground opens a block only on the part right
-		// after a dive and panics elsewhere, so a keys anywhere else is an
-		// error rather than a schema for a tag it cannot load; a keys inside
-		// a block belongs to the key-side grammar, which is skipped whole.
+		// Map key validators: the parts from a keys to the first endkeys, or
+		// to the end of the tag, apply to the map's keys (not modeled here)
+		// and are skipped whole. Go-playground opens a block only on the
+		// part right after a dive and panics elsewhere, and only its map
+		// branch reads the block, so a keys anywhere else, or after a dive
+		// into a slice or array, is an error rather than a schema for a tag
+		// it cannot load.
 		if part == keysTag {
-			if keysDepth == 0 && (!afterDive || idx != 0) {
+			if !afterDive || idx != 0 {
 				return ErrKeysPlacement
 			}
 
-			keysDepth++
+			if container != tagmodel.FormObject {
+				return fmt.Errorf("%w, and this dive descends into a %s", ErrKeysPlacement, container)
+			}
+
+			consumed, err := skipKeysBlock(parts[idx+1:])
+			if err != nil {
+				return err
+			}
+
+			idx += consumed
 
 			continue
 		}
 
-		// An endkeys closes the innermost open block; with none open,
-		// go-playground refuses the tag.
+		// An endkeys outside a block closes nothing; go-playground refuses
+		// the tag.
 		if part == endkeysTag {
-			if keysDepth == 0 {
-				return ErrEndkeysPlacement
-			}
-
-			keysDepth--
-
-			continue
+			return ErrEndkeysPlacement
 		}
 
 		// A control tag governs when validation runs rather than expressing
@@ -198,29 +195,14 @@ func applyParts(parts []string, field jsonschema.FieldContext, afterDive bool) e
 			continue
 		}
 
-		// The | OR operator is not modeled. The go-playground/validator parser
-		// splits a comma group on the pipe and treats the alternatives as OR;
-		// here only the first alternative (the group before the first pipe) is
-		// interpreted, matching the documented behavior. Stripping per part
-		// rather than across the whole tag keeps later comma-separated
-		// constraints intact. A literal pipe in a param is written 0x7C and
-		// survives, since unescapeParam runs after this split.
-		orGroup := false
-
-		if i := strings.IndexByte(raw, '|'); i >= 0 {
-			// An empty first alternative is a tag go-playground refuses
-			// outright; dropping the whole group would silently weaken the
-			// schema instead.
-			if strings.TrimSpace(raw[:i]) == "" {
-				return fmt.Errorf("validate tag: empty OR alternative in %q", part)
-			}
-
-			orGroup = true
-			raw = raw[:i]
-			part = strings.TrimSpace(raw)
+		alt, orGroup, err := firstAlternative(raw)
+		if err != nil {
+			return err
 		}
 
-		key, value, hasValue := strings.Cut(raw, "=")
+		part = strings.TrimSpace(alt)
+
+		key, value, hasValue := strings.Cut(alt, "=")
 
 		key = strings.TrimSpace(key)
 		if hasValue {
@@ -242,24 +224,84 @@ func applyParts(parts []string, field jsonschema.FieldContext, afterDive bool) e
 
 		// A structural key carrying a parameter or standing as an OR
 		// alternative names no validator on either side: go-playground looks
-		// it up as a validator there and refuses the tag, inside a keys block
-		// as much as outside it. The error carries the whole part, as
-		// go-playground's does.
+		// it up as a validator there and refuses the tag. The error carries
+		// the whole part, as go-playground's does.
 		if isStructuralKey(key) && (hasValue || orGroup) {
 			return fmt.Errorf("%w %q", ErrUnrecognizedValidator, part)
 		}
 
-		if keysDepth > 0 {
-			continue
-		}
-
-		err := applyValidator(key, value, hasValue, field, applied)
+		err = applyValidator(key, value, hasValue, field, applied)
 		if err != nil {
 			return err
 		}
 	}
 
 	return nil
+}
+
+// skipKeysBlock walks the parts after a keys marker to the first endkeys,
+// which closes the block, or to the end of the tag when none follows, as
+// go-playground's parser collects them. The constraints inside are key
+// constraints, which this dialect does not model, so nothing is applied. The
+// grammar is still checked, since go-playground parses the block with the
+// same rules: a keys inside it must immediately follow a dive, and a
+// structural key with a parameter or an OR alternative names no validator. A
+// nested block closes on the same first endkeys as the block holding it,
+// since go-playground's collector stops there whatever opened before. It
+// returns the number of parts consumed, the closing endkeys included.
+func skipKeysBlock(parts []string) (int, error) {
+	prevDive := false
+
+	for idx := range parts {
+		part := strings.TrimSpace(parts[idx])
+
+		switch {
+		case part == endkeysTag:
+			return idx + 1, nil
+		case part == keysTag:
+			if !prevDive {
+				return 0, ErrKeysPlacement
+			}
+
+		case part == "" || part == "-" || part == diveTag || isControlTag(part):
+		default:
+			alt, orGroup, err := firstAlternative(parts[idx])
+			if err != nil {
+				return 0, err
+			}
+
+			key, _, hasValue := strings.Cut(alt, "=")
+			if isStructuralKey(strings.TrimSpace(key)) && (hasValue || orGroup) {
+				return 0, fmt.Errorf("%w %q", ErrUnrecognizedValidator, strings.TrimSpace(alt))
+			}
+		}
+
+		prevDive = part == diveTag
+	}
+
+	return len(parts), nil
+}
+
+// firstAlternative returns the first OR alternative of one comma part and
+// whether the part carried a pipe at all. The | OR operator is not modeled:
+// go-playground splits a comma group on the pipe and treats the alternatives
+// as OR, and this dialect interprets the first alone, so a schema is never
+// looser than the group. Splitting per part rather than across the whole tag
+// keeps later comma-separated constraints intact, and a literal pipe in a
+// parameter is written 0x7C and survives, since unescapeParam runs after
+// this split. An empty first alternative is a tag go-playground refuses
+// outright, so it is an error rather than a group dropped in silence.
+func firstAlternative(raw string) (string, bool, error) {
+	first, _, orGroup := strings.Cut(raw, "|")
+	if !orGroup {
+		return raw, false, nil
+	}
+
+	if strings.TrimSpace(first) == "" {
+		return "", true, fmt.Errorf("validate tag: empty OR alternative in %q", strings.TrimSpace(raw))
+	}
+
+	return first, true, nil
 }
 
 // applyValidator applies one validator to the field: look the key up in this

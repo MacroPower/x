@@ -16,8 +16,11 @@ import (
 // supplies, so a rule written under a dive and the same rule written on the
 // sequence itself reach the elements by one path and cannot disagree about what
 // an element is. What a dive does not do is decide anything about the elements:
-// their shapes classify themselves.
+// their shapes classify themselves. The container's form travels with the
+// descent, since a keys block right after the dive is legal only under a map.
 func applyDive(remaining []string, field jsonschema.FieldContext) error {
+	form := shapeOf(field).Form
+
 	elems := field.ElementContexts()
 	if len(elems) == 0 {
 		// The shape decides whether there is anything to descend into, as it
@@ -26,7 +29,6 @@ func applyDive(remaining []string, field jsonschema.FieldContext) error {
 		// canvases even for a collection, so a trailing dive there descends
 		// into nothing and applies nothing, while a dive carrying constraints
 		// it cannot place is still an error rather than a silent drop.
-		form := shapeOf(field).Form
 		if (form == tagmodel.FormArray || form == tagmodel.FormObject) && !hasConstraint(remaining) {
 			return nil
 		}
@@ -35,7 +37,7 @@ func applyDive(remaining []string, field jsonschema.FieldContext) error {
 	}
 
 	for i := range elems {
-		err := applyParts(remaining, elems[i], true)
+		err := applyParts(remaining, elems[i], true, form)
 		if err != nil {
 			return err
 		}
