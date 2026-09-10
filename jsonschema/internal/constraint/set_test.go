@@ -407,7 +407,9 @@ func TestNumericIntervalAdmits(t *testing.T) {
 // TestComposeMultipleOf pins the divisor algebra: two divisors intersect to
 // their least common multiple over their shortest decimals, one dividing the
 // other keeps the larger, and a composite the float64 cannot spell exactly
-// keeps the later value.
+// is reported rather than replaced by either input. The composition used to
+// hand the slot to the later value there, so an inferred 5e307 replaced a
+// stated 9e307 although 5e307 is not a multiple of it.
 func TestComposeMultipleOf(t *testing.T) {
 	t.Parallel()
 
@@ -427,24 +429,47 @@ func TestComposeMultipleOf(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			assert.InDelta(t, tc.want, constraint.ComposeMultipleOf(tc.a, tc.b), 0)
-			assert.InDelta(t, tc.want, constraint.ComposeMultipleOf(tc.b, tc.a), 0, "order-independent")
+			got, ok := constraint.ComposeMultipleOf(tc.a, tc.b)
+			require.True(t, ok)
+			assert.InDelta(t, tc.want, got, 0)
+
+			got, ok = constraint.ComposeMultipleOf(tc.b, tc.a)
+			require.True(t, ok, "order-independent")
+			assert.InDelta(t, tc.want, got, 0, "order-independent")
 		})
 	}
 
 	t.Run("non-finite keeps the later value", func(t *testing.T) {
 		t.Parallel()
 
-		assert.InDelta(t, 2, constraint.ComposeMultipleOf(math.Inf(1), 2), 0)
-		assert.InDelta(t, 2, constraint.ComposeMultipleOf(math.NaN(), 2), 0)
+		got, ok := constraint.ComposeMultipleOf(math.Inf(1), 2)
+		require.True(t, ok)
+		assert.InDelta(t, 2, got, 0)
+
+		got, ok = constraint.ComposeMultipleOf(math.NaN(), 2)
+		require.True(t, ok)
+		assert.InDelta(t, 2, got, 0)
 	})
 
-	t.Run("composite past the float64 range keeps the later value", func(t *testing.T) {
-		t.Parallel()
-
+	unspellable := map[string]struct{ a, b float64 }{
 		// 1e308 and 1.5 are both finite and positive, but their least common
 		// multiple, 3e308, rounds to +Inf, which has no rational form.
-		assert.InDelta(t, 1.5, constraint.ComposeMultipleOf(1e308, 1.5), 0)
-		assert.InDelta(t, 1e308, constraint.ComposeMultipleOf(1.5, 1e308), 0)
-	})
+		"composite past the float64 range":               {a: 1e308, b: 1.5},
+		"composite past the float64 range, larger first": {a: 9e307, b: 5e307},
+		// The least common multiple of two long decimals carries more digits
+		// than a float64's shortest decimal holds.
+		"composite with too many digits": {a: 0.1234567890123, b: 0.9876543219},
+	}
+
+	for name, tc := range unspellable {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			_, ok := constraint.ComposeMultipleOf(tc.a, tc.b)
+			assert.False(t, ok, "an unspellable composite is reported, not replaced")
+
+			_, ok = constraint.ComposeMultipleOf(tc.b, tc.a)
+			assert.False(t, ok, "order-independent")
+		})
+	}
 }

@@ -239,8 +239,11 @@ func (c *Constraints) ready() error {
 // a non-positive value, which JSON Schema forbids, and for a field whose shape
 // has no number to divide. A divisor already in force (from the field's type,
 // the jsonschema tag, or an earlier rule) intersects with it to their least
-// common multiple, so an inferred divisor never loosens a stated one. It is
-// the named form of [Constraints.Apply] with [OpMultipleOf].
+// common multiple, so an inferred divisor never loosens a stated one. A
+// least common multiple the schema's float64 cannot spell exactly is
+// [ErrBoundNotRepresentable], as any bound the float64 would not reproduce
+// is, since neither divisor alone enforces both. It is the named form of
+// [Constraints.Apply] with [OpMultipleOf].
 func (c *Constraints) SetMultipleOf(value float64) error {
 	err := c.ready()
 	if err != nil {

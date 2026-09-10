@@ -365,7 +365,10 @@ func applyMultipleOf(t Target, r Rule, pol Policy) error {
 // infers a divisor intersects it with the one in force (the canvas value, or
 // the type-derived one) through [constraint.ComposeMultipleOf], so it never
 // loosens a divisor a tag or the type stated and two inferred divisors
-// compose order-independently.
+// compose order-independently. A least common multiple the schema's float64
+// cannot spell exactly is [constraint.ErrNotRepresentable], the refusal
+// every numeric bound the float64 would not reproduce gets, since neither
+// divisor alone enforces both.
 func applyDivisor(t Target, lit string, pol Policy) error {
 	// A divisor is a keyword value, not a field value, so it takes the
 	// keyword-shaped literal domain regardless of the target's kind.
@@ -383,7 +386,13 @@ func applyDivisor(t Target, lit string, pol Policy) error {
 
 	if pol.Keywords == KeywordFirstWins {
 		if inForce := effectiveDivisor(t); inForce != nil {
-			n = constraint.ComposeMultipleOf(*inForce, n)
+			composed, ok := constraint.ComposeMultipleOf(*inForce, n)
+			if !ok {
+				return fmt.Errorf("the least common multiple of multipleOf %v and %v is %w",
+					*inForce, n, constraint.ErrNotRepresentable)
+			}
+
+			n = composed
 		}
 	}
 

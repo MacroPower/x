@@ -64,12 +64,14 @@ func (set *Set) SetMultipleOf(val float64) {
 // the other the result is the larger, so a divisor already implied by the one
 // in force changes nothing. A composite whose shortest decimal the float64
 // cannot spell exactly (the same representability rule every numeric bound
-// obeys) keeps b, as does a non-finite or non-positive input, which JSON
-// Schema forbids and the callers reject before composing.
-func ComposeMultipleOf(a, b float64) float64 {
+// obeys) reports false, and the caller refuses it: neither input alone
+// enforces both, so shipping either would loosen the other. A non-finite or
+// non-positive input, which JSON Schema forbids and the callers reject before
+// composing, keeps b.
+func ComposeMultipleOf(a, b float64) (float64, bool) {
 	ra, rb := numrat.Float64ToRat(a), numrat.Float64ToRat(b)
 	if ra == nil || rb == nil || ra.Sign() <= 0 || rb.Sign() <= 0 {
-		return b
+		return b, true
 	}
 
 	// The least common multiple of p1/q1 and p2/q2 is
@@ -86,13 +88,13 @@ func ComposeMultipleOf(a, b float64) float64 {
 
 	// A composite past the float64 range rounds to an infinity, which has no
 	// rational form; that is the same unspellable case as an inexact finite
-	// rounding, so it keeps b too.
+	// rounding.
 	f, _ := lcm.Float64()
 	if fr := numrat.Float64ToRat(f); fr == nil || fr.Cmp(lcm) != 0 {
-		return b
+		return 0, false
 	}
 
-	return f
+	return f, true
 }
 
 // axisFor returns the axis backing a size field.

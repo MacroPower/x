@@ -544,7 +544,10 @@
 //     way: an interpreter's divisor intersects with the one in force (the
 //     jsonschema tag's, or the type's) to their least common multiple, so
 //     a stated divisor is never replaced by a weaker inferred one and two
-//     inferred divisors compose in either order.
+//     inferred divisors compose in either order. A least common multiple
+//     the schema's float64 cannot spell exactly is
+//     [ErrBoundNotRepresentable], since neither divisor alone enforces
+//     both.
 //   - Shape errors. A rule the field's shape cannot carry is
 //     [ErrConstraintUnsupported], naming the reason, rather than a keyword
 //     nothing enforces.

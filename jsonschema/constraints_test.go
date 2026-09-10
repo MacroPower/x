@@ -986,6 +986,23 @@ func TestConstraintsMultipleOfComposes(t *testing.T) {
 			assert.InDelta(t, 30, *s.Properties["v"].MultipleOf, 0, name)
 		}
 	})
+
+	// An unspellable least common multiple used to hand the slot to the
+	// inferred divisor: multipleOf=9e307 plus an inferred 5e307 generated
+	// {"multipleOf":5e+307}, admitting 5e307 although the tag excludes it.
+	t.Run("unspellable least common multiple is refused", func(t *testing.T) {
+		t.Parallel()
+
+		type Payload struct {
+			V float64 `div:"x" json:"v" jsonschema:"multipleOf=9e307"`
+		}
+
+		huge := boundInterp(func(c *jsonschema.Constraints) error { return c.SetMultipleOf(5e307) })
+
+		_, err := jsonschema.GenerateFor[Payload](t.Context(), jsonschema.WithTagInterpreter("div", huge))
+		require.ErrorIs(t, err, jsonschema.ErrBoundNotRepresentable,
+			"neither divisor alone enforces both, so the pair is refused")
+	})
 }
 
 // TestConstraintsForbidCopiesTheCanvasNot pins that a forbid composes onto a
