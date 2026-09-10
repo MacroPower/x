@@ -179,8 +179,11 @@
 //     or that does not marshal to a JSON object, returns an error wrapping
 //     [ErrInvalidDefaultsInstance].
 //
-// [WithRootTitle] honors the [WithNamer] namer and pointer-dereferences the
-// root type first. Unnamed roots (anonymous structs, unnamed maps and slices)
+// [WithRootTitle] titles the root with the [WithNamer] namer's answer for the
+// root type, pointer-dereferenced first. The title is display text, so a
+// root type whose name collides in $defs keeps the namer's plain answer as
+// its title while its $defs entry takes the package-prefixed key. Unnamed
+// roots (anonymous structs, unnamed maps and slices)
 // stay untitled, and a title from [WithTypeSchema], [JSONSchemaProvider], or
 // [JSONSchemaExtender] is never overwritten. Under [Draft7], a
 // self-referential root stays a bare $ref into definitions, where a reader

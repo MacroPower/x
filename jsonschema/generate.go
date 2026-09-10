@@ -340,9 +340,11 @@ func WithDefaultsFrom(instance any) GenerateOption {
 }
 
 // WithRootTitle controls whether the root schema's title is set to the
-// generated root type's name when no title is otherwise present. The
-// configured namer ([WithNamer]) is honored, so root and $defs naming stay
-// consistent. Unnamed roots (anonymous structs, maps, slices) leave the
+// generated root type's name when no title is otherwise present. The title
+// is the configured namer's ([WithNamer]) answer for the root type, as
+// display text; the package-prefixed key a $defs collision gives the same
+// type belongs to the $defs entry alone and never becomes the title.
+// Unnamed roots (anonymous structs, maps, slices) leave the
 // title unset. Under [Draft7], a self-referential root stays a bare $ref
 // into definitions, where a sibling title would be ignored; the title is set
 // on the definitions entry instead, shared by every occurrence of the type.
