@@ -159,9 +159,10 @@
 // forbid side names both texts, so required and ne=0 emit not.enum ["0", "-0"].
 // That matches go-playground, which rejects the negative zero wherever it
 // rejects zero. The pin side names the canonical text alone, so eq=0 emits
-// const "0" and a oneof listing zero enumerates "0". Either one rejects a "-0"
-// instance. For eq=0 that is stricter than go-playground, which accepts the
-// value.
+// const "0", eq=-0 emits the same const "0", since go-playground compares the
+// two zeros as one value, and a oneof listing zero enumerates "0". Either one
+// rejects a "-0" instance. For eq=0 that is stricter than go-playground, which
+// accepts the value.
 //
 // Numeric bounds (min, max, gt, lt, gte, lte) have no faithful mapping onto that
 // serialized string -- minimum and friends constrain JSON numbers, not the

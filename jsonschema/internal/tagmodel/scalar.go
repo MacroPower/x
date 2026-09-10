@@ -68,7 +68,7 @@ func (sh Shape) ParseScalar(lit string, pol Policy) (any, error) {
 		return sh.parseNumber(lit)
 
 	case FormCoercedNumber, FormCoercedBool, FormCoercedString:
-		return sh.coercedText(lit)
+		return sh.coercedText(lit, false)
 
 	case FormByteString:
 		return sh.byteText(lit)
@@ -177,7 +177,14 @@ func parseFloatLiteral(lit string, kind reflect.Kind) (any, error) {
 // value serializes to. Parsing at the real kind keeps the range check; the
 // round-trip is what lets a string-marshaling type contribute its own form. A
 // quoted result is unquoted to the content the string schema compares against.
-func (sh Shape) coercedText(lit string) (any, error) {
+//
+// A float literal spelled -0 is the value 0, and the text is the canonical
+// "0" unless keepSign is set: Go compares the two zeros as one, so
+// go-playground's eq=-0 accepts the same values eq=0 does, and a pin on the
+// text "-0", which encoding/json writes for the sign bit alone, would reject
+// the zero the field ordinarily emits. The forbid side sets keepSign to name
+// both texts, see [Shape.zeroLiterals].
+func (sh Shape) coercedText(lit string, keepSign bool) (any, error) {
 	var (
 		parsed any
 		err    error
@@ -203,6 +210,10 @@ func (sh Shape) coercedText(lit string) (any, error) {
 
 	if err != nil {
 		return nil, err
+	}
+
+	if f, isFloat := parsed.(float64); isFloat && f == 0 && !keepSign {
+		parsed = float64(0)
 	}
 
 	out, err := json.Marshal(reflect.ValueOf(parsed).Convert(sh.Elem).Interface())
@@ -241,6 +252,9 @@ func (sh Shape) coercedText(lit string) (any, error) {
 //
 // A coerced string's zero is the empty Go string, and what it forbids is
 // whatever text that empty string marshals to.
+//
+// The texts come from [Shape.zeroTexts], which keeps the sign of the float
+// pair where [Shape.ParseScalar] folds it into the canonical "0".
 func (sh Shape) zeroLiterals() []string {
 	switch {
 	case sh.Form == FormCoercedBool:
@@ -252,6 +266,25 @@ func (sh Shape) zeroLiterals() []string {
 	default:
 		return []string{"0"}
 	}
+}
+
+// zeroTexts parses each zero literal to the text the field emits for it, the
+// sign of a negative zero kept, so the forbid side names every text a Go zero
+// serializes to.
+func (sh Shape) zeroTexts() ([]any, error) {
+	spellings := sh.zeroLiterals()
+	out := make([]any, len(spellings))
+
+	for i, lit := range spellings {
+		v, err := sh.coercedText(lit, true)
+		if err != nil {
+			return nil, err
+		}
+
+		out[i] = v
+	}
+
+	return out, nil
 }
 
 // ParseBoolLiteral parses the two boolean literals both tag grammars spell,

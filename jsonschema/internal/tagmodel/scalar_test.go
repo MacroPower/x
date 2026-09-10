@@ -120,6 +120,17 @@ func TestShapeParseScalarCoerced(t *testing.T) {
 			typ: reflect.TypeFor[float64](), lit: "1e2",
 			form: tagmodel.FormCoercedNumber, want: "100",
 		},
+		"a coerced float pins the canonical zero for a negative zero": {
+			// Go compares the two zeros as one, so go-playground's eq=-0
+			// accepts the "0" the field emits for a zero. A pin on "-0"
+			// used to reject it.
+			typ: reflect.TypeFor[float64](), lit: "-0",
+			form: tagmodel.FormCoercedNumber, want: "0",
+		},
+		"a coerced float pins the canonical zero for a negative zero float": {
+			typ: reflect.TypeFor[float32](), lit: "-0.0",
+			form: tagmodel.FormCoercedNumber, want: "0",
+		},
 		"a coerced negative int emits its decimal text": {
 			typ: reflect.TypeFor[int](), lit: "-5",
 			form: tagmodel.FormCoercedNumber, want: "-5",
@@ -263,7 +274,7 @@ func TestShapeZeroLiteralsRouteThroughParseScalar(t *testing.T) {
 
 			sh := tagmodel.ShapeOfQuoted(tc.typ, stringSchema(), true, nil)
 
-			got, err := sh.ParseScalars(sh.ZeroLiteralsForTest(), tagmodel.Policy{})
+			got, err := sh.ZeroTextsForTest()
 			require.NoError(t, err)
 			assert.Equal(t, tc.want, got,
 				"the forbidden zeros are what the type serializes, not a hardcoded \"0\"")

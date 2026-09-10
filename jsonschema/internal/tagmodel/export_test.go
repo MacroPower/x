@@ -32,6 +32,7 @@ func Axes() []Axis {
 // assert every pair either resolves or reports a reason.
 func ResolveAxisForTest(form Form, axis Axis) (Axis, error) { return resolveAxis(form, axis) }
 
-// ZeroLiteralsForTest exposes the non-zero comparison literals, so the scalar
-// tests can pin that a coerced shape forbids every text it actually emits.
-func (sh Shape) ZeroLiteralsForTest() []string { return sh.zeroLiterals() }
+// ZeroTextsForTest exposes the texts the forbid side names for a Go zero, so
+// the scalar tests can pin that a coerced shape forbids every text it
+// actually emits.
+func (sh Shape) ZeroTextsForTest() ([]any, error) { return sh.zeroTexts() }

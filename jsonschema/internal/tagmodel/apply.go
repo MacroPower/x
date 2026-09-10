@@ -300,12 +300,11 @@ func forbidLiteral(t Target, lit string, pol Policy) error {
 
 	Forbid(t.Canvas, v)
 
-	spellings := t.Shape.zeroLiterals()
-	if len(spellings) < 2 {
+	if len(t.Shape.zeroLiterals()) < 2 {
 		return nil
 	}
 
-	zeros, err := t.Shape.ParseScalars(spellings, pol)
+	zeros, err := t.Shape.zeroTexts()
 	if err != nil {
 		return err
 	}
