@@ -1463,9 +1463,11 @@ func regexFlagRunLen(s string) int {
 // regexGroupNameLen returns the length of s through the '>' closing a group
 // name whose first character sits at s[from], or 0 when the name is not an
 // ECMA 262 RegExpIdentifierName ending in '>'. Each character of the name is
-// a code point written literally or as a RegExpUnicodeEscapeSequence, and
-// every one must be an IdentifierPartChar. Only such a run is consumed, so a
-// malformed name never swallows a parenthesis the group accounting needs.
+// a code point written literally or as a RegExpUnicodeEscapeSequence; the
+// first must be an IdentifierStartChar and every later one an
+// IdentifierPartChar, so a name never opens on a digit. Only such a run is
+// consumed, so a malformed name never swallows a parenthesis the group
+// accounting needs.
 func regexGroupNameLen(s string, from int) int {
 	for i := from; i < len(s); {
 		if s[i] == '>' {
@@ -1477,7 +1479,16 @@ func regexGroupNameLen(s string, from int) int {
 		}
 
 		r, size := regexGroupNameChar(s[i:])
-		if size == 0 || !isRegexIDPart(r) {
+		if size == 0 {
+			return 0
+		}
+
+		ok := isRegexIDPart(r)
+		if i == from {
+			ok = isRegexIDStart(r)
+		}
+
+		if !ok {
 			return 0
 		}
 

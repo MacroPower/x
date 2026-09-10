@@ -1535,10 +1535,11 @@
 //   - regex is a structural ECMA-262 check, not a compile. It checks balanced
 //     groups, terminated classes, well-formed escapes, and that every
 //     quantifier follows something to repeat with its bounds in order. A
-//     capture name is an ECMA-262 RegExpIdentifierName, so it takes any code
-//     point with the Unicode ID_Start or ID_Continue property, written
-//     literally or as a "\u" escape; "(?<\u03c0>x)" is a valid pattern with
-//     the Greek letter spelled either way. It accepts backreferences and
+//     capture name is an ECMA-262 RegExpIdentifierName, so it opens on a
+//     code point with the Unicode ID_Start property and continues with
+//     ID_Continue ones, each written literally or as a "\u" escape;
+//     "(?<\u03c0>x)" is a valid pattern with the Greek letter spelled either
+//     way, and "(?<1a>x)" is not. It accepts backreferences and
 //     lookaround, since ECMA-262 has them and Go's RE2 does not, and every
 //     ASCII character is a valid ECMA-262 Annex B identity escape, so it
 //     accepts "\a" and "\_" (and a bare "\c", an Annex B ExtendedAtom in its

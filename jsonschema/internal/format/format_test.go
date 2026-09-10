@@ -110,12 +110,13 @@ func TestRegexFormatFlagRuns(t *testing.T) {
 }
 
 // TestRegexFormatGroupNames pins the capture name grammar. ECMA 262 22.2.1
-// reads a name as a RegExpIdentifierName, so it admits any code point with the
-// Unicode ID_Start or ID_Continue property, written literally or as a
-// RegExpUnicodeEscapeSequence read in Unicode mode. The scan once held a name
-// to ASCII word characters and refused "(?<\u03c0>x)", a pattern every ECMA
-// 262 engine compiles, which is the false-rejection direction the format
-// guards.
+// reads a name as a RegExpIdentifierName, so it opens on a code point with the
+// Unicode ID_Start property and continues with ID_Continue ones, each written
+// literally or as a RegExpUnicodeEscapeSequence read in Unicode mode. The scan
+// once held a name to ASCII word characters and refused "(?<\u03c0>x)", a
+// pattern every ECMA 262 engine compiles, which is the false-rejection
+// direction the format guards; it also applied one test to every position and
+// accepted "(?<1a>x)", which every ECMA 262 engine refuses.
 func TestRegexFormatGroupNames(t *testing.T) {
 	t.Parallel()
 
@@ -142,6 +143,12 @@ func TestRegexFormatGroupNames(t *testing.T) {
 		"unterminated braced escape":             {instance: `(?<\u{41>x)`, valid: false},
 		"short four digit escape":                {instance: `(?<\u41>x)`, valid: false},
 		"space in a name":                        {instance: "(?<a b>x)", valid: false},
+		"leading digit":                          {instance: "(?<1a>x)", valid: false},
+		"all digit name":                         {instance: "(?<1>x)", valid: false},
+		"escaped digit opens a name":             {instance: `(?<\u0031a>x)`, valid: false},
+		"digit inside a name":                    {instance: "(?<a1>x)", valid: true},
+		"combining mark opens a name":            {instance: "(?<\u0301a>x)", valid: false},
+		"combining mark inside a name":           {instance: "(?<a\u0301>x)", valid: true},
 		"empty name":                             {instance: "(?<>x)", valid: false},
 	}
 

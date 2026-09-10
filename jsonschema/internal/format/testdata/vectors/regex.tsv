@@ -94,6 +94,19 @@
 "(?<\\u{110000}>x)"	false	a braced escape past the last code point
 "(?<\\u{}>x)"	false	a braced escape with no digits
 "(?<a b>x)"	false	a space is no identifier character
+#
+# RegExpIdentifierName opens on an IdentifierStartChar, which excludes a digit
+# and a combining mark, and continues with IdentifierPartChars, which admit
+# both. RE2 accepts a name opening on a digit, so the differential rig carves
+# that shape out; the scan once applied one test to every position and
+# accepted "(?<1a>x)".
+#
+"(?<1a>x)"	false	a name opening on a digit
+"(?<1>x)"	false	a name that is one digit
+"(?<\\u0031a>x)"	false	a name opening on a digit spelled as an escape
+"(?<a1>x)"	true	a digit inside a name
+"(?<\u0301a>x)"	false	a name opening on a combining mark
+"(?<a\u0301>x)"	true	a combining mark inside a name
 "(?)"	false	a group modifier naming nothing, so the '?' has nothing to repeat
 #
 # A flag run after "(?" is the shape RE2's parsePerlFlags reads: letters from

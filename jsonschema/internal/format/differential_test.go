@@ -305,7 +305,15 @@ func regexCarveOut(s string) bool {
 	// A braced bound with a leading zero. RE2's parseInt refuses one, so it
 	// reads "{00}" as four literal characters, while ECMA 262 DecimalDigits
 	// admits it and "{00}" is a quantifier with nothing to repeat.
-	return leadingZeroBound.MatchString(s)
+	if leadingZeroBound.MatchString(s) {
+		return true
+	}
+
+	// A capture name opening on a digit. RE2's isValidCaptureName takes any
+	// run of ASCII word characters, while ECMA 262 reads the name as a
+	// RegExpIdentifierName, whose IdentifierStartChar excludes a digit, so
+	// "(?<1a>x)" is a syntax error there.
+	return digitLedCaptureName.MatchString(s)
 }
 
 // FuzzFormatURIVsNetURL differentials the uri validator against net/url. The
@@ -761,6 +769,10 @@ var (
 	// digit, in either the lower or the upper position; regexCarveOut skips
 	// a pattern carrying one.
 	leadingZeroBound = regexp.MustCompile(`\{0\d|\{\d+,0\d`)
+
+	// A named group, in either spelling, whose name opens on a digit;
+	// regexCarveOut skips a pattern carrying one.
+	digitLedCaptureName = regexp.MustCompile(`\(\?P?<\d`)
 
 	// The RFC 9562 §4 canonical textual representation: four hyphens at fixed
 	// places and hex digits of either case elsewhere.
