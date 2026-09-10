@@ -2487,10 +2487,11 @@ func TestValidateInterpreter_PipeBindsWithinCommaGroup(t *testing.T) {
 
 	// The | OR operator binds within a single comma group: go-playground splits
 	// on commas first, then treats the pipe as OR. A pipe in an earlier group
-	// must not swallow later comma-separated constraints. Here oneof=a|b keeps
-	// only its first alternative ("a"), and the trailing min=2 still applies.
+	// must not swallow later comma-separated constraints. Here oneof=a|eq=b
+	// keeps only its first alternative ("a"), and the trailing min=2 still
+	// applies.
 	type Form struct {
-		Name string `json:"name" validate:"oneof=a|b,min=2"`
+		Name string `json:"name" validate:"oneof=a|eq=b,min=2"`
 	}
 
 	s, err := jsonschema.GenerateFor[Form](t.Context(),
@@ -2501,7 +2502,7 @@ func TestValidateInterpreter_PipeBindsWithinCommaGroup(t *testing.T) {
 	field := s.Properties["name"]
 	require.NotNil(t, field)
 	assert.Equal(t, []any{"a"}, field.Enum,
-		"only the first OR alternative of oneof=a|b is interpreted")
+		"only the first OR alternative of oneof=a|eq=b is interpreted")
 	require.NotNil(t, field.MinLength,
 		"min after a pipe-bearing constraint must still apply")
 	assert.Equal(t, 2, *field.MinLength)
@@ -3229,6 +3230,50 @@ func TestValidateInterpreterGoPlaygroundParity(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, s.Properties["f"].Const)
 		assert.Equal(t, "a", *s.Properties["f"].Const)
+	})
+
+	t.Run("undefined OR alternative anywhere is refused", func(t *testing.T) {
+		t.Parallel()
+
+		// Go-playground looks every alternative up as a validator and
+		// panics on an undefined one, not only the first. Reading the
+		// first alone would emit minLength 1 for required|0, a tag the
+		// library cannot load, and would pass over a typo in the tail.
+		type Trailing struct {
+			F string `json:"f" validate:"required|0"`
+		}
+
+		_, err := jsonschema.GenerateFor[Trailing](t.Context(), opt)
+		require.ErrorIs(t, err, validate.ErrUnrecognizedValidator)
+		require.ErrorContains(t, err, `"0"`)
+
+		type Typo struct {
+			F string `json:"f" validate:"min=1|mxa=3"`
+		}
+
+		_, err = jsonschema.GenerateFor[Typo](t.Context(), opt)
+		require.ErrorIs(t, err, validate.ErrUnrecognizedValidator)
+		require.ErrorContains(t, err, `"mxa=3"`)
+
+		// A keys block is parsed there with the same lookup, so an
+		// undefined key constraint is refused the same way.
+		type InsideKeys struct {
+			F map[string]string `json:"f" validate:"dive,keys,0,endkeys"`
+		}
+
+		_, err = jsonschema.GenerateFor[InsideKeys](t.Context(), opt)
+		require.ErrorIs(t, err, validate.ErrUnrecognizedValidator)
+		require.ErrorContains(t, err, `"0"`)
+
+		// A cross-field validator is registered there, so one in the tail
+		// is as legal as a bare one.
+		type CrossField struct {
+			F     string `json:"f"     validate:"min=1|eqfield=Other"`
+			Other string `json:"other"`
+		}
+
+		_, err = jsonschema.GenerateFor[CrossField](t.Context(), opt)
+		require.NoError(t, err)
 	})
 
 	t.Run("a repeated oneof intersects", func(t *testing.T) {

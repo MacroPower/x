@@ -347,8 +347,10 @@
 // constraints inside a keys...endkeys block (map-key constraints are not
 // modeled). A block runs from the keys to the first endkeys, or to the end
 // of the tag when none follows, as go-playground's parser collects it, so
-// every part between is a key constraint and is skipped, and a keys inside
-// the block closes on that same first endkeys. A keys not immediately
+// every part between is a key constraint and is skipped once it names a
+// validator go-playground registers, since go-playground parses the block
+// with the same lookup, and a keys inside the block closes on that same
+// first endkeys. A keys not immediately
 // following a dive is an error ([ErrKeysPlacement]), inside a block as much
 // as outside one, as go-playground refuses it, and so is a keys after a dive
 // into a slice or array, since only go-playground's map branch reads a block
@@ -374,8 +376,9 @@
 // space. The | OR operator is not modeled
 // either: within a single comma group the pipe separates OR alternatives, of
 // which only the first is interpreted, so later comma-separated constraints
-// still apply; an alternative with no key, anywhere in the group, is an
-// error, since go-playground refuses the tag.
+// still apply; an alternative with no key, or one naming a validator neither
+// side knows, anywhere in the group, is an error, since go-playground looks
+// every alternative up and refuses the tag.
 //
 // Any other key that is not a recognized constraint causes Interpret to return
 // [ErrUnrecognizedValidator] rather than being silently consumed, so a typo'd

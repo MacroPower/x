@@ -282,8 +282,9 @@ func applyParts(parts []string, field jsonschema.FieldContext, afterDive bool, c
 // constraints, which this dialect does not model, so nothing is applied. The
 // grammar is still checked, since go-playground parses the block with the
 // same rules: a keys inside it must immediately follow a dive and have a
-// part after it, and a structural key with a parameter or an OR alternative
-// names no validator. A
+// part after it, a structural key with a parameter or an OR alternative
+// names no validator, and every other part must name a validator
+// go-playground registers. A
 // nested block closes on the same first endkeys as the block holding it,
 // since go-playground's collector stops there whatever opened before. It
 // returns the number of parts consumed, the closing endkeys included.
@@ -313,8 +314,16 @@ func skipKeysBlock(parts []string) (int, error) {
 			}
 
 			key, _, hasValue := strings.Cut(alt, "=")
-			if isStructuralKey(strings.TrimSpace(key)) && (hasValue || orGroup) {
+
+			key = strings.TrimSpace(key)
+			if isStructuralKey(key) && (hasValue || orGroup) {
 				return 0, fmt.Errorf("%w %q", ErrUnrecognizedValidator, strings.TrimSpace(alt))
+			}
+
+			// Go-playground parses the block with the same lookup, so a
+			// key constraint must name a validator it registers.
+			if _, known := validatorKeys[key]; !known && !isCrossFieldValidator(key) {
+				return 0, fmt.Errorf("%w %q", ErrUnrecognizedValidator, key)
 			}
 		}
 
@@ -331,10 +340,14 @@ func skipKeysBlock(parts []string) (int, error) {
 // looser than the group. Splitting per part rather than across the whole tag
 // keeps later comma-separated constraints intact, and a literal pipe in a
 // parameter is written 0x7C and survives, since unescapeParam runs after
-// this split. An alternative with no key, anywhere in the group, is a tag
-// go-playground refuses outright: its parser splits every alternative and
-// panics on an empty key in any of them. So a trailing pipe or a doubled one
-// is an error here rather than a group whose tail is dropped in silence.
+// this split. Every alternative in the group must name a validator, since
+// go-playground's parser splits every alternative and looks each key up,
+// and panics on an empty or undefined one. So a trailing pipe, a doubled
+// one, or a later alternative naming nothing this dialect or go-playground
+// knows is an error here rather than a group whose tail is dropped in
+// silence. The cross-field validators count as known, as go-playground
+// registers them, and so does a key this dialect expresses; a structural key
+// names no validator on either side.
 func firstAlternative(raw string) (string, bool, error) {
 	first, _, orGroup := strings.Cut(raw, "|")
 	if !orGroup {
@@ -343,8 +356,14 @@ func firstAlternative(raw string) (string, bool, error) {
 
 	for alt := range strings.SplitSeq(raw, "|") {
 		key, _, _ := strings.Cut(alt, "=")
-		if strings.TrimSpace(key) == "" {
+
+		key = strings.TrimSpace(key)
+		if key == "" {
 			return "", true, fmt.Errorf("validate tag: empty OR alternative in %q", strings.TrimSpace(raw))
+		}
+
+		if _, known := validatorKeys[key]; !known && !isCrossFieldValidator(key) {
+			return "", true, fmt.Errorf("%w %q", ErrUnrecognizedValidator, strings.TrimSpace(alt))
 		}
 	}
 
