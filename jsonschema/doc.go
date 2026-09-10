@@ -618,8 +618,9 @@
 //
 // Generation disambiguates name collisions with the package's base directory
 // name, then with the full import path if needed. The collision check runs
-// over the definitions the output emits, so a type a type= override or root
-// inlining drops never prefixes a surviving name. For generic type
+// over the definitions the output emits, so a type a type= override, a tag
+// replacing a definition keyword, or root inlining drops never prefixes a
+// surviving name. For generic type
 // instantiations, it replaces the brackets and commas in [reflect.Type.Name]
 // with underscores to form the $defs key (e.g., "MyStruct[int]" becomes
 // "MyStruct_int_"). The [WithNamer] option overrides this naming.
@@ -1040,7 +1041,11 @@
 //     tag replacing one renders that occurrence inline, as a copy of the
 //     definition's schema with the keyword replaced, rather than beside a
 //     $ref, where JSON Schema would apply both; every other occurrence keeps
-//     the reference. Naming any of them twice in one tag is an error,
+//     the reference. The copy is an occurrence of the type as an inline one
+//     is, so a byte-slice type keeps its string type and, under a
+//     nil-as-null option, its null admission. A definition no occurrence
+//     refers to afterward joins no name collision. Naming any of them twice
+//     in one tag is an error,
 //     because no precedence applies there and dropping one of two stated
 //     values would be silent. A repeated uniqueItems or type is an error for
 //     the same reason.

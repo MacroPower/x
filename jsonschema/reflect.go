@@ -10,6 +10,7 @@ import (
 	"math/big"
 	"reflect"
 	"slices"
+	"strconv"
 	"time"
 
 	jsonv2 "encoding/json/v2"
@@ -1379,6 +1380,16 @@ func (g *run) buildFieldSchema(
 
 	fieldNode.isField = true
 
+	// The jsonschema tag's directives that reach into a definition apply
+	// here, as facts of the graph: a replacing keyword turns a reference into
+	// a copy of the definition's body, and the type= pair rewrites the node.
+	// The tag's other directives wait for the null pass. A malformed tag is
+	// reported where the tag is applied, in [run.applyFieldTag], which parses
+	// it again.
+	directives := fieldDirectives(fi)
+
+	inlineReplacedRef(fieldNode, directives)
+
 	// Allocate the authored canvas for the field and every sequence/map element
 	// beneath it. Field-level processing (the comment provider, the jsonschema
 	// tag, tag interpreters) declares its facts on the canvas rather than mutating
@@ -1395,9 +1406,8 @@ func (g *run) buildFieldSchema(
 	})
 
 	// The jsonschema tag's type= pair replaces the field's type wholesale, a
-	// fact the null pass needs, so it applies here; the tag's other
-	// directives wait for the pass.
-	g.applyTypeOverrideDirective(fieldNode, fi)
+	// fact the null pass needs, so it applies here.
+	applyTypeOverrideDirective(fieldNode, directives)
 
 	// Encoding/json/v2's omitempty omits a field only when its encoded value
 	// is an empty JSON value (null, "", {}, []), so a field whose type never
@@ -1424,30 +1434,109 @@ func (g *run) buildFieldSchema(
 	return nil
 }
 
+// fieldDirectives parses the key=value directives of a field's jsonschema
+// tag for the build phase. A field with no tag, a bare description, or a
+// tag the parser refuses has none; the refusal is reported where the tag is
+// applied, in [run.applyFieldTag].
+func fieldDirectives(fi fieldset.Field) []tagparse.Directive {
+	tag, ok := fi.StructField.Tag.Lookup("jsonschema")
+	if !ok {
+		return nil
+	}
+
+	directives, _, err := tagparse.Parse(tag)
+	if err != nil {
+		return nil
+	}
+
+	return directives
+}
+
 // applyTypeOverrideDirective applies the type= pairs of a field's jsonschema
 // tag to the field's node in place ([node.overrideType]), so the override is
 // a fact of the graph before the null pass runs. The node keeps the
 // occurrence it replaced, whose decision the tag's other directives read in
-// [run.applyFieldTag]. A tag with no valid type= pair, or one the parser
-// refuses, leaves the node as built.
-func (g *run) applyTypeOverrideDirective(fieldNode *node, fi fieldset.Field) {
-	tag, ok := fi.StructField.Tag.Lookup("jsonschema")
-	if !ok {
-		return
-	}
-
-	// A malformed tag is reported where the tag is applied, in
-	// [run.applyFieldTag], which parses it again.
-	directives, _, err := tagparse.Parse(tag)
-	if err != nil {
-		return
-	}
-
+// [run.applyFieldTag]. A tag with no valid type= pair leaves the node as
+// built.
+func applyTypeOverrideDirective(fieldNode *node, directives []tagparse.Directive) {
 	for _, d := range directives {
 		if d.Key == keyword.Type && typename.Valid(d.Value) {
 			fieldNode.overrideType(d.Value)
 		}
 	}
+}
+
+// inlineReplacedRef turns a reference whose tag replaces a keyword the
+// referenced definition declares into a copy of that definition's body. The
+// jsonschema tag's format, pattern, and multipleOf replace what the field's
+// type declared, but a type extracted to $defs declares them on its
+// definition, where a sibling keyword beside the $ref would conjoin with the
+// definition's instead. The occurrence becomes an inline leaf of the type,
+// so the overlay replaces the keyword the way it does for an inline type,
+// while every other occurrence keeps the reference. It runs in the build
+// phase, so the null pass decides the copy from the facts the entry
+// recorded for the type (its container kind and stance, folded with the
+// occurrence's own) as it decides an inline occurrence, and the naming pass
+// sees an entry no occurrence refers to as the orphan it is. A verbatim
+// body is emitted as authored, so it stays referenced; so does a body that
+// is not a leaf, which declares no replaceable keyword of its own.
+func inlineReplacedRef(n *node, directives []tagparse.Directive) {
+	if n.kind != kindRef || n.def.body == nil {
+		return
+	}
+
+	body := n.def.body
+	if body.kind != kindValue || body.verbatim || !tagReplacesKeyword(directives, body.payload) {
+		return
+	}
+
+	n.inlineLeafBody()
+}
+
+// inlineLeafBody replaces a reference to a leaf body with a copy of the body
+// in place. The copy takes the entry's container kind and stance, so the
+// null pass reads the facts a reference would have read off the entry: the
+// entry's stance where it declares one, the node's own otherwise, matching
+// the precedence the reference applies.
+func (n *node) inlineLeafBody() {
+	e := n.def
+
+	n.payload = schemaclone.Clone(e.body.payload)
+	n.def = nil
+	n.kind = kindValue
+	n.occ.container = e.container
+
+	if e.nullability != NullFromReflection {
+		n.stance = e.nullability
+	}
+}
+
+// tagReplacesKeyword reports whether the tag's directives set a replacing
+// keyword (format, pattern, multipleOf) to a value other than the one def
+// declares. A multipleOf the tag misspells replaces nothing here; the tag's
+// application refuses it later.
+func tagReplacesKeyword(directives []tagparse.Directive, def *Schema) bool {
+	for _, d := range directives {
+		switch d.Key {
+		case keyword.Format:
+			if d.Value != "" && def.Format != "" && d.Value != def.Format {
+				return true
+			}
+
+		case keyword.Pattern:
+			if d.Value != "" && def.Pattern != "" && d.Value != def.Pattern {
+				return true
+			}
+
+		case keyword.MultipleOf:
+			v, err := strconv.ParseFloat(d.Value, 64)
+			if err == nil && def.MultipleOf != nil && v != *def.MultipleOf {
+				return true
+			}
+		}
+	}
+
+	return false
 }
 
 // applyFieldHooks runs the field-level hooks over every struct in the graph
@@ -1603,62 +1692,10 @@ func (g *run) applyFieldTag(p nodeProp) error {
 		// admission is one answer whichever site classifies it.
 		Nullable: decided.null.admit,
 	})
-	if err != nil {
-		// Tagparse errors already carry the "jsonschema tag:" prefix, and
-		// their sentinels are the ones this package exports.
-		//nolint:wrapcheck // The tag grammar owns the message and the sentinel.
-		return err
-	}
-
-	inlineReplacedRefs(fieldNode)
-
-	return nil
-}
-
-// inlineReplacedRefs inlines a reference whose canvas replaces a keyword the
-// referenced definition declares. The jsonschema tag's format, pattern, and
-// multipleOf replace what the field's type declared, but a type extracted to
-// $defs declares them on its definition, where a sibling keyword beside the
-// $ref would conjoin with the definition's instead. The occurrence takes a
-// copy of the definition's leaf body, so the overlay replaces the keyword the
-// way it does for an inline type, while every other occurrence keeps the
-// reference. The null decision stands: a leaf body admits null through the
-// same facts as a reference to it. A verbatim body is emitted as authored,
-// so it stays referenced. The walk follows the slots the tag's element rules
-// reach, a list's element and a tuple's positions.
-func inlineReplacedRefs(n *node) {
-	if n == nil {
-		return
-	}
-
-	if n.kind == kindRef && n.def != nil && n.def.body != nil {
-		body := n.def.body
-		if body.kind == kindValue && !body.verbatim && canvasReplacesKeyword(n.authored, body.payload) {
-			n.payload = schemaclone.Clone(body.payload)
-			n.def = nil
-			n.kind = kindValue
-		}
-	}
-
-	if n.kind == kindList {
-		inlineReplacedRefs(n.items)
-	}
-
-	for _, c := range n.prefix {
-		inlineReplacedRefs(c)
-	}
-}
-
-// canvasReplacesKeyword reports whether canvas sets a replacing keyword
-// (format, pattern, multipleOf) to a value other than the one def declares.
-func canvasReplacesKeyword(canvas, def *Schema) bool {
-	if canvas == nil || def == nil {
-		return false
-	}
-
-	return (canvas.Format != "" && def.Format != "" && canvas.Format != def.Format) ||
-		(canvas.Pattern != "" && def.Pattern != "" && canvas.Pattern != def.Pattern) ||
-		(canvas.MultipleOf != nil && def.MultipleOf != nil && *canvas.MultipleOf != *def.MultipleOf)
+	// Tagparse errors already carry the "jsonschema tag:" prefix, and their
+	// sentinels are the ones this package exports.
+	//nolint:wrapcheck // The tag grammar owns the message and the sentinel.
+	return err
 }
 
 // elemRefs mirrors a node's element children as the definition seams the

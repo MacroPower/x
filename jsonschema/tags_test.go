@@ -4895,3 +4895,116 @@ func TestTagReplacesDefinitionKeywordInline(t *testing.T) {
 		"when": "2020-01-01T00:00:00Z",
 	}), "the replaced format applies alone")
 }
+
+// inlinedBlob declares a base64 string schema for a byte-slice type, so its
+// definition carries the container's type and, under nil-as-null, the null
+// the type list admits.
+type inlinedBlob []byte
+
+func (inlinedBlob) JSONSchema(_ context.Context, _ jsonschema.TypeContext) (jsonschema.TypeSchema, error) {
+	return jsonschema.TypeSchema{Value: &jsonschema.Schema{
+		Type: "string", Format: "blob", ContentEncoding: "base64",
+	}}, nil
+}
+
+// editedBlob extends the reflected byte-slice schema, whose type keyword the
+// payload leaves for render to restore from the container fact.
+type editedBlob []byte
+
+func (editedBlob) JSONSchemaExtend(
+	_ context.Context, _ jsonschema.TypeContext, ts *jsonschema.TypeSchema,
+) error {
+	ts.Value.Pattern = "^a"
+
+	return nil
+}
+
+// TestTagReplacesDefinitionKeywordKeepsContainer pins that the inline copy a
+// replacing tag makes of a $defs-extracted container type is an occurrence
+// of that type: it carries the container's type keyword and, under a
+// nil-as-null option, the null admission the definition renders. The copy
+// once kept the reference's occurrence facts, so a byte-slice field whose
+// tag replaced the definition's pattern rendered with no type at all, and
+// one replacing its format refused the null encoding/json/v2 writes for it.
+func TestTagReplacesDefinitionKeywordKeepsContainer(t *testing.T) {
+	t.Parallel()
+
+	type provided struct {
+		A inlinedBlob `json:"a" jsonschema:"format=other"`
+		B inlinedBlob `json:"b"`
+	}
+
+	type edited struct {
+		A editedBlob `json:"a" jsonschema:"pattern=^b"`
+		B editedBlob `json:"b"`
+	}
+
+	tests := map[string]struct {
+		generate func() (*jsonschema.Schema, error)
+		want     string
+		accept   string
+		reject   string
+	}{
+		"provider type under nil-as-null keeps the null admission": {
+			generate: func() (*jsonschema.Schema, error) {
+				return jsonschema.GenerateFor[provided](t.Context(),
+					jsonschema.WithJSONOptions(json.FormatNilSliceAsNull(true)))
+			},
+			want:   `{"type":["null","string"],"contentEncoding":"base64","format":"other"}`,
+			accept: `{"a":null,"b":null}`,
+			reject: `{"a":123,"b":null}`,
+		},
+		"extender type keeps the container type": {
+			generate: func() (*jsonschema.Schema, error) {
+				return jsonschema.GenerateFor[edited](t.Context())
+			},
+			want:   `{"type":"string","pattern":"^b","contentEncoding":"base64"}`,
+			accept: `{"a":"bb","b":"aa"}`,
+			reject: `{"a":123,"b":"aa"}`,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			s, err := tc.generate()
+			require.NoError(t, err)
+
+			got, err := json.Marshal(s.Properties["a"])
+			require.NoError(t, err)
+			assert.JSONEq(t, tc.want, string(got))
+			assert.NotEmpty(t, s.Properties["b"].Ref, "an untagged occurrence keeps the reference")
+
+			v, err := jsonschema.Compile(t.Context(), s)
+			require.NoError(t, err)
+
+			require.NoError(t, v.ValidateJSON(t.Context(), []byte(tc.accept)))
+			require.Error(t, v.ValidateJSON(t.Context(), []byte(tc.reject)))
+		})
+	}
+}
+
+// TestTagReplacesDefinitionKeywordAcceptsMarshaledNull pins that the inline
+// copy accepts what encoding/json/v2 writes for a nil value of the type
+// under the nil-as-null option, as the definition does.
+func TestTagReplacesDefinitionKeywordAcceptsMarshaledNull(t *testing.T) {
+	t.Parallel()
+
+	type doc struct {
+		A inlinedBlob `json:"a" jsonschema:"format=other"`
+		B inlinedBlob `json:"b"`
+	}
+
+	s, err := jsonschema.GenerateFor[doc](t.Context(),
+		jsonschema.WithJSONOptions(json.FormatNilSliceAsNull(true)))
+	require.NoError(t, err)
+
+	inst, err := json.Marshal(doc{}, json.FormatNilSliceAsNull(true))
+	require.NoError(t, err)
+
+	v, err := jsonschema.Compile(t.Context(), s)
+	require.NoError(t, err)
+
+	assert.NoError(t, v.ValidateJSON(t.Context(), inst), "the schema accepts the type's own marshaled output")
+}

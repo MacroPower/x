@@ -90,7 +90,8 @@ func (g *run) emittedDefs(root *node) map[*defEntry]bool {
 // assignDefNames assigns each def entry its final $defs key, disambiguating
 // name collisions among the emitted entries by prefixing with the package's
 // base directory name, then with the full import path if collisions persist.
-// An entry outside emitted (one a type= override or root inlining orphaned)
+// An entry outside emitted (one a type= override, a tag replacing a
+// definition keyword, or root inlining orphaned)
 // never reaches the output, so it joins no collision group and takes a
 // token-shaped name instead, which no emitted key can spell. It runs before
 // render, so renderRef emits final names directly; because refs are defEntry

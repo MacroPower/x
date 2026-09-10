@@ -515,18 +515,23 @@ func (canvasRefCode) JSONSchema(context.Context, jsonschema.TypeContext) (jsonsc
 // TestHookCanvasRefKeepsItsDefinition pins the reachability edge a $ref an
 // interpreter writes onto a field canvas makes. The canvas is rendered into
 // the output, so the definition it names must survive the render-time
-// reachability scan. Field b's interpreter copies the final $ref it reads
-// off its sibling a through Parent and forbids it; field a's own tag then
-// replaces the definition's format, which inlines a's reference and leaves
-// the canvas copy as the definition's only reference. The scan used to read
-// payload refs alone, so the definition was dropped and the output carried
-// a $ref it did not emit.
+// reachability scan, which reads canvases beside payloads. Field b's
+// interpreter copies the final $ref it reads off its sibling a through
+// Parent and forbids it, while field p's tag replaces the definition's
+// format and renders that occurrence inline. The scan used to read payload
+// refs alone, and the tag once inlined a reference in the field hooks,
+// after the interpreter read it off Parent, so a canvas copy could be the
+// definition's only reference and the output carried a $ref it did not
+// emit. The tag's inlining runs in the build phase, so the reference an
+// interpreter reads off Parent is one the output keeps; the scan still
+// counts the canvas copy, and every $ref the output carries resolves.
 func TestHookCanvasRefKeepsItsDefinition(t *testing.T) {
 	t.Parallel()
 
 	type root struct {
-		B string        `canvasref:"a" json:"b"`
-		A canvasRefCode `json:"a"      jsonschema:"format=uri"`
+		B string         `canvasref:"a" json:"b"`
+		A canvasRefCode  `json:"a"`
+		P *canvasRefCode `json:"p"      jsonschema:"format=uri"`
 	}
 
 	interp := jsonschema.TagInterpreterFunc(
@@ -541,13 +546,15 @@ func TestHookCanvasRefKeepsItsDefinition(t *testing.T) {
 	s, err := jsonschema.GenerateFor[root](t.Context(), jsonschema.WithTagInterpreter("canvasref", interp))
 	require.NoError(t, err)
 
-	assert.Equal(t, "uri", s.Properties["a"].Format, "the tag inlines the reference it replaces a keyword of")
-	assert.Empty(t, s.Properties["a"].Ref)
+	assert.Equal(t, "#/$defs/canvasRefCode", s.Properties["a"].Ref, "an untagged occurrence keeps the reference")
+
+	require.Len(t, s.Properties["p"].AnyOf, 2)
+	assert.Equal(t, "uri", s.Properties["p"].AnyOf[0].Format, "the tag inlines the reference it replaces a keyword of")
+	assert.Empty(t, s.Properties["p"].AnyOf[0].Ref)
 
 	require.Len(t, s.Properties["b"].AllOf, 1)
 	assert.Equal(t, "#/$defs/canvasRefCode", s.Properties["b"].AllOf[0].Not.Ref)
-	require.Contains(t, s.Defs, "canvasRefCode",
-		"a definition a canvas $ref alone names is emitted")
+	require.Contains(t, s.Defs, "canvasRefCode", "the definition the canvas $ref names is emitted")
 
 	_, err = jsonschema.Compile(t.Context(), s)
 	require.NoError(t, err, "every $ref the output carries must resolve")
