@@ -62,9 +62,12 @@ func (g *run) reconcileField(n *node) *Schema {
 	// A nilable container with no const/enum encodes as a ["null", base] type
 	// list carrying its authored keywords inline; its bare payload has no type
 	// yet, so the empty-schema dedup (which treats a typeless payload as
-	// null-admitting) must not run first.
-	hasConstEnum := merged.Const != nil || merged.Enum != nil
-	if n.typeListEncoded() && !hasConstEnum {
+	// null-admitting) must not run first. An allOf (a subschema the canvas
+	// forbids) cannot ride the list either: inline beside "null" it judges
+	// the null, and a forbidden subschema naming no type rejects it, so the
+	// field takes the anyOf form with the allOf on the value branch.
+	hasValueOnly := merged.Const != nil || merged.Enum != nil || len(merged.AllOf) > 0
+	if n.typeListEncoded() && !hasValueOnly {
 		nullTypeList(&merged, n.containerType())
 
 		return &merged

@@ -693,6 +693,60 @@ func TestConstraintsForbidSchemaSparesNull(t *testing.T) {
 	}
 }
 
+// TestConstraintsForbidSchemaSparesNullOnATypeList pins that a forbidden
+// subschema judges the value branch alone on a nilable container too. Such a
+// field's null render is a ["null", base] type list rather than an anyOf
+// wrapper, and the allOf used to ride that list inline, where a forbidden
+// subschema naming no type matched null vacuously and the not rejected it,
+// while the same forbid on a *string kept null valid. The container takes
+// the anyOf form with the allOf on the value branch.
+func TestConstraintsForbidSchemaSparesNullOnATypeList(t *testing.T) {
+	t.Parallel()
+
+	type doc struct {
+		Items *[]int           `forbid:"x" json:"items"`
+		Names *map[string]bool `forbid:"x" json:"names"`
+		Str   *string          `forbid:"x" json:"str"`
+	}
+
+	forbid := jsonschema.TagInterpreterFunc(
+		func(_ context.Context, field jsonschema.FieldContext, _ jsonschema.Tag) error {
+			c := field.Constraints()
+
+			switch field.Name {
+			case "items":
+				return c.ForbidSchema(&jsonschema.Schema{MaxItems: new(2)})
+			case "names":
+				return c.ForbidSchema(&jsonschema.Schema{MaxProperties: new(2)})
+			default:
+				return c.ForbidSchema(&jsonschema.Schema{MaxLength: new(2)})
+			}
+		},
+	)
+
+	s, err := jsonschema.GenerateFor[doc](t.Context(), jsonschema.WithTagInterpreter("forbid", forbid))
+	require.NoError(t, err)
+
+	require.NoError(t, jsonschema.Validate(t.Context(), s,
+		map[string]any{"items": nil, "names": nil, "str": nil}),
+		"a null the field's decision admits is never judged by a forbidden subschema")
+
+	three := map[string]any{"a": true, "b": false, "c": true}
+
+	require.NoError(t, jsonschema.Validate(t.Context(), s,
+		map[string]any{"items": []any{1, 2, 3}, "names": three, "str": "abc"}),
+		"a value outside the forbidden range passes on every container")
+
+	for _, instance := range []map[string]any{
+		{"items": []any{1, 2}, "names": three, "str": "abc"},
+		{"items": []any{1, 2, 3}, "names": map[string]any{"a": true}, "str": "abc"},
+		{"items": []any{1, 2, 3}, "names": three, "str": "ab"},
+	} {
+		require.Error(t, jsonschema.Validate(t.Context(), s, instance),
+			"the forbidden subschema still holds on the value branch of %v", instance)
+	}
+}
+
 // TestConstraintsFacadeNilCanvasWrites pins the facade's write boundary:
 // every write on a facade with no canvas, a nil *Constraints, the zero
 // Constraints, or one a caller-built context handed out without a Canvas, is
