@@ -504,6 +504,55 @@ func TestGenerateFor_HandSpelledRefSurvivesNameEscalation(t *testing.T) {
 	require.NoError(t, err, "every $ref the output carries must resolve")
 }
 
+// canvasRefCode is a provider-implementing named string, so it is extracted
+// to $defs and declares a format there a field tag can replace.
+type canvasRefCode string
+
+func (canvasRefCode) JSONSchema(context.Context, jsonschema.TypeContext) (jsonschema.TypeSchema, error) {
+	return jsonschema.TypeSchema{Value: &jsonschema.Schema{Type: "string", Format: "email"}}, nil
+}
+
+// TestHookCanvasRefKeepsItsDefinition pins the reachability edge a $ref an
+// interpreter writes onto a field canvas makes. The canvas is rendered into
+// the output, so the definition it names must survive the render-time
+// reachability scan. Field b's interpreter copies the final $ref it reads
+// off its sibling a through Parent and forbids it; field a's own tag then
+// replaces the definition's format, which inlines a's reference and leaves
+// the canvas copy as the definition's only reference. The scan used to read
+// payload refs alone, so the definition was dropped and the output carried
+// a $ref it did not emit.
+func TestHookCanvasRefKeepsItsDefinition(t *testing.T) {
+	t.Parallel()
+
+	type root struct {
+		B string        `canvasref:"a" json:"b"`
+		A canvasRefCode `json:"a"      jsonschema:"format=uri"`
+	}
+
+	interp := jsonschema.TagInterpreterFunc(
+		func(_ context.Context, fc jsonschema.FieldContext, tag jsonschema.Tag) error {
+			sibling := fc.Parent.Properties[tag.Value]
+			require.Equal(t, "#/$defs/canvasRefCode", sibling.Ref, "the sibling's final $ref is what Parent shows")
+
+			return fc.Constraints().ForbidSchema(&jsonschema.Schema{Ref: sibling.Ref})
+		},
+	)
+
+	s, err := jsonschema.GenerateFor[root](t.Context(), jsonschema.WithTagInterpreter("canvasref", interp))
+	require.NoError(t, err)
+
+	assert.Equal(t, "uri", s.Properties["a"].Format, "the tag inlines the reference it replaces a keyword of")
+	assert.Empty(t, s.Properties["a"].Ref)
+
+	require.Len(t, s.Properties["b"].AllOf, 1)
+	assert.Equal(t, "#/$defs/canvasRefCode", s.Properties["b"].AllOf[0].Not.Ref)
+	require.Contains(t, s.Defs, "canvasRefCode",
+		"a definition a canvas $ref alone names is emitted")
+
+	_, err = jsonschema.Compile(t.Context(), s)
+	require.NoError(t, err, "every $ref the output carries must resolve")
+}
+
 // TestHookCanvasContainersAreNotAliased pins that the rendered schema shares
 // no container with a slice a hook assigned to its canvas. The overlay copies
 // an enum or examples header from the canvas as is, so an interpreter that

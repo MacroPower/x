@@ -1285,10 +1285,11 @@ func (g *run) payloadRefTargets() map[string]*defEntry {
 }
 
 // walkReachable visits every node reachable from root like walkNodes, and
-// additionally follows the raw $ref strings inside every payload. A payload
-// holds no node-backed child, so what the scan reaches is what a hook
-// declared: a Verbatim payload ([TypeSchema.Verbatim]), a provider's Value, a
-// slot a build-time extender replaced or a branch it grafted, in a typed
+// additionally follows the raw $ref strings inside every payload and every
+// authored canvas. A payload holds no node-backed child, so what the scan
+// reaches is what a hook declared: a Verbatim payload
+// ([TypeSchema.Verbatim]), a provider's Value, a slot a build-time extender
+// replaced or a branch it grafted, a subschema a field hook forbade, in a typed
 // sub-schema field or under a "$ref" member of an extension keyword's
 // value ([extraRefs]). A $defs reference inside any of those is a
 // reachability edge only a string scan sees. A kindRef node's own Ref is
@@ -1311,9 +1312,15 @@ func (g *run) walkReachable(
 
 	var scanPayload func(s *Schema)
 
+	// The authored canvas is rendered into the output beside the payload
+	// (its allOf conjuncts, not, and contentSchema carry sub-schemas), so a
+	// $ref a field hook wrote there is an edge too. Field hooks run after
+	// naming, so a canvas ref is a final key; the scan reads it for the root
+	// inlining check and the render-time def collection.
 	visitAndScan := func(n *node) {
 		visit(n)
 		scanPayload(n.payload)
+		scanPayload(n.authored)
 	}
 
 	hit := func(ref string) {
