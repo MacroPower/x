@@ -292,6 +292,61 @@ func TestValidateConstAgreesWithUniqueItems(t *testing.T) {
 	require.NoError(t, constSchema.Validate(t.Context(), jsonv1.Number("1.1")))
 }
 
+// TestValidateEmptyTypeArrayRejectsEverything pins that a present-but-empty
+// type array constrains, rather than reading as an absent keyword. The spec
+// admits an instance whose type is in the listed set, so an empty list admits
+// nothing, the reading the package already gives an empty enum. The type
+// check once skipped on len(types) == 0, conflating "type": [] with no type
+// keyword and accepting every instance, and a hand-built
+// Schema{Types: []string{}} did the same.
+func TestValidateEmptyTypeArrayRejectsEverything(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		schema string
+	}{
+		"2020-12": {schema: `{"type": []}`},
+		"draft-07": {
+			schema: `{"$schema": "http://json-schema.org/draft-07/schema#", "type": []}`,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			v, err := jsonschema.CompileJSON(t.Context(), []byte(tc.schema))
+			require.NoError(t, err, "an empty type array compiles")
+
+			for _, instance := range []string{`1`, `"s"`, `null`, `[]`, `{}`, `true`} {
+				err = v.ValidateJSON(t.Context(), []byte(instance))
+				require.Error(t, err, "an empty type list admits no instance: %s", instance)
+
+				var verr *jsonschema.ValidationError
+
+				require.ErrorAs(t, err, &verr)
+				assert.Equal(t, jsonschema.KeywordType, verr.Keyword)
+			}
+		})
+	}
+
+	t.Run("hand-built empty Types", func(t *testing.T) {
+		t.Parallel()
+
+		v, err := jsonschema.Compile(t.Context(), &jsonschema.Schema{Types: []string{}})
+		require.NoError(t, err)
+		require.Error(t, v.Validate(t.Context(), 1))
+	})
+
+	t.Run("absent keyword still accepts", func(t *testing.T) {
+		t.Parallel()
+
+		v, err := jsonschema.Compile(t.Context(), &jsonschema.Schema{})
+		require.NoError(t, err)
+		require.NoError(t, v.Validate(t.Context(), 1))
+	})
+}
+
 // A metaschema may declare a vocabulary with false, marking it optional for
 // implementations that do not recognize it (core section 8.1.2). This
 // implementation recognizes every standard 2020-12 vocabulary, so the value

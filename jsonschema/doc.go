@@ -1657,8 +1657,8 @@
 //     form, a schema with no fields set, which marshals to JSON true and
 //     accepts every instance. Annotation-only schemas (a description but no
 //     constraints) return false, as do schemas whose only field is a non-nil
-//     empty map or slice (Schema{Enum: []any{}} vacuously rejects every
-//     instance).
+//     empty map or slice (Schema{Enum: []any{}} and Schema{Types: []string{}}
+//     each vacuously reject every instance).
 //   - [IsFalseSchema] reports whether a schema is the boolean false schema
 //     form {"not": {}} (the shape the upstream produces when unmarshaling the
 //     JSON boolean false), which marshals to JSON false and rejects every

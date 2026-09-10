@@ -2150,13 +2150,16 @@ func evalUnevaluatedItems(ctx evalContext) []*ValidationError {
 func evalType(ctx evalContext) []*ValidationError {
 	schema := ctx.schema
 
+	// An empty Type beside a nil Types means the keyword is absent (skip). An
+	// empty but non-nil Types ("type": []) names no type, so every instance
+	// fails it, the same reading evalEnum gives an empty enum.
+	if schema.Type == "" && schema.Types == nil {
+		return nil
+	}
+
 	types := schema.Types
 	if schema.Type != "" {
 		types = []string{schema.Type}
-	}
-
-	if len(types) == 0 {
-		return nil
 	}
 
 	if slices.ContainsFunc(types, ctx.instance.MatchesType) {
