@@ -22,10 +22,12 @@ func BaseTypeName(name string) string {
 }
 
 // TypeDoc returns the doc comment for the type named name declared in files,
-// reporting whether the type was found. The doc comment can be on the TypeSpec
-// itself or, for a single-spec declaration, on the enclosing GenDecl. A type
-// found without a doc comment reports an empty string and true; an absent type
-// reports an empty string and false.
+// reporting whether the type was found. The doc comment sits on the TypeSpec
+// itself or, for a spec with none, on the enclosing GenDecl, whether that
+// declaration holds one spec or a parenthesized group; go/doc attaches a
+// group's comment to every spec in it lacking its own, and TypeDoc reads it
+// the same way. A type found without a doc comment reports an empty string
+// and true; an absent type reports an empty string and false.
 func TypeDoc(files []*ast.File, name string) (string, bool) {
 	for _, f := range files {
 		for _, decl := range f.Decls {
