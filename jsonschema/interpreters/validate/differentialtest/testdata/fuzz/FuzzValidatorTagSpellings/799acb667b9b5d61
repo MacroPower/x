@@ -1,0 +1,4 @@
+go test fuzz v1
+string("dive,unique")
+byte('\x11')
+[]byte("00001001022222210")

@@ -101,6 +101,14 @@ const (
 	// "-0" instance is rejected here and accepted by go-playground, which
 	// compares the two zeros as one, so the rig skips the negative zero probe
 	// under a pin and compares every other value.
+	// The interpreter checks every later OR alternative as it would a bare
+	// part, on a scratch canvas, so a parameter go-playground could not
+	// read there is refused. Go-playground runs a later alternative only on
+	// a value the alternatives before it reject, so on a kind whose first
+	// alternative every probe satisfies the faulty tail is never reached
+	// and the tag loads; the refusal is the stricter side the | operator
+	// already takes, and the rig compares the other direction alone.
+	reasonOrAlternativeChecked        = "a later OR alternative is checked as a bare part here, where go-playground runs it only on a value the alternatives before it reject"
 	reasonCoercedFloatNegativeZeroPin = "a pin on a coerced float names the canonical \"0\" alone, so a \"-0\" instance is rejected here and accepted by go-playground"
 	// A cross-field or conditional validator reads a sibling field, which no
 	// single property schema can express.
@@ -176,6 +184,7 @@ func rigExclusions() []rigExclusion {
 		{what: "a keys...endkeys block", reason: reasonKeysBlockUnmodeled, rule: "keys"},
 		{what: "the cross-field validators", reason: reasonCrossFieldUnmodeled, rule: "eqfield"},
 		{what: "the | OR operator", reason: reasonOrOperatorUnmodeled, rule: "|"},
+		{what: "a later OR alternative the first alternative shadows", reason: reasonOrAlternativeChecked},
 		{what: "a comparison rule on a time.Time", reason: reasonTimeRelativeRule},
 		{what: "a value rule on an interface", reason: reasonOpaqueRuleDynamicKind},
 

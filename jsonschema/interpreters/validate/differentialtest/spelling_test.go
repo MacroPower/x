@@ -443,6 +443,9 @@ func spellingExclusions() []spellingExclusion {
 				return contains([]string{"gt", "gte", "lt", "lte", "min", "max", "eq", "ne", "len"}, key)
 			})
 		}},
+		{reason: reasonOrAlternativeChecked, catches: func(_ string, _ spellingKind, _ string, err error) bool {
+			return err != nil && strings.Contains(err.Error(), "OR alternative:")
+		}},
 		{reason: reasonOpaqueRuleDynamicKind, catches: func(_ string, kind spellingKind, _ string, err error) bool {
 			return kind.typ.Kind() == reflect.Interface && errors.Is(err, tagmodel.ErrUnsupported) &&
 				strings.Contains(err.Error(), "on a opaque value")
@@ -476,7 +479,11 @@ func spellingExclusions() []spellingExclusion {
 			reason:  reasonUniqueMapNoOp,
 			verdict: true,
 			catches: func(tag string, kind spellingKind, _ string, _ error) bool {
-				return spells(tag, "unique") && kind.typ.Kind() == reflect.Map
+				// The rule reaches a map as the field itself or as an
+				// element behind a dive.
+				return anyRule(tag, kind.typ, func(key, _ string, target reflect.Type) bool {
+					return key == "unique" && target.Kind() == reflect.Map
+				})
 			},
 		},
 	}
@@ -1166,6 +1173,11 @@ func TestSpellingExclusionsAreReasoned(t *testing.T) {
 			want: reasonTimeRelativeRule,
 		},
 		"required on a time is compared": {tag: "required", kind: "*time.Time", want: ""},
+		"time-relative rule in an alternative": {
+			tag: "min|max", kind: "*time.Time",
+			err:  errors.New("validate tag: min: requires a non-empty value"),
+			want: reasonTimeRelativeRule,
+		},
 		"value rule on an interface": {
 			tag:  "ne=0",
 			kind: "any",
@@ -1176,6 +1188,11 @@ func TestSpellingExclusionsAreReasoned(t *testing.T) {
 			want: reasonOpaqueRuleDynamicKind,
 		},
 		"required on an interface is compared": {tag: "required", kind: "any", want: ""},
+		"faulty later alternative": {
+			tag: "required|min", kind: "*object",
+			err:  errors.New("OR alternative: validate tag: min: requires a non-empty value"),
+			want: reasonOrAlternativeChecked,
+		},
 		"oneof after a dive onto a nested sequence": {
 			tag: "dive,oneof=a b", kind: "[][]string", want: reasonOneOfSequenceRetarget,
 		},
@@ -1281,6 +1298,10 @@ func TestSpellingExclusionsAreReasoned(t *testing.T) {
 			schema: `{}`,
 			want:   reasonUniqueMapNoOp,
 		},
+		"unique on a map behind a dive": {
+			tag: "dive,unique", kind: "[]map[string]int", schema: `{"type":"array"}`,
+			want: reasonUniqueMapNoOp,
+		},
 		"plain rule is compared": {tag: "min=3", kind: "int", schema: `{"minimum":3}`, want: ""},
 	}
 
@@ -1308,9 +1329,14 @@ func TestSpellingExclusionsAreReasoned(t *testing.T) {
 // split into its key and parameter the way both parsers split it.
 func anyPart(tag string, pred func(key, param string) bool) bool {
 	for part := range strings.SplitSeq(tag, ",") {
-		key, param, _ := strings.Cut(part, "=")
-		if pred(key, param) {
-			return true
+		// Every OR alternative is a key go-playground looks up, so a
+		// predicate on a key reads each one. A literal pipe in a
+		// parameter is spelled 0x7C and never splits here.
+		for alt := range strings.SplitSeq(part, "|") {
+			key, param, _ := strings.Cut(alt, "=")
+			if pred(key, param) {
+				return true
+			}
 		}
 	}
 
