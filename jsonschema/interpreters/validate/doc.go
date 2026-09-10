@@ -388,7 +388,10 @@
 // which only the first is interpreted, so later comma-separated constraints
 // still apply; an alternative with no key, or one naming a validator neither
 // side knows, anywhere in the group, is an error, since go-playground looks
-// every alternative up and refuses the tag.
+// every alternative up and refuses the tag, and every later alternative is
+// checked as a bare part would be, on a scratch canvas that reaches the
+// schema no further, since go-playground runs it whenever the alternatives
+// before it fail and panics there on a parameter it cannot read.
 //
 // Any other key that is not a recognized constraint causes Interpret to return
 // [ErrUnrecognizedValidator] rather than being silently consumed, so a typo'd

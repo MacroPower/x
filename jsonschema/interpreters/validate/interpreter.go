@@ -247,6 +247,13 @@ func applyParts(parts []string, field jsonschema.FieldContext, d descent) error 
 			return err
 		}
 
+		if orGroup {
+			err = checkAlternatives(raw, field)
+			if err != nil {
+				return err
+			}
+		}
+
 		part = strings.TrimSpace(alt)
 
 		key, value, hasValue := strings.Cut(alt, "=")
@@ -280,6 +287,49 @@ func applyParts(parts []string, field jsonschema.FieldContext, d descent) error 
 		err = applyValidator(key, value, hasValue, field, applied)
 		if err != nil {
 			return err
+		}
+	}
+
+	return nil
+}
+
+// checkAlternatives applies every alternative of an OR group after the first
+// to a scratch copy of the field and discards what lands there. Go-playground
+// runs an alternative whenever the ones before it fail, so a parameter it
+// cannot read there, or a rule the field's kind refuses, panics on some
+// value; the interpreter refuses the tag the way it would refuse the same
+// spelling as a bare part. Only the first alternative is interpreted, so the
+// schema stays the stricter side. A structural key was refused by
+// firstAlternative already, and a cross-field validator is registered there
+// and skipped here as it is at the top level.
+func checkAlternatives(raw string, field jsonschema.FieldContext) error {
+	scratch := field
+	scratch.Canvas = &jsonschema.Schema{}
+	scratch.Parent = nil
+
+	first := true
+
+	for alt := range strings.SplitSeq(raw, "|") {
+		if first {
+			first = false
+
+			continue
+		}
+
+		key, value, hasValue := strings.Cut(alt, "=")
+
+		key = strings.TrimSpace(key)
+		if isCrossFieldValidator(key) {
+			continue
+		}
+
+		if hasValue {
+			value = unescapeParam(value)
+		}
+
+		err := applyValidator(key, value, hasValue, scratch, map[tagmodel.Op]string{})
+		if err != nil {
+			return fmt.Errorf("OR alternative: %w", err)
 		}
 	}
 

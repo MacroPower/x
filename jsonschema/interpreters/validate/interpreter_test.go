@@ -3265,6 +3265,18 @@ func TestValidateInterpreterGoPlaygroundParity(t *testing.T) {
 		require.ErrorIs(t, err, validate.ErrUnrecognizedValidator)
 		require.ErrorContains(t, err, `"0"`)
 
+		// Go-playground runs a later alternative whenever the ones before
+		// it fail, so a bare min there panics on a zero value as it would
+		// as a bare part. Reading the first alternative alone used to emit
+		// a clean schema for required|min.
+		type BareTail struct {
+			F int64 `json:"f" validate:"required|min"`
+		}
+
+		_, err = jsonschema.GenerateFor[BareTail](t.Context(), opt)
+		require.ErrorContains(t, err, "OR alternative")
+		require.ErrorContains(t, err, "min")
+
 		// A cross-field validator is registered there, so one in the tail
 		// is as legal as a bare one.
 		type CrossField struct {
