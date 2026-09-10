@@ -19,7 +19,9 @@ package tagparse
 
 import (
 	"fmt"
+	"maps"
 	"regexp"
+	"slices"
 	"strings"
 
 	"go.jacobcolvin.com/x/jsonschema/internal/keyword"
@@ -61,6 +63,13 @@ var (
 		keyword.Examples:         true,
 	}
 )
+
+// Keys returns every key the jsonschema tag recognizes, in sorted order. It
+// is the vocabulary a rig draws tag pairs from, so a key added to the table is
+// drawn without a hand-kept list.
+func Keys() []string {
+	return slices.Sorted(maps.Keys(jsonSchemaTagKeys))
+}
 
 // Directive is one key=value pair of a jsonschema tag, in tag order.
 type Directive struct {
