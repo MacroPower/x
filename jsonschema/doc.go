@@ -1376,8 +1376,11 @@
 // The schema side is float64. The bound keywords (minimum, maximum,
 // exclusiveMinimum, exclusiveMaximum, multipleOf) are float64 fields, so an
 // integer beyond 2^53 rounds when the schema is decoded, even though the
-// instance value it is compared against is exact. Both const and enum values
-// keep exact precision (decoded as [encoding/json.Number]).
+// instance value it is compared against is exact, and a literal outside
+// float64 range (1e400) fails the decode. Both const and enum values keep
+// exact precision (decoded as [encoding/json.Number]), and a literal outside
+// float64 range survives there, as it does in examples, default, and an
+// unknown keyword, so a const of 1e400 admits the instance 1e400 alone.
 //
 // On the generation side, an authored bound the shipped float64 would not
 // reproduce fails with [ErrBoundNotRepresentable] rather than silently

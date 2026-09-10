@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"math"
 	"math/big"
 	"reflect"
 	"regexp"
@@ -23,9 +24,11 @@ import (
 	"go.jacobcolvin.com/x/jsonschema/internal/format"
 	"go.jacobcolvin.com/x/jsonschema/internal/jsonptr"
 	"go.jacobcolvin.com/x/jsonschema/internal/jsonvalue"
+	"go.jacobcolvin.com/x/jsonschema/internal/keywordmeta"
 	"go.jacobcolvin.com/x/jsonschema/internal/numrat"
 	"go.jacobcolvin.com/x/jsonschema/internal/refresolve"
 	"go.jacobcolvin.com/x/jsonschema/internal/regexcache"
+	"go.jacobcolvin.com/x/jsonschema/internal/schemafield"
 	"go.jacobcolvin.com/x/jsonschema/internal/schemashape"
 	"go.jacobcolvin.com/x/jsonschema/internal/schemavet"
 	"go.jacobcolvin.com/x/jsonschema/internal/uriref"
@@ -1467,8 +1470,11 @@ func ParseSchemaValue(doc any) (*Schema, error) {
 	case map[string]any:
 		// Round-trip through encoding/json, delegating keyword parsing to the
 		// upstream UnmarshalJSON. A [jsonv1.Number] leaf marshals verbatim as a
-		// JSON number, so a [Normalize]d document converts exactly.
-		data, err := json.Marshal(d)
+		// JSON number, so a [Normalize]d document converts exactly. The
+		// upstream decode reads every data member as float64 and refuses a
+		// literal outside float64 range, so those members go through it with
+		// a placeholder and restoreExactValues re-copies the authored literal.
+		data, err := json.Marshal(placeholderOutOfRange(d))
 		if err != nil {
 			return nil, fmt.Errorf("encode schema document: %w", err)
 		}
@@ -1517,30 +1523,210 @@ func refuseEmptyRef(s *Schema, doc map[string]any) error {
 	})
 }
 
+// subschemaForms maps each sub-schema keyword to the container shapes it can
+// hold in JSON form, derived from [schemafield.Subschemas] the way the
+// JSON-form pointer walk derives its own table, so the placeholder walk
+// cannot disagree with the typed field table about which members hold
+// schemas.
+var subschemaForms = func() map[string][]schemafield.Shape {
+	m := make(map[string][]schemafield.Shape)
+
+	for _, f := range schemafield.Subschemas {
+		m[f.Keyword] = append(m[f.Keyword], f.Shape)
+	}
+
+	return m
+}()
+
+// placeholderOutOfRange returns doc with every [jsonv1.Number] literal float64
+// cannot hold replaced by 0 in the members the upstream decode reads as
+// data, or doc itself when it holds none. The upstream UnmarshalJSON decodes
+// the whole document into map[string]any without UseNumber, so such a
+// literal fails the decode wherever it sits, although const, enum, examples,
+// default, and an unknown keyword hold it as data the validator compares
+// exactly. The walk follows the sub-schema keywords into each schema object
+// and leaves the numeric-domain keywords ([keywordmeta.Bounds]) alone: their
+// float64 and int fields cannot hold such a literal, and the typed decode
+// reports the refusal for them. Every replaced member is one
+// restoreExactValues re-copies from the untouched doc, so the placeholder
+// never reaches the returned schema. The copy is on write, so a document
+// with no such literal comes back as the same map.
+func placeholderOutOfRange(doc map[string]any) map[string]any {
+	out, changed := rangeSafeSchema(doc)
+	if !changed {
+		return doc
+	}
+
+	return out
+}
+
+// rangeSafeSchema applies placeholderOutOfRange's rule to one schema object,
+// reporting whether the returned map is a changed copy.
+func rangeSafeSchema(obj map[string]any) (map[string]any, bool) {
+	return rangeSafeMap(obj, func(key string, member any) (any, bool) {
+		if kw := keywordmeta.ByName[key]; kw != nil && kw.Bound {
+			return member, false
+		}
+
+		return rangeSafeMember(key, member)
+	})
+}
+
+// rangeSafeMember descends a member of a schema object: a sub-schema keyword
+// whose value takes one of its declared JSON forms recurses into the schemas
+// it holds, and any other member is data.
+func rangeSafeMember(key string, member any) (any, bool) {
+	for _, shape := range subschemaForms[key] {
+		switch shape {
+		case schemafield.Map:
+			if m, ok := member.(map[string]any); ok {
+				return rangeSafeMap(m, func(_ string, v any) (any, bool) { return rangeSafeNode(v) })
+			}
+
+		case schemafield.Slice:
+			if list, ok := member.([]any); ok {
+				return rangeSafeSlice(list, rangeSafeNode)
+			}
+
+		case schemafield.Single:
+			switch m := member.(type) {
+			case map[string]any:
+				return rangeSafeSchema(m)
+			case bool:
+				return member, false
+			}
+
+		case schemafield.None:
+		}
+	}
+
+	return rangeSafeData(member)
+}
+
+// rangeSafeNode applies the schema rule to a schema-position value: an object
+// is a schema, and anything else (a boolean schema, or a Draft-07 dependencies
+// string list) holds no number.
+func rangeSafeNode(v any) (any, bool) {
+	if m, ok := v.(map[string]any); ok {
+		return rangeSafeSchema(m)
+	}
+
+	return v, false
+}
+
+// rangeSafeMap applies each to every member of m, copying on the first
+// change.
+func rangeSafeMap(m map[string]any, each func(string, any) (any, bool)) (map[string]any, bool) {
+	var out map[string]any
+
+	for key, member := range m {
+		next, changed := each(key, member)
+		if !changed {
+			continue
+		}
+
+		if out == nil {
+			out = maps.Clone(m)
+		}
+
+		out[key] = next
+	}
+
+	if out == nil {
+		return m, false
+	}
+
+	return out, true
+}
+
+// rangeSafeSlice applies each to every element of list, copying on the first
+// change.
+func rangeSafeSlice(list []any, each func(any) (any, bool)) ([]any, bool) {
+	var out []any
+
+	for i, v := range list {
+		next, changed := each(v)
+		if !changed {
+			continue
+		}
+
+		if out == nil {
+			out = slices.Clone(list)
+		}
+
+		out[i] = next
+	}
+
+	if out == nil {
+		return list, false
+	}
+
+	return out, true
+}
+
+// rangeSafeData replaces every [jsonv1.Number] literal float64 cannot hold
+// inside a data value with 0, copying each container on the first change.
+// Only an overflow counts, the case the decode refuses; an underflowing
+// literal decodes to a zero the decode accepts, and a literal that is not a
+// JSON number keeps its spelling for the marshal to refuse.
+func rangeSafeData(v any) (any, bool) {
+	switch d := v.(type) {
+	case jsonv1.Number:
+		f, err := strconv.ParseFloat(d.String(), 64)
+		if errors.Is(err, strconv.ErrRange) && math.IsInf(f, 0) {
+			return jsonv1.Number("0"), true
+		}
+
+		return v, false
+
+	case map[string]any:
+		return rangeSafeMap(d, func(_ string, member any) (any, bool) { return rangeSafeData(member) })
+
+	case []any:
+		return rangeSafeSlice(d, rangeSafeData)
+
+	default:
+		return v, false
+	}
+}
+
 // restoreExactValues re-copies each decoded node's any-typed value members
 // (const, enum, examples, and the unknown-keyword Extra map, mirroring the set
-// internal/schemaclone deep-copies) from the source document. The upstream
-// UnmarshalJSON decodes those any-typed members without UseNumber, so a number
-// beyond float64 precision comes back rounded and the validator would compare
-// instances against the rounded neighbor of what the author wrote; a sub-schema
-// carried inside an unknown keyword would likewise reach the JSON-pointer
-// fallback with its numbers already rounded. Each node's typed [Location]
-// segments resolve its source map, and each member is re-copied via
-// [jsonvalue.Exact], keeping numbers as exact [jsonv1.Number] literals
-// while staying unaliased from the caller's document. Restoration is gated
-// on what upstream parsed (a node whose members are unset stays unset), so
-// the two trees stay shape-aligned; a member that fails the re-copy keeps
-// its round-tripped value.
+// internal/schemaclone deep-copies) and its raw default from the source
+// document. The upstream UnmarshalJSON decodes those any-typed members
+// without UseNumber, so a number beyond float64 precision comes back rounded
+// and the validator would compare instances against the rounded neighbor of
+// what the author wrote; a sub-schema carried inside an unknown keyword would
+// likewise reach the JSON-pointer fallback with its numbers already rounded.
+// A literal outside float64 range reaches the decode as the placeholder
+// placeholderOutOfRange wrote, in the default's raw bytes as much as in the
+// any-typed members, so the default is re-encoded from the source as well.
+// Each node's typed [Location] segments resolve its source map, and each
+// member is re-copied via [jsonvalue.Exact], keeping numbers as exact
+// [jsonv1.Number] literals while staying unaliased from the caller's
+// document. Restoration is gated on what upstream parsed (a node whose
+// members are unset stays unset), so the two trees stay shape-aligned; a
+// member that fails the re-copy keeps its round-tripped value.
 func restoreExactValues(s *Schema, doc map[string]any) {
 	//nolint:errcheck // The walk callback never returns an error.
 	_ = Walk(s, func(loc Location, node *Schema) error {
-		if node.Const == nil && node.Enum == nil && node.Examples == nil && node.Extra == nil {
+		if node.Const == nil && node.Enum == nil && node.Examples == nil &&
+			node.Extra == nil && node.Default == nil {
 			return nil
 		}
 
 		src, ok := resolveDocValue(doc, loc.Segments).(map[string]any)
 		if !ok {
 			return nil
+		}
+
+		if node.Default != nil {
+			if raw, present := src[KeywordDefault]; present {
+				data, err := json.Marshal(raw)
+				if err == nil {
+					node.Default = data
+				}
+			}
 		}
 
 		if node.Const != nil {

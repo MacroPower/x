@@ -1082,6 +1082,122 @@ func TestCompileMultipleOfUnderflow(t *testing.T) {
 	}
 }
 
+// TestParseSchemaOutOfRangeNumberLiteral pins that a JSON number outside
+// float64 range survives in the members the decode reads as data (const,
+// enum, examples, default, and an unknown keyword, at the root and inside a
+// sub-schema) and stays refused in the float64 and int bound keywords, whose
+// fields cannot hold it. ParseSchemaValue round-trips the document through
+// the upstream UnmarshalJSON, which decoded those data members as float64
+// and so refused the whole document before restoreExactValues could re-copy
+// the authored literal, although the validator's instance side accepts the
+// same literal as an ordinary number.
+func TestParseSchemaOutOfRangeNumberLiteral(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		doc     string
+		want    string // the parsed schema's JSON form, in the upstream marshal order
+		valid   []string
+		invalid []string
+		refused bool
+	}{
+		"const": {
+			doc:     `{"const": 1e400}`,
+			want:    `{"const":1e400}`,
+			valid:   []string{`1e400`},
+			invalid: []string{`1e401`, `1.7976931348623157e308`},
+		},
+		"const nested": {
+			doc:   `{"const": {"a": [1e400]}}`,
+			want:  `{"const":{"a":[1e400]}}`,
+			valid: []string{`{"a": [1e400]}`},
+		},
+		"const negative": {
+			doc:     `{"const": -1e400}`,
+			want:    `{"const":-1e400}`,
+			valid:   []string{`-1e400`},
+			invalid: []string{`1e400`},
+		},
+		"enum": {
+			doc:     `{"enum": [1e400, "s"]}`,
+			want:    `{"enum":[1e400,"s"]}`,
+			valid:   []string{`1e400`, `"s"`},
+			invalid: []string{`1e401`},
+		},
+		"examples": {
+			doc:   `{"examples": [1e400]}`,
+			want:  `{"examples":[1e400]}`,
+			valid: []string{`1`},
+		},
+		"default": {
+			doc:   `{"default": 1e400}`,
+			want:  `{"default":1e400}`,
+			valid: []string{`1`},
+		},
+		"unknown keyword": {
+			doc:   `{"x-ext": {"const": 1e400}}`,
+			want:  `{"x-ext":{"const":1e400}}`,
+			valid: []string{`1`},
+		},
+		"inside a property": {
+			doc:     `{"properties": {"p": {"const": 1e400}}}`,
+			want:    `{"properties":{"p":{"const":1e400}}}`,
+			valid:   []string{`{"p": 1e400}`},
+			invalid: []string{`{"p": 1e401}`},
+		},
+		"inside a draft-07 items array": {
+			doc:     `{"$schema": "http://json-schema.org/draft-07/schema#", "items": [{"const": 1e400}]}`,
+			want:    `{"items":[{"const":1e400}],"$schema":"http://json-schema.org/draft-07/schema#"}`,
+			valid:   []string{`[1e400]`},
+			invalid: []string{`[1e401]`},
+		},
+		"minimum stays refused": {
+			doc:     `{"minimum": 1e400}`,
+			refused: true,
+		},
+		"minLength stays refused": {
+			doc:     `{"minLength": 1e400}`,
+			refused: true,
+		},
+		"nested multipleOf stays refused": {
+			doc:     `{"properties": {"p": {"multipleOf": 1e400}}}`,
+			refused: true,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			s, err := jsonschema.ParseSchema([]byte(tc.doc))
+			if tc.refused {
+				require.Error(t, err, "a float64-typed keyword cannot hold the literal")
+
+				return
+			}
+
+			require.NoError(t, err, "a valid JSON Schema document parses")
+
+			got, err := s.MarshalJSON()
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, string(got), "the authored literal survives")
+
+			v, err := jsonschema.Compile(t.Context(), s)
+			require.NoError(t, err)
+
+			for _, instance := range tc.valid {
+				require.NoError(t, v.ValidateJSON(t.Context(), []byte(instance)),
+					"instance %s must validate", instance)
+			}
+
+			for _, instance := range tc.invalid {
+				require.Error(t, v.ValidateJSON(t.Context(), []byte(instance)),
+					"instance %s must not validate", instance)
+			}
+		})
+	}
+}
+
 // assertParseValueMatchesRemarshal pins ParseSchemaValue's direct exact copy
 // of value members to the marshal round trip it replaced: parsing doc
 // directly must produce the same schema as marshaling doc and parsing the
