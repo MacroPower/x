@@ -201,6 +201,73 @@ func TestGenerateFor_ExtenderCopiedRefResolvesUnderCollision(t *testing.T) {
 	require.NoError(t, v.ValidateJSON(t.Context(), []byte(`{"a":{"label":"x","size":1},"b":null}`)))
 }
 
+// TestGenerateFor_ExtenderRetainedValueIsCopied pins that an extender
+// assigning its own schema to ts.Value, or splicing one into the view, keeps
+// that schema. The node used to adopt the extender's pointer as its payload,
+// so generation deleted every node-backed property from the retained map and
+// a second run with the same extender emitted an empty properties object.
+// Generation copies the value it reads back, so the extender's object is
+// untouched and two runs agree.
+func TestGenerateFor_ExtenderRetainedValueIsCopied(t *testing.T) {
+	t.Parallel()
+
+	type host struct {
+		Name string `json:"name"`
+	}
+
+	type outer struct {
+		Inner host `json:"inner"`
+	}
+
+	tests := map[string]struct {
+		extend func(ts *jsonschema.TypeSchema, shared *jsonschema.Schema)
+	}{
+		"assigned to Value": {
+			extend: func(ts *jsonschema.TypeSchema, shared *jsonschema.Schema) {
+				ts.Value = shared
+			},
+		},
+		"spliced into a property": {
+			extend: func(ts *jsonschema.TypeSchema, shared *jsonschema.Schema) {
+				ts.Value.Properties["inner"] = shared
+			},
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			shared := &jsonschema.Schema{
+				Type:       "object",
+				Properties: map[string]*jsonschema.Schema{"name": {Type: "string", MinLength: new(1)}},
+			}
+
+			want, err := json.Marshal(shared)
+			require.NoError(t, err)
+
+			opt := jsonschema.WithTypeSchemaExtenderFor[outer](
+				func(_ context.Context, _ jsonschema.TypeContext, ts *jsonschema.TypeSchema) error {
+					tc.extend(ts, shared)
+
+					return nil
+				},
+			)
+
+			first, err := jsonschema.GenerateFor[outer](t.Context(), opt)
+			require.NoError(t, err)
+
+			second, err := jsonschema.GenerateFor[outer](t.Context(), opt)
+			require.NoError(t, err)
+
+			got, err := json.Marshal(shared)
+			require.NoError(t, err)
+			assert.JSONEq(t, string(want), string(got), "generation leaves the extender's own schema untouched")
+			assert.Equal(t, first, second, "two runs with the same extender agree")
+		})
+	}
+}
+
 // TestGenerateFor_ExtenderNullTypeUnderFormatNull pins the type list a
 // nilable container renders when an extender sets its type to null outright.
 // The ["null", base] encoding once took the authored type as the list's

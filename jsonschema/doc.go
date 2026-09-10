@@ -397,7 +397,10 @@
 // $defs keys; an extender may test, clear, or copy it, and a copy placed
 // anywhere in the value (a branch of its own, say) is emitted with the final
 // key and keeps that definition in the output. A field-level hook runs after
-// the keys are settled and reads the final $ref in its Base.
+// the keys are settled and reads the final $ref in its Base. Generation
+// copies the value the extender leaves, so a schema the extender assigned to
+// Value or spliced into it stays as the extender left it and a second run
+// with the same extender emits the same output.
 //
 // When a registered provider ([WithTypeSchemaProvider] or [WithTypeSchema])
 // or [JSONSchemaProvider] supplies the schema, [JSONSchemaExtender] does not

@@ -2073,7 +2073,14 @@ func (g *run) extendTypeSchema(t reflect.Type, n *node) (Nullability, error) {
 			return NullFromReflection, err
 		}
 
-		n.absorbView(ts.Value, pristine, g.draft)
+		// An extender may leave its own retained schema in ts.Value, or splice
+		// one into the view, and the node would alias it: absorbProps deletes
+		// node-backed properties from the adopted map, finalizeRefs rewrites
+		// its $ref strings, and the seed pass writes defaults into it. The
+		// copy keeps every later phase off the extender's object, as the
+		// provider path's clone does, and reproduces a cycle as a cycle so
+		// absorbSlot still sees one.
+		n.absorbView(schemaclone.Clone(ts.Value), pristine, g.draft)
 	}
 
 	return ts.Nullability, nil
