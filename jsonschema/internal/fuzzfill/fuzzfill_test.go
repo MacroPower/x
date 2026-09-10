@@ -10,6 +10,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"go.jacobcolvin.com/x/jsonschema/internal/fuzzfill"
+	"go.jacobcolvin.com/x/jsonschema/internal/fuzzgen"
+	"go.jacobcolvin.com/x/jsonschema/internal/fuzzshape"
 )
 
 // containers is the fill target: one slice, one map, one byte slice, and a
@@ -255,4 +257,36 @@ func TestFillDefaultDrawIsGolden(t *testing.T) {
 	doc, err := json.Marshal(fillContainers(t, rampBlob()), json.Deterministic(true))
 	require.NoError(t, err)
 	assert.Equal(t, want, string(doc))
+}
+
+// FuzzFillNeverPanics runs Fill under every option set over the tagged shape
+// draw, whose pool holds the types that re-enter themselves by value through a
+// slice and through a pointer chain, so a fill that followed such a type
+// forever fails here before it fails a rig that only wanted a value. The
+// marshal after it may refuse a drawn declaration, and must not panic either.
+func FuzzFillNeverPanics(f *testing.F) {
+	for i, blob := range fuzzshape.Blobs(16) {
+		values := bytes.Repeat([]byte{0xff}, 64)
+		if i%2 == 0 {
+			values = make([]byte, 64)
+		}
+
+		f.Add(blob, values)
+	}
+
+	f.Fuzz(func(_ *testing.T, shape, values []byte) {
+		rt := fuzzgen.TaggedType(shape)
+
+		for _, opts := range [][]fuzzfill.Option{
+			nil,
+			{fuzzfill.WithFull()},
+			{fuzzfill.WithNilContainers()},
+		} {
+			val := reflect.New(rt)
+			fuzzfill.Fill(val, values, append(fuzzshape.FillOptions(), opts...)...)
+
+			//nolint:errcheck // A refused declaration is a legal draw; only a panic is a fault.
+			_, _ = json.Marshal(val.Interface())
+		}
+	})
 }

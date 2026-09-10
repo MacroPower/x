@@ -41,8 +41,8 @@ func (m metaSchemaResolver) ResolveRef(_ context.Context, uri string) (*jsonsche
 // indexes them by $id, and returns the index plus the validate options needed to
 // validate a document against them (a resolver for the sub-schema refs that
 // doubles as the $vocabulary metaschema lookup).
-func loadMetaSchemas(t *testing.T) (map[string]*jsonschema.Schema, []jsonschema.ValidateOption) {
-	t.Helper()
+func loadMetaSchemas(tb testing.TB) (map[string]*jsonschema.Schema, []jsonschema.ValidateOption) {
+	tb.Helper()
 
 	byID := metaSchemaResolver{}
 
@@ -74,7 +74,7 @@ func loadMetaSchemas(t *testing.T) (map[string]*jsonschema.Schema, []jsonschema.
 		return nil
 	}
 
-	require.NoError(t, filepath.Walk("testdata/metaschemas", walk))
+	require.NoError(tb, filepath.Walk("testdata/metaschemas", walk))
 
 	return byID, []jsonschema.ValidateOption{
 		jsonschema.WithRefResolver(byID),

@@ -171,12 +171,23 @@ is the only one that imports the parent package.
   pairs every `tagparse.Keys()` key with parameters and reaches every hook,
   recursive, and dialect-tag class; `TestKeysAreTheParsedVocabulary`
   (tagparse) holds the exported vocabulary to the parser.
+- `TestGenerateSeedsReachEveryClass` (fuzz_generate_test.go): the seed corpus
+  of the generation invariants rig reaches each class the tagged draw adds.
 
 ## Differential rigs
 
 - `FuzzReflectAccepts<T>` and `FuzzShapeAccepts*`: the schema for a type
   accepts whatever v2 marshals from a value of it; `FuzzShapeRejectsNearMiss`
   refuses an instance one property away. Shapes come from `fuzzshape`.
+- `FuzzGenerateInvariants`: every schema Generate emits over the tagged
+  shape draw (`fuzzgen.TaggedType`, `fuzzgen.Options`) compiles with no
+  resolver, carries no provisional `@n` token, validates against its draft's
+  metaschema, is pure across repeated and interleaved calls and leaves every
+  handed-in override untouched, agrees between its extracted, inlined, and
+  `Inline` forms and between `T` and `*T`, and accepts a filled value where
+  the shape carries no constraint. A refusal must be one a hook, a dialect, a
+  conflict, or v2 reports. `FuzzFillNeverPanics` (fuzzfill) fills the same
+  draw under every option set.
 - `FuzzFieldSetKeys` (fieldset): the resolved names are the keys v2 writes.
 - `FuzzRefEnginesAgree`, `TestSuiteInlineAgrees`,
   `TestRefEnginesAgreeOnPastFixes`: `Compile`, `Inline`, and the substitute
