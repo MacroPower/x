@@ -85,27 +85,44 @@ func FindTypeSpec(files []*ast.File, name string) *ast.TypeSpec {
 }
 
 // StructFieldDoc returns the trimmed doc comment for the field named fieldName
-// in st, reporting whether a documented match was found.
+// in st, reporting whether a documented match was found. A field's doc
+// comment is the comment group above it, or, for a field with none, the line
+// comment after it on the same line, the two forms gopls presents as a
+// field's documentation. A field carrying both keeps the group above it.
 func StructFieldDoc(st *ast.StructType, fieldName string) (string, bool) {
 	for _, field := range st.Fields.List {
 		// An embedded field has no name idents; Go names it after the embedded
 		// type, and a doc comment hangs off the field itself.
 		if len(field.Names) == 0 {
-			if field.Doc != nil && EmbeddedFieldName(field.Type) == fieldName {
-				return strings.TrimSpace(field.Doc.Text()), true
+			if EmbeddedFieldName(field.Type) == fieldName {
+				return fieldDoc(field)
 			}
 
 			continue
 		}
 
 		for _, ident := range field.Names {
-			if ident.Name == fieldName && field.Doc != nil {
-				return strings.TrimSpace(field.Doc.Text()), true
+			if ident.Name == fieldName {
+				return fieldDoc(field)
 			}
 		}
 	}
 
 	return "", false
+}
+
+// fieldDoc returns the trimmed text of the comment group above field, or of
+// the line comment after it when there is none, reporting whether field
+// carries either.
+func fieldDoc(field *ast.Field) (string, bool) {
+	switch {
+	case field.Doc != nil:
+		return strings.TrimSpace(field.Doc.Text()), true
+	case field.Comment != nil:
+		return strings.TrimSpace(field.Comment.Text()), true
+	default:
+		return "", false
+	}
 }
 
 // EmbeddedFieldName returns the field name Go assigns to an embedded

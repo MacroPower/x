@@ -152,9 +152,20 @@ type Embedded struct {
 
 	// Base documents the embedded field.
 	Base
+
+	Trailing int // Trailing is documented on its own line.
+
+	// Both documents the field above it.
+	Both int // The line comment loses to the group above.
+
+	Line // Line is an embedded field with a line comment.
+
+	First, Second int // A line comment covers every name it follows.
 }
 
 type Base struct{}
+
+type Line struct{}
 `
 
 	files := parseFiles(t, src)
@@ -164,6 +175,11 @@ type Base struct{}
 	st, ok := ts.Type.(*ast.StructType)
 	require.True(t, ok)
 
+	// The trailing cases pin the line-comment fallback: the parser attaches
+	// a comment on the field's own line to field.Comment, not field.Doc,
+	// and a reader that consulted only field.Doc left such a field
+	// undescribed although gopls presents that comment as its
+	// documentation.
 	tests := map[string]struct {
 		field string
 		want  string
@@ -173,6 +189,18 @@ type Base struct{}
 		"embedded field": {field: "Base", want: "Base documents the embedded field.", found: true},
 		"undocumented":   {field: "Undocumented", want: "", found: false},
 		"absent":         {field: "Missing", want: "", found: false},
+		"trailing line comment": {
+			field: "Trailing", want: "Trailing is documented on its own line.", found: true,
+		},
+		"group above wins over line comment": {
+			field: "Both", want: "Both documents the field above it.", found: true,
+		},
+		"embedded field line comment": {
+			field: "Line", want: "Line is an embedded field with a line comment.", found: true,
+		},
+		"line comment on a shared declaration": {
+			field: "Second", want: "A line comment covers every name it follows.", found: true,
+		},
 	}
 
 	for name, tc := range tests {

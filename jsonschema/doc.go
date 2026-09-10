@@ -1073,6 +1073,10 @@
 //     points it at another module's directory. A type declared in package
 //     main is located through that directory, which must be the main
 //     package's own, since reflection reports no import path for it.
+//   - A struct field's doc comment is the comment group above the field or,
+//     for a field with none, the line comment after it on the same line,
+//     the two forms gopls presents as a field's documentation. A field
+//     carrying both keeps the group above it.
 //   - A load that fails outright (a package the module graph cannot supply,
 //     a proxy that cannot be reached) is retried on the next Generate rather
 //     than remembered as a package with no sources.
