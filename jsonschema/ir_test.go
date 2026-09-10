@@ -5,6 +5,7 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
+	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -436,6 +437,64 @@ func TestGenerateFor_OrphanedDefNeverPrefixesName(t *testing.T) {
 
 	assert.Equal(t, alone.Properties["b"].Ref, withTwin.Properties["b"].Ref)
 	assert.Equal(t, alone.Defs, withTwin.Defs)
+}
+
+// orphanedID is a string type extracted to $defs whose every occurrence a
+// tag replaces the format of, so no occurrence keeps its reference.
+type orphanedID string
+
+func (orphanedID) JSONSchemaExtend(
+	_ context.Context, _ jsonschema.TypeContext, ts *jsonschema.TypeSchema,
+) error {
+	ts.Value.Format = "date"
+
+	return nil
+}
+
+// survivingID is a string type extracted to $defs that keeps its reference.
+type survivingID string
+
+func (survivingID) JSONSchemaExtend(
+	_ context.Context, _ jsonschema.TypeContext, ts *jsonschema.TypeSchema,
+) error {
+	ts.Value.Format = "email"
+
+	return nil
+}
+
+// sameBaseNamer gives both extracted types one base name, standing in for
+// two same-named types in different packages.
+type sameBaseNamer struct{}
+
+func (sameBaseNamer) SchemaName(tc jsonschema.TypeContext) string {
+	switch tc.Type {
+	case reflect.TypeFor[orphanedID](), reflect.TypeFor[survivingID]():
+		return "ID"
+	default:
+		return ""
+	}
+}
+
+// TestGenerateFor_TagInlinedDefNeverPrefixesName pins that a definition
+// every occurrence of which a tag replacing its keyword renders inline joins
+// no collision group, so the lone surviving definition keeps its bare name.
+// The inlining once ran after the names were assigned, so the orphan still
+// prefixed the survivor although the output held no other ID.
+func TestGenerateFor_TagInlinedDefNeverPrefixesName(t *testing.T) {
+	t.Parallel()
+
+	type doc struct {
+		A orphanedID  `json:"a" jsonschema:"format=other"`
+		B survivingID `json:"b"`
+	}
+
+	s, err := jsonschema.GenerateFor[doc](t.Context(), jsonschema.WithNamer(sameBaseNamer{}))
+	require.NoError(t, err)
+
+	assert.Equal(t, "other", s.Properties["a"].Format, "the replaced occurrence renders inline")
+	assert.Equal(t, "#/$defs/ID", s.Properties["b"].Ref, "the surviving definition keeps the bare name")
+	require.Contains(t, s.Defs, "ID")
+	assert.Len(t, s.Defs, 1, "the orphaned definition is dropped")
 }
 
 // TestGenerateFor_RootInliningUnderBaseNameCollision pins that the
