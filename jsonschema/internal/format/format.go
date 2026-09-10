@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf16"
 	"unicode/utf8"
 
 	"golang.org/x/net/idna"
@@ -1460,13 +1461,14 @@ func regexFlagRunLen(s string) int {
 }
 
 // regexGroupNameLen returns the length of s through the '>' closing a group
-// name whose first character sits at s[from], or 0 when the name is not a run
-// of ASCII word characters ending in '>'. Only such a run is consumed, so a
+// name whose first character sits at s[from], or 0 when the name is not an
+// ECMA 262 RegExpIdentifierName ending in '>'. Each character of the name is
+// a code point written literally or as a RegExpUnicodeEscapeSequence, and
+// every one must be an IdentifierPartChar. Only such a run is consumed, so a
 // malformed name never swallows a parenthesis the group accounting needs.
 func regexGroupNameLen(s string, from int) int {
-	for i := from; i < len(s); i++ {
-		c := s[i]
-		if c == '>' {
+	for i := from; i < len(s); {
+		if s[i] == '>' {
 			if i == from {
 				return 0
 			}
@@ -1474,12 +1476,140 @@ func regexGroupNameLen(s string, from int) int {
 			return i + 1
 		}
 
-		if !isASCIILetter(c) && (c < '0' || c > '9') && c != '_' && c != '$' {
+		r, size := regexGroupNameChar(s[i:])
+		if size == 0 || !isRegexIDPart(r) {
 			return 0
 		}
+
+		i += size
 	}
 
 	return 0
+}
+
+// regexGroupNameChar reads one character of a group name at the start of s
+// and returns its code point and the bytes it spans, or a size of 0 when s
+// opens no character. A literal code point is one UTF-8 sequence. ECMA 262
+// 22.2.1 also admits a RegExpUnicodeEscapeSequence in a name, read in Unicode
+// mode whatever the pattern's flags: "\u" and four hex digits, a lead and a
+// trail surrogate in that form joined to one code point, or "\u{" and hex
+// digits up to 0x10FFFF "}". A lone surrogate keeps its own value, which the
+// identifier tests refuse.
+func regexGroupNameChar(s string) (rune, int) {
+	if s == "" {
+		return 0, 0
+	}
+
+	if s[0] != '\\' {
+		r, size := utf8.DecodeRuneInString(s)
+		if r == utf8.RuneError && size == 1 {
+			return 0, 0
+		}
+
+		return r, size
+	}
+
+	if len(s) < 2 || s[1] != 'u' {
+		return 0, 0
+	}
+
+	if len(s) > 2 && s[2] == '{' {
+		end := strings.IndexByte(s, '}')
+		if end < 0 {
+			return 0, 0
+		}
+
+		r, ok := regexHexValue(s[3:end])
+		if !ok || r > unicode.MaxRune {
+			return 0, 0
+		}
+
+		return r, end + 1
+	}
+
+	const escapeLen = len(`\uXXXX`)
+
+	if len(s) < escapeLen {
+		return 0, 0
+	}
+
+	r, ok := regexHexValue(s[2:escapeLen])
+	if !ok {
+		return 0, 0
+	}
+
+	if !utf16.IsSurrogate(r) || r >= 0xDC00 || len(s) < 2*escapeLen ||
+		s[escapeLen] != '\\' || s[escapeLen+1] != 'u' {
+		return r, escapeLen
+	}
+
+	trail, ok := regexHexValue(s[escapeLen+2 : 2*escapeLen])
+	if !ok || trail < 0xDC00 || trail > 0xDFFF {
+		return r, escapeLen
+	}
+
+	return utf16.DecodeRune(r, trail), 2 * escapeLen
+}
+
+// regexHexValue reads s as a non-empty run of hex digits and returns its
+// value, or false when s is empty, holds another byte, or exceeds the rune
+// range. Leading zeros are admitted, as ECMA 262 HexDigits admits them.
+func regexHexValue(s string) (rune, bool) {
+	if s == "" {
+		return 0, false
+	}
+
+	var v rune
+
+	for i := range len(s) {
+		var d rune
+
+		switch c := s[i]; {
+		case c >= '0' && c <= '9':
+			d = rune(c - '0')
+		case c >= 'a' && c <= 'f':
+			d = rune(c-'a') + 10
+		case c >= 'A' && c <= 'F':
+			d = rune(c-'A') + 10
+		default:
+			return 0, false
+		}
+
+		v = v<<4 | d
+		if v > unicode.MaxRune {
+			return 0, false
+		}
+	}
+
+	return v, true
+}
+
+// isRegexIDStart reports whether r is an ECMA 262 IdentifierStartChar: a
+// code point with the Unicode ID_Start property, '$', or '_'.
+func isRegexIDStart(r rune) bool {
+	if r == '$' || r == '_' {
+		return true
+	}
+
+	if unicode.In(r, unicode.Pattern_Syntax, unicode.Pattern_White_Space) {
+		return false
+	}
+
+	return unicode.In(r, unicode.L, unicode.Nl, unicode.Other_ID_Start)
+}
+
+// isRegexIDPart reports whether r is an ECMA 262 IdentifierPartChar: a code
+// point with the Unicode ID_Continue property, '$', ZWNJ, or ZWJ.
+func isRegexIDPart(r rune) bool {
+	if isRegexIDStart(r) || r == '\u200C' || r == '\u200D' {
+		return true
+	}
+
+	if unicode.In(r, unicode.Pattern_Syntax, unicode.Pattern_White_Space) {
+		return false
+	}
+
+	return unicode.In(r, unicode.Mn, unicode.Mc, unicode.Nd, unicode.Pc, unicode.Other_ID_Continue)
 }
 
 // regexBracedQuantifier reads a braced quantifier at the start of s, which

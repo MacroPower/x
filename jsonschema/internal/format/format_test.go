@@ -109,6 +109,58 @@ func TestRegexFormatFlagRuns(t *testing.T) {
 	}
 }
 
+// TestRegexFormatGroupNames pins the capture name grammar. ECMA 262 22.2.1
+// reads a name as a RegExpIdentifierName, so it admits any code point with the
+// Unicode ID_Start or ID_Continue property, written literally or as a
+// RegExpUnicodeEscapeSequence read in Unicode mode. The scan once held a name
+// to ASCII word characters and refused "(?<\u03c0>x)", a pattern every ECMA
+// 262 engine compiles, which is the false-rejection direction the format
+// guards.
+func TestRegexFormatGroupNames(t *testing.T) {
+	t.Parallel()
+
+	validate := validator(t, "regex")
+
+	tests := map[string]struct {
+		instance string
+		valid    bool
+	}{
+		"greek letter name":                      {instance: "(?<\u03c0>x)", valid: true},
+		"accented name":                          {instance: "(?<caf\u00e9>x)", valid: true},
+		"other id start code point":              {instance: "(?<\u2118>x)", valid: true},
+		"zwj inside a name":                      {instance: "(?<a\u200db>x)", valid: true},
+		"dollar opens a name":                    {instance: "(?<$a>x)", valid: true},
+		"four digit escape":                      {instance: `(?<\u03c0>x)`, valid: true},
+		"braced escape past the bmp":             {instance: `(?<\u{1d400}>x)`, valid: true},
+		"braced escape with leading zeros":       {instance: `(?<\u{0041}>x)`, valid: true},
+		"surrogate pair escape":                  {instance: `(?<\ud835\udc00>x)`, valid: true},
+		"backreference by unicode name":          {instance: "(?<\u03c0>x)\\k<\u03c0>", valid: true},
+		"lone surrogate escape":                  {instance: `(?<\ud835>x)`, valid: false},
+		"hex escape":                             {instance: `(?<\x41>x)`, valid: false},
+		"braced escape past the last code point": {instance: `(?<\u{110000}>x)`, valid: false},
+		"braced escape with no digits":           {instance: `(?<\u{}>x)`, valid: false},
+		"unterminated braced escape":             {instance: `(?<\u{41>x)`, valid: false},
+		"short four digit escape":                {instance: `(?<\u41>x)`, valid: false},
+		"space in a name":                        {instance: "(?<a b>x)", valid: false},
+		"empty name":                             {instance: "(?<>x)", valid: false},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := validate(tc.instance)
+			if tc.valid {
+				require.NoError(t, err,
+					"a capture name every ECMA 262 engine reads should pass the regex validator")
+			} else {
+				require.Error(t, err,
+					"a capture name outside RegExpIdentifierName should be rejected by the regex validator")
+			}
+		})
+	}
+}
+
 // TestRegexFormatAcceptsEmptyCharacterClass covers the empty character class:
 // ECMA 262 22.2.1 defines CharacterClass as '[' [lookahead != ^] ClassContents
 // ']' where ClassContents may be empty, so "[]" (matches nothing) and "[^]"

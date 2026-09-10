@@ -72,6 +72,28 @@
 "(?<name>a)"	true	a named capture group
 "(?<>a)"	false	an empty capture name, which no engine accepts
 "(?<a-b>x)"	false	a capture name outside the identifier grammar
+#
+# ECMA-262 22.2.1 reads a capture name as a RegExpIdentifierName, so a name
+# takes any code point with the Unicode ID_Start or ID_Continue property,
+# written literally or as a RegExpUnicodeEscapeSequence, which the name reads
+# in Unicode mode whatever the pattern's flags. The scan once held a name to
+# ASCII word characters and refused every one of the valid rows below.
+#
+"(?<\u03c0>x)"	true	a Greek letter name
+"(?<caf\u00e9>x)"	true	an accented name
+"(?<\u2118>x)"	true	SCRIPT CAPITAL P, an Other_ID_Start code point
+"(?<a\u200db>x)"	true	a ZWJ inside a name, an IdentifierPartChar
+"(?<$a>x)"	true	a '$' opens a name
+"(?<_>x)"	true	a lone underscore is a name
+"(?<\\u03c0>x)"	true	a name spelled with a four-digit escape
+"(?<\\u{1d400}>x)"	true	a name spelled with a braced escape past the BMP
+"(?<\\u{0041}>x)"	true	a braced escape with leading zeros
+"(?<\\ud835\\udc00>x)"	true	a surrogate pair joined to one code point
+"(?<\\ud835>x)"	false	a lone surrogate is no identifier character
+"(?<\\x41>x)"	false	a hex escape is no RegExpUnicodeEscapeSequence
+"(?<\\u{110000}>x)"	false	a braced escape past the last code point
+"(?<\\u{}>x)"	false	a braced escape with no digits
+"(?<a b>x)"	false	a space is no identifier character
 "(?)"	false	a group modifier naming nothing, so the '?' has nothing to repeat
 #
 # A flag run after "(?" is the shape RE2's parsePerlFlags reads: letters from
