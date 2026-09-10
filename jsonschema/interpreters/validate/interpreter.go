@@ -141,15 +141,25 @@ func (i *Interpreter) Interpret(_ context.Context, field jsonschema.FieldContext
 	// constraint (e.g. "oneof=a|b,required" would drop required).
 	parts := strings.Split(tag.Value, ",")
 
-	return applyParts(parts, field, false, tagmodel.FormUnset)
+	return applyParts(parts, field, descent{})
 }
 
-// applyParts applies a sequence of validator tag parts to a field. The
-// afterDive flag says whether parts starts right after a dive, and container
-// is the form that dive descended into ([tagmodel.FormUnset] at the field
-// level). Together they name the one place a keys block may open: the part
-// right after a dive into a map.
-func applyParts(parts []string, field jsonschema.FieldContext, afterDive bool, container tagmodel.Form) error {
+// A descent records the dive that a run of parts follows: the form of the
+// container it descended into and, for a map, the key type. The zero descent
+// is the field level, before any dive. Together the two name the one place a
+// keys block may open, the part right after a dive into a map, and the key
+// the block is checked against.
+type descent struct {
+	key  reflect.Type
+	form tagmodel.Form
+}
+
+// afterDive reports whether the parts follow a dive.
+func (d descent) afterDive() bool { return d.form != tagmodel.FormUnset }
+
+// applyParts applies a sequence of validator tag parts to a field, which the
+// descent places at the field level or right after a dive.
+func applyParts(parts []string, field jsonschema.FieldContext, d descent) error {
 	// The keyword-setting validators applied so far, keyed by the keyword
 	// each sets, so a second validator naming the same keyword is refused
 	// rather than dropped. An element level starts its own record.
@@ -189,19 +199,19 @@ func applyParts(parts []string, field jsonschema.FieldContext, afterDive bool, c
 		// go-playground's collector reads at least one part and indexes
 		// past the tag on none.
 		if part == keysTag {
-			if !afterDive || idx != 0 {
+			if !d.afterDive() || idx != 0 {
 				return ErrKeysPlacement
 			}
 
-			if container != tagmodel.FormObject {
-				return fmt.Errorf("%w, and this dive descends into a %s", ErrKeysPlacement, container)
+			if d.form != tagmodel.FormObject {
+				return fmt.Errorf("%w, and this dive descends into a %s", ErrKeysPlacement, d.form)
 			}
 
 			if idx == len(parts)-1 {
 				return fmt.Errorf("%w, and this keys is the last part of the tag", ErrKeysPlacement)
 			}
 
-			consumed, err := skipKeysBlock(parts[idx+1:])
+			consumed, err := checkKeysBlock(parts[idx+1:], d.key)
 			if err != nil {
 				return err
 			}
@@ -276,61 +286,60 @@ func applyParts(parts []string, field jsonschema.FieldContext, afterDive bool, c
 	return nil
 }
 
-// skipKeysBlock walks the parts after a keys marker to the first endkeys,
-// which closes the block, or to the end of the tag when none follows, as
-// go-playground's parser collects them. The constraints inside are key
-// constraints, which this dialect does not model, so nothing is applied. The
-// grammar is still checked, since go-playground parses the block with the
-// same rules: a keys inside it must immediately follow a dive and have a
-// part after it, a structural key with a parameter or an OR alternative
-// names no validator, and every other part must name a validator
-// go-playground registers. A
-// nested block closes on the same first endkeys as the block holding it,
-// since go-playground's collector stops there whatever opened before. It
-// returns the number of parts consumed, the closing endkeys included.
-func skipKeysBlock(parts []string) (int, error) {
-	prevDive := false
+// checkKeysBlock interprets the parts after a keys marker, to the first
+// endkeys, which closes the block, or to the end of the tag when none follows,
+// as go-playground's parser collects them. The constraints inside are key
+// constraints, which this dialect does not model, so nothing they declare
+// reaches the schema. Go-playground parses and runs the block through the
+// same code as a field of the key type, so the block runs through applyParts
+// against a scratch context for the key and the canvas is discarded: a
+// spelling go-playground cannot load or run on a key, an undefined
+// validator, a parameter of the wrong arity or spelling, or a rule its kind
+// refuses, is refused here the way it is on a field. The scratch context
+// carries no element canvases, so a dive inside the block descends into
+// nothing, as it does in go-playground on the string keys of every JSON
+// object. A nested block closes on the same first endkeys as the block
+// holding it, since go-playground's collector stops there whatever opened
+// before. It returns the number of parts consumed, the closing endkeys
+// included.
+func checkKeysBlock(parts []string, key reflect.Type) (int, error) {
+	block, consumed := parts, len(parts)
 
-	for idx := range parts {
-		part := strings.TrimSpace(parts[idx])
-
-		switch {
-		case part == endkeysTag:
-			return idx + 1, nil
-		case part == keysTag:
-			if !prevDive {
-				return 0, ErrKeysPlacement
-			}
-
-			if idx == len(parts)-1 {
-				return 0, fmt.Errorf("%w, and this keys is the last part of the tag", ErrKeysPlacement)
-			}
-
-		case part == "" || part == "-" || part == diveTag || isControlTag(part):
-		default:
-			alt, orGroup, err := firstAlternative(parts[idx])
-			if err != nil {
-				return 0, err
-			}
-
-			key, _, hasValue := strings.Cut(alt, "=")
-
-			key = strings.TrimSpace(key)
-			if isStructuralKey(key) && (hasValue || orGroup) {
-				return 0, fmt.Errorf("%w %q", ErrUnrecognizedValidator, strings.TrimSpace(alt))
-			}
-
-			// Go-playground parses the block with the same lookup, so a
-			// key constraint must name a validator it registers.
-			if _, known := validatorKeys[key]; !known && !isCrossFieldValidator(key) {
-				return 0, fmt.Errorf("%w %q", ErrUnrecognizedValidator, key)
-			}
-		}
-
-		prevDive = part == diveTag
+	end := slices.IndexFunc(parts, func(p string) bool { return strings.TrimSpace(p) == endkeysTag })
+	if end >= 0 {
+		block, consumed = parts[:end], end+1
 	}
 
-	return len(parts), nil
+	err := applyParts(block, keyContext(key), descent{})
+	if err != nil {
+		return 0, fmt.Errorf("keys block: %w", err)
+	}
+
+	return consumed, nil
+}
+
+// keyContext builds the scratch context a keys block is checked against: the
+// map's key type over the reflected schema its kind would carry as a field,
+// so a bound on an integer key parses as a numeric bound and a string
+// validator on a string key applies as it does on a string field. A key of
+// any other kind is opaque, and every value rule on it is refused, as
+// go-playground refuses to run one on a kind it does not switch on. The
+// context has no parent, so a required inside the block marks nothing.
+func keyContext(key reflect.Type) jsonschema.FieldContext {
+	base := &jsonschema.Schema{}
+
+	switch kind := numkind.DerefType(key).Kind(); {
+	case kind == reflect.String:
+		base.Type = "string"
+	case numkind.IsInteger(kind):
+		base.Type = "integer"
+	case numkind.IsFloat(kind):
+		base.Type = "number"
+	case kind == reflect.Bool:
+		base.Type = "boolean"
+	}
+
+	return jsonschema.FieldContext{Type: key, Canvas: &jsonschema.Schema{}, Base: base}
 }
 
 // firstAlternative returns the first OR alternative of one comma part and

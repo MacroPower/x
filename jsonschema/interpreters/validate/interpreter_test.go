@@ -3383,26 +3383,24 @@ func TestValidateInterpreterGoPlaygroundParity(t *testing.T) {
 		_, err = jsonschema.GenerateFor[Blank](t.Context(), opt)
 		require.ErrorIs(t, err, validate.ErrKeysPlacement)
 
-		// A keys inside a block is key-side grammar, but the block it opens
-		// closes on the same first endkeys as the outer one: go-playground's
-		// collector stops there whatever opened before, so the second
-		// endkeys is stray and, with a part after it, refused. The
-		// interpreter used to count depth and emit maxLength 3 for a tag
-		// go-playground cannot load.
-		type Nested struct {
-			F map[string]string `json:"f" validate:"dive,keys,dive,keys,min=1,endkeys,endkeys,max=3"`
+		// A block closes on the first endkeys: go-playground's collector
+		// stops there whatever opened before, so a second endkeys is stray
+		// and, with a part after it, refused. The interpreter used to count
+		// depth and emit maxLength 3 for a tag go-playground cannot load.
+		type Doubled struct {
+			F map[string]string `json:"f" validate:"dive,keys,min=1,endkeys,endkeys,max=3"`
 		}
 
-		_, err = jsonschema.GenerateFor[Nested](t.Context(), opt)
+		_, err = jsonschema.GenerateFor[Doubled](t.Context(), opt)
 		require.ErrorIs(t, err, validate.ErrEndkeysPlacement)
 
-		// With one endkeys the nested block and the outer one close together,
-		// and the part after it reaches the map values.
-		type NestedOnce struct {
-			F map[string]string `json:"f" validate:"dive,keys,dive,keys,min=1,endkeys,max=3"`
+		// With one endkeys the block closes and the part after it reaches
+		// the map values.
+		type Once struct {
+			F map[string]string `json:"f" validate:"dive,keys,min=1,endkeys,max=3"`
 		}
 
-		s, err := jsonschema.GenerateFor[NestedOnce](t.Context(), opt)
+		s, err := jsonschema.GenerateFor[Once](t.Context(), opt)
 		require.NoError(t, err)
 		assert.Equal(t, new(3), s.Properties["f"].AdditionalProperties.MaxLength)
 
@@ -3426,16 +3424,43 @@ func TestValidateInterpreterGoPlaygroundParity(t *testing.T) {
 		_, err = jsonschema.GenerateFor[Trailing](t.Context(), opt)
 		require.ErrorIs(t, err, validate.ErrKeysPlacement)
 		require.ErrorContains(t, err, "last part")
+	})
 
-		// The block is parsed there by the same collector, so a trailing
-		// keys inside one is refused the same way.
-		type TrailingInside struct {
-			F map[string]map[string]string `json:"f" validate:"dive,keys,dive,keys"`
+	t.Run("keys block runs as a field of the key type", func(t *testing.T) {
+		t.Parallel()
+
+		// Go-playground parses and runs a keys block through the same code
+		// as a field of the key type, so a spelling it cannot run on a key
+		// is refused here as it is on a field. The interpreter used to walk
+		// the block's grammar alone and emit a clean schema for a bare min
+		// on the keys, which go-playground panics on.
+		type BareMin struct {
+			F map[string]string `json:"f" validate:"dive,keys,min,endkeys"`
 		}
 
-		_, err = jsonschema.GenerateFor[TrailingInside](t.Context(), opt)
-		require.ErrorIs(t, err, validate.ErrKeysPlacement)
-		require.ErrorContains(t, err, "last part")
+		_, err := jsonschema.GenerateFor[BareMin](t.Context(), opt)
+		require.ErrorContains(t, err, "keys block")
+		require.ErrorContains(t, err, "min")
+
+		// The key of every JSON object is a string, which a dive cannot
+		// descend into there either.
+		type DiveOnKey struct {
+			F map[string]string `json:"f" validate:"dive,keys,dive,min=1,endkeys"`
+		}
+
+		_, err = jsonschema.GenerateFor[DiveOnKey](t.Context(), opt)
+		require.ErrorContains(t, err, "cannot dive")
+
+		// A bound on an integer key parses as a numeric bound, as on an
+		// integer field, and nothing it declares reaches the schema.
+		type IntKey struct {
+			F map[int]string `json:"f" validate:"dive,keys,min=1,endkeys,max=3"`
+		}
+
+		s, err := jsonschema.GenerateFor[IntKey](t.Context(), opt)
+		require.NoError(t, err)
+		assert.Equal(t, new(3), s.Properties["f"].AdditionalProperties.MaxLength)
+		assert.Nil(t, s.Properties["f"].PropertyNames, "key constraints are not modeled")
 	})
 
 	t.Run("keys after a dive into a slice is refused", func(t *testing.T) {

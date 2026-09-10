@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"go.jacobcolvin.com/x/jsonschema"
+	"go.jacobcolvin.com/x/jsonschema/internal/numkind"
 	"go.jacobcolvin.com/x/jsonschema/internal/tagmodel"
 )
 
@@ -36,8 +37,13 @@ func applyDive(remaining []string, field jsonschema.FieldContext) error {
 		return fmt.Errorf("validate tag: cannot dive: %w", noElementsReason(field))
 	}
 
+	d := descent{form: form}
+	if form == tagmodel.FormObject {
+		d.key = numkind.DerefType(field.Type).Key()
+	}
+
 	for i := range elems {
-		err := applyParts(remaining, elems[i], true, form)
+		err := applyParts(remaining, elems[i], d)
 		if err != nil {
 			return err
 		}

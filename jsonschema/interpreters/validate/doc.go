@@ -347,10 +347,14 @@
 // constraints inside a keys...endkeys block (map-key constraints are not
 // modeled). A block runs from the keys to the first endkeys, or to the end
 // of the tag when none follows, as go-playground's parser collects it, so
-// every part between is a key constraint and is skipped once it names a
-// validator go-playground registers, since go-playground parses the block
-// with the same lookup, and a keys inside the block closes on that same
-// first endkeys. A keys not immediately
+// every part between is a key constraint, and a keys inside the block closes
+// on that same first endkeys. Go-playground parses and runs the block
+// through the same code as a field of the key type, so the interpreter
+// checks it the same way, against a scratch context for the key that
+// nothing lands on: an undefined validator, a parameter of the wrong arity
+// or spelling, or a rule the key's kind refuses is an error inside the block
+// as it is on a field, and a dive inside the block finds no elements, as it
+// finds none on the string keys of a JSON object. A keys not immediately
 // following a dive is an error ([ErrKeysPlacement]), inside a block as much
 // as outside one, as go-playground refuses it, and so is a keys after a dive
 // into a slice or array, since only go-playground's map branch reads a block
