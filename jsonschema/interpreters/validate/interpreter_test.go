@@ -3369,6 +3369,28 @@ func TestValidateInterpreterGoPlaygroundParity(t *testing.T) {
 
 		_, err = jsonschema.GenerateFor[NestedNoDive](t.Context(), opt)
 		require.ErrorIs(t, err, validate.ErrKeysPlacement)
+
+		// Go-playground's collector reads at least one part after a keys
+		// and indexes past the tag when none follows, so a trailing keys
+		// is unloadable there. The interpreter used to open an empty block
+		// and emit a clean schema.
+		type Trailing struct {
+			F map[string]string `json:"f" validate:"dive,keys"`
+		}
+
+		_, err = jsonschema.GenerateFor[Trailing](t.Context(), opt)
+		require.ErrorIs(t, err, validate.ErrKeysPlacement)
+		require.ErrorContains(t, err, "last part")
+
+		// The block is parsed there by the same collector, so a trailing
+		// keys inside one is refused the same way.
+		type TrailingInside struct {
+			F map[string]map[string]string `json:"f" validate:"dive,keys,dive,keys"`
+		}
+
+		_, err = jsonschema.GenerateFor[TrailingInside](t.Context(), opt)
+		require.ErrorIs(t, err, validate.ErrKeysPlacement)
+		require.ErrorContains(t, err, "last part")
 	})
 
 	t.Run("keys after a dive into a slice is refused", func(t *testing.T) {

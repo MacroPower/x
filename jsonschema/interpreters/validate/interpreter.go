@@ -36,10 +36,12 @@ var (
 
 	// ErrKeysPlacement reports a keys tag go-playground cannot open a key
 	// block on: one that does not immediately follow a dive, inside a block
-	// as much as outside one, or one whose dive descends into a slice or
-	// array. Go-playground's parser refuses the first, and only its map
-	// branch reads a block, so the second dereferences a nil validation at
-	// run time. The interpreter refuses both rather than emitting a schema
+	// as much as outside one, one whose dive descends into a slice or
+	// array, or one that is the last part of the tag. Go-playground's
+	// parser refuses the first, only its map branch reads a block, so the
+	// second dereferences a nil validation at run time, and the third
+	// leaves its collector with no part to read and it indexes past the
+	// tag. The interpreter refuses all three rather than emitting a schema
 	// for a tag the library cannot load.
 	ErrKeysPlacement = errors.New("validate tag: keys must immediately follow a dive into a map")
 	// ErrEndkeysPlacement reports an endkeys tag with no keys block open
@@ -183,7 +185,9 @@ func applyParts(parts []string, field jsonschema.FieldContext, afterDive bool, c
 		// part right after a dive and panics elsewhere, and only its map
 		// branch reads the block, so a keys anywhere else, or after a dive
 		// into a slice or array, is an error rather than a schema for a tag
-		// it cannot load.
+		// it cannot load. So is a keys with no part after it, since
+		// go-playground's collector reads at least one part and indexes
+		// past the tag on none.
 		if part == keysTag {
 			if !afterDive || idx != 0 {
 				return ErrKeysPlacement
@@ -191,6 +195,10 @@ func applyParts(parts []string, field jsonschema.FieldContext, afterDive bool, c
 
 			if container != tagmodel.FormObject {
 				return fmt.Errorf("%w, and this dive descends into a %s", ErrKeysPlacement, container)
+			}
+
+			if idx == len(parts)-1 {
+				return fmt.Errorf("%w, and this keys is the last part of the tag", ErrKeysPlacement)
 			}
 
 			consumed, err := skipKeysBlock(parts[idx+1:])
@@ -273,8 +281,9 @@ func applyParts(parts []string, field jsonschema.FieldContext, afterDive bool, c
 // go-playground's parser collects them. The constraints inside are key
 // constraints, which this dialect does not model, so nothing is applied. The
 // grammar is still checked, since go-playground parses the block with the
-// same rules: a keys inside it must immediately follow a dive, and a
-// structural key with a parameter or an OR alternative names no validator. A
+// same rules: a keys inside it must immediately follow a dive and have a
+// part after it, and a structural key with a parameter or an OR alternative
+// names no validator. A
 // nested block closes on the same first endkeys as the block holding it,
 // since go-playground's collector stops there whatever opened before. It
 // returns the number of parts consumed, the closing endkeys included.
@@ -290,6 +299,10 @@ func skipKeysBlock(parts []string) (int, error) {
 		case part == keysTag:
 			if !prevDive {
 				return 0, ErrKeysPlacement
+			}
+
+			if idx == len(parts)-1 {
+				return 0, fmt.Errorf("%w, and this keys is the last part of the tag", ErrKeysPlacement)
 			}
 
 		case part == "" || part == "-" || part == diveTag || isControlTag(part):

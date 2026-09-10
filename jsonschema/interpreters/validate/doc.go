@@ -352,7 +352,9 @@
 // following a dive is an error ([ErrKeysPlacement]), inside a block as much
 // as outside one, as go-playground refuses it, and so is a keys after a dive
 // into a slice or array, since only go-playground's map branch reads a block
-// and the others dereference a nil validation. An endkeys with no keys block
+// and the others dereference a nil validation, and so is a keys that is the
+// last part of the tag, since go-playground's collector reads at least one
+// part after it. An endkeys with no keys block
 // open is an error too ([ErrEndkeysPlacement]) unless it is the last part
 // of the tag, where go-playground's parser ends the chain and the
 // interpreter skips it. A control tag, dive,
