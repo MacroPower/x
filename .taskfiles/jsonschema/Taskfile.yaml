@@ -1,0 +1,44 @@
+version: "3"
+
+set: [errexit, nounset, pipefail]
+shopt: [globstar]
+
+# The jsonschema module vendors the official JSON Schema Test Suite under
+# jsonschema/testdata/suite and runs it from suite_test.go. suite:sync
+# replaces that copy with upstream at REF and records the commit in
+# testdata/suite/COMMIT, which TestSuitePinIsRecorded reads. The clone is a
+# single-commit fetch into .tmp, which .gitignore excludes and `task clean`
+# removes.
+vars:
+  SUITE_REPO: https://github.com/json-schema-org/JSON-Schema-Test-Suite
+  SUITE_CLONE: .tmp/json-schema-test-suite
+  SUITE_DIR: jsonschema/testdata/suite
+
+tasks:
+  suite:sync:
+    desc: Re-vendors the official JSON Schema Test Suite at REF (default main)
+    summary: |
+      Fetches one commit of the official JSON Schema Test Suite and replaces
+      the vendored draft7 and draft2020-12 test directories and the remotes
+      tree wholesale, then writes the fetched commit to testdata/suite/COMMIT.
+
+      Run `task check` afterwards. A new upstream case that fails is the
+      point of the refresh: fix the behavior, or add a reasoned skip to
+      suiteSkips in jsonschema/suite_test.go.
+
+      Args:
+        REF: Upstream branch, tag, or full commit hash to vendor (default:
+             main). A single-commit fetch needs the full hash, since GitHub
+             does not resolve an abbreviated one.
+    vars:
+      REF: '{{.REF | default "main"}}'
+    cmds:
+      - rm -rf {{.SUITE_CLONE}}
+      - mkdir -p {{.SUITE_CLONE}}
+      - git -C {{.SUITE_CLONE}} init --quiet
+      - git -C {{.SUITE_CLONE}} fetch --quiet --depth 1 {{.SUITE_REPO}} {{.REF}}
+      - git -C {{.SUITE_CLONE}} checkout --quiet FETCH_HEAD
+      - for: [draft7, draft2020-12]
+        cmd: rm -rf {{.SUITE_DIR}}/{{.ITEM}} && cp -R {{.SUITE_CLONE}}/tests/{{.ITEM}} {{.SUITE_DIR}}/{{.ITEM}}
+      - rm -rf {{.SUITE_DIR}}/remotes && cp -R {{.SUITE_CLONE}}/remotes {{.SUITE_DIR}}/remotes
+      - git -C {{.SUITE_CLONE}} rev-parse HEAD > {{.SUITE_DIR}}/COMMIT

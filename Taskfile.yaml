@@ -10,6 +10,7 @@ includes:
   gh: ./.taskfiles/gh/Taskfile.yaml
   git: ./.taskfiles/git/Taskfile.yaml
   go: ./.taskfiles/go/Taskfile.yaml
+  jsonschema: ./.taskfiles/jsonschema/Taskfile.yaml
   release: ./.taskfiles/release/Taskfile.yaml
   security: ./.taskfiles/security/Taskfile.yaml
 
