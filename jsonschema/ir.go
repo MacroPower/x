@@ -1255,29 +1255,29 @@ func isJSONNull(v any) bool {
 }
 
 // payloadRefTargets maps the $ref string of every def entry to the entry:
-// its provisional token, and its final key once assignDefNames has settled
-// one. Before [run.finalizeRefs] a payload carries a def reference as a
-// token, or as the base name a hook that spelled the ref by hand
-// anticipated, which is the key a singleton takes; from then on as the final
-// key, whether a ref node's own, one a hook copied out of a view, or one a
-// hook spelled by hand. A token carries "@", which no final key does, so the
-// two spellings never collide. Before naming, a base name two entries share
-// resolves to the first registered, as the render-time scan resolves a
-// string to one entry.
+// its provisional token, its final key once assignDefNames has settled one,
+// and the base name a hook that spelled the ref by hand anticipated, which
+// is the key a singleton takes. A token carries "@", which no final key
+// does, so the two spellings never collide. A base name two entries share
+// resolves to the first registered, before and after naming alike, so the
+// entry the reachability scan counts for a hand-spelled ref is the entry
+// [run.finalizeRefs] rewrites it to; a final key that spells a base name
+// wins over that fallback.
 func (g *run) payloadRefTargets() map[string]*defEntry {
 	prefix := g.profile.refPrefix()
 
-	targets := make(map[string]*defEntry, 2*len(g.defs))
+	targets := make(map[string]*defEntry, 3*len(g.defs))
 	for _, e := range g.defs {
 		targets[e.token] = e
 
-		switch {
-		case e.name != "":
+		if e.name != "" {
 			targets[prefix+e.name] = e
-		default:
-			if _, taken := targets[prefix+e.baseName]; !taken {
-				targets[prefix+e.baseName] = e
-			}
+		}
+	}
+
+	for _, e := range g.defs {
+		if _, taken := targets[prefix+e.baseName]; !taken {
+			targets[prefix+e.baseName] = e
 		}
 	}
 

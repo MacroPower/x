@@ -469,6 +469,41 @@ func TestGenerateFor_RootInliningUnderBaseNameCollision(t *testing.T) {
 		"an inlined root leaves no def behind")
 }
 
+// TestGenerateFor_HandSpelledRefSurvivesNameEscalation pins the hand-spelled
+// "#/$defs/<name>" reference a hook authors from the namer's answer for a
+// type, under a base-name collision. The reachability scan resolved such a
+// ref to the first-registered entry before naming, but once the collision
+// pass escalated the name the same string resolved to nothing at render, so
+// the output carried a $ref no definition spelled. The scan resolves the
+// base name to one entry before and after naming, and finalizeRefs rewrites
+// the hand-spelled ref to that entry's final key.
+func TestGenerateFor_HandSpelledRefSurvivesNameEscalation(t *testing.T) {
+	t.Parallel()
+
+	type refHolder struct{ Z int }
+
+	type root struct {
+		A alpha.Widget `json:"a"`
+		B beta.Widget  `json:"b"`
+		C refHolder    `json:"c"`
+	}
+
+	s, err := jsonschema.GenerateFor[root](t.Context(),
+		jsonschema.WithTypeSchemaFor[refHolder](jsonschema.TypeSchema{
+			Verbatim: &jsonschema.Schema{Ref: "#/$defs/Widget"},
+		}),
+	)
+	require.NoError(t, err)
+
+	require.Contains(t, s.Defs, "alpha_Widget")
+	require.Contains(t, s.Defs, "beta_Widget")
+	assert.Equal(t, "#/$defs/alpha_Widget", s.Properties["c"].Ref,
+		"a hand-spelled base name follows the first-registered entry to its escalated key")
+
+	_, err = jsonschema.Compile(t.Context(), s)
+	require.NoError(t, err, "every $ref the output carries must resolve")
+}
+
 // TestHookCanvasContainersAreNotAliased pins that the rendered schema shares
 // no container with a slice a hook assigned to its canvas. The overlay copies
 // an enum or examples header from the canvas as is, so an interpreter that

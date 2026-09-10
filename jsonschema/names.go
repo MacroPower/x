@@ -187,7 +187,10 @@ func (g *run) assignDefNames(emitted map[*defEntry]bool) {
 // token sits in a ref node's own payload, and in any literal a type-level
 // hook copied it into, such as a branch grafted beside a property, a slot
 // replaced wholesale, or a "$ref" member inside an extension keyword's
-// value. The walk covers the root graph, every def body whether
+// value. A ref a hook spelled by hand as a base name is rewritten the same
+// way, to the final key of the entry [run.payloadRefTargets] resolves it
+// to, so a name the collision pass escalated does not leave the hand-spelled
+// ref dangling. The walk covers the root graph, every def body whether
 // or not the root reaches it, and the node a type= override replaced, whose
 // view the jsonschema tag reads later. An entry render never emits keeps its
 // token-shaped name, so a field inside an orphaned body whose type is another
@@ -198,9 +201,11 @@ func (g *run) assignDefNames(emitted map[*defEntry]bool) {
 func (g *run) finalizeRefs(root *node) {
 	prefix := g.profile.refPrefix()
 
-	final := make(map[string]string, len(g.defs))
-	for _, e := range g.defs {
-		final[e.token] = prefix + e.name
+	targets := g.payloadRefTargets()
+
+	final := make(map[string]string, len(targets))
+	for ref, e := range targets {
+		final[ref] = prefix + e.name
 	}
 
 	scanned := map[*Schema]bool{}
