@@ -1,6 +1,9 @@
 package validate
 
 import (
+	"maps"
+	"slices"
+
 	"go.jacobcolvin.com/x/jsonschema"
 	"go.jacobcolvin.com/x/jsonschema/internal/content"
 	"go.jacobcolvin.com/x/jsonschema/internal/tagmodel"
@@ -103,6 +106,13 @@ func patternKey(pattern string) validatorRule {
 	return validatorRule{KeyRule: tagmodel.KeyRule{
 		Op: tagmodel.OpPattern, Param: tagmodel.ParamNone, Implied: pattern,
 	}}
+}
+
+// Keys returns every validator name this dialect maps to a constraint, in
+// sorted order. It is the vocabulary a differential rig enumerates, so a
+// validator added to the table is compared without a hand-kept list.
+func Keys() []string {
+	return slices.Sorted(maps.Keys(validatorKeys))
 }
 
 // isControlTag reports whether a key is a go-playground/validator control tag
