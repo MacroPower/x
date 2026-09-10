@@ -528,20 +528,22 @@ func validateEmailDomain(d string) error {
 }
 
 func validateHostname(s string) error {
-	// The hostname format is RFC 1123-based; the top-level label must not be
-	// all-numeric, to disambiguate from an IPv4 address (RFC 1123 §2.1), and
-	// the DNS root-dot convention permits a trailing dot on a multi-label FQDN.
+	// The hostname format is RFC 1123-based; the top-level label of a name
+	// of two or more labels must not be all-numeric, to disambiguate from an
+	// IPv4 address (RFC 1123 §2.1), and the DNS root-dot convention permits
+	// a trailing dot on a multi-label FQDN.
 	return validateHostnameLabels(s, true, true)
 }
 
 // validateHostnameLabels validates the shared RFC 1123 label structure used by
 // both the hostname format and email domain validation. The banNumericTLD flag
-// rejects an all-numeric top-level label, which the hostname format requires
-// (RFC 1123 §2.1) but the RFC 5321 email domain grammar permits. The
-// allowTrailingDot flag accepts the DNS root-dot convention on a multi-label
-// FQDN, which likewise belongs to the hostname format only: the RFC 5321
-// Domain grammar (sub-domain *("." sub-domain)) has no trailing-dot
-// production.
+// rejects an all-numeric top-level label below another label, which the
+// hostname format requires (RFC 1123 §2.1) but the RFC 5321 email domain
+// grammar permits; a single all-numeric label passes, since no IPv4 address
+// is one label long. The allowTrailingDot flag accepts the DNS root-dot
+// convention on a multi-label FQDN, which likewise belongs to the hostname
+// format only: the RFC 5321 Domain grammar (sub-domain *("." sub-domain))
+// has no trailing-dot production.
 func validateHostnameLabels(s string, banNumericTLD, allowTrailingDot bool) error {
 	if s == "" {
 		return errInvalidHostname
@@ -589,7 +591,7 @@ func validateHostnameLabels(s string, banNumericTLD, allowTrailingDot bool) erro
 		}
 	}
 
-	if banNumericTLD && isAllDigits(labels[len(labels)-1]) {
+	if banNumericTLD && len(labels) > 1 && isAllDigits(labels[len(labels)-1]) {
 		return errors.New("invalid hostname: numeric top-level label")
 	}
 
@@ -2446,11 +2448,12 @@ func validateIDNHostname(s string) error {
 // used by both the idn-hostname format and idn-email domain validation. Three
 // flags separate what belongs to each caller's grammar:
 //
-// The banNumericTLD flag rejects an all-numeric top-level label, which the
-// idn-hostname format requires but the RFC 5321/6531 email domain grammar
-// permits. The allowTrailingDot flag accepts the DNS root-dot convention on a
-// multi-label FQDN, which likewise belongs to the idn-hostname format only: the
-// RFC 5321/6531 Domain grammar has no trailing-dot production.
+// The banNumericTLD flag rejects an all-numeric top-level label below another
+// label, which the idn-hostname format requires but the RFC 5321/6531 email
+// domain grammar permits; a single all-numeric label passes. The
+// allowTrailingDot flag accepts the DNS root-dot convention on a multi-label
+// FQDN, which likewise belongs to the idn-hostname format only: the RFC
+// 5321/6531 Domain grammar has no trailing-dot production.
 //
 // The asciiSubDomain flag decides which LDH rule an ASCII label without an ACE
 // prefix is held to. Such a label is not internationalized at all, so the
@@ -2541,13 +2544,15 @@ func validateIDNHostnameLabels(s string, banNumericTLD, allowTrailingDot, asciiS
 		return err
 	}
 
-	// When banNumericTLD is set, the top-level label must not be all-numeric,
-	// mirroring validateHostname so that an idn-hostname cannot be confused with
-	// an IPv4 address (RFC 1123 §2.1 / RFC 5890). The check uses the A-label
-	// (IDNA-mapped) form, so a label of fullwidth digits (which IDNA-maps to
-	// ASCII "123") is rejected too, not only a literal ASCII-digit label.
-	// ToASCII already succeeded for every label in the loop.
-	if banNumericTLD {
+	// When banNumericTLD is set, the top-level label of a name of two or more
+	// labels must not be all-numeric, mirroring validateHostname so that an
+	// idn-hostname cannot be confused with an IPv4 address (RFC 1123 §2.1 /
+	// RFC 5890); a single label passes, since no address is one label long.
+	// The check uses the A-label (IDNA-mapped) form, so a label of fullwidth
+	// digits (which IDNA-maps to ASCII "123") is judged the same way as a
+	// literal ASCII-digit label. ToASCII already succeeded for every label in
+	// the loop.
+	if banNumericTLD && len(labels) > 1 {
 		tld := labels[len(labels)-1]
 
 		ascii, err := idna.Lookup.ToASCII(tld)

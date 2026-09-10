@@ -17,7 +17,7 @@
 "example.com."	true	the DNS root dot on a multi-label FQDN
 "-bad.com"	false	Let-dig opens a label, so a hyphen cannot
 "bad-.com"	false	Ldh-str ends on Let-dig, so a hyphen cannot
-"123"	false	an all-numeric top-level label
+"123"	true	a single all-numeric label, which no IPv4 address form shares
 "example."	false	a bare trailing dot on a single label
 "a..b"	false	an empty interior label
 "xn--"	false	the ACE prefix with no Punycode payload
@@ -30,6 +30,7 @@
 "9.example"	true	a numeric label below the top level is fine
 "example.123"	false	RFC 1123 §2.1 bans an all-numeric top-level label
 "1.2.3.4"	false	an IPv4 address reads as a numeric top-level label
+"a.123"	false	an all-numeric last label below another label
 "a_b.com"	false	an underscore is not an LDH character
 ".com"	false	an empty first label
 ""	false	a name holds at least one label

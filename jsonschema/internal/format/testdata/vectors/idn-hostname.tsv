@@ -46,7 +46,10 @@
 "-bad.example"	false	RFC 5891 §4.2.3.1 bans a leading hyphen
 "bad-.example"	false	RFC 5891 §4.2.3.1 bans a trailing hyphen
 "xn--"	false	the ACE prefix with no Punycode payload
-"123"	false	RFC 1123 §2.1 numeric top-level label
+"123"	true	a single all-numeric label, which no IPv4 address form shares
+"１２３"	true	a single label of fullwidth digits, which UTS 46 maps to 123
+"a.123"	false	RFC 1123 §2.1 bans an all-numeric top-level label below another label
+"a.１２３"	false	the same ban after the UTS 46 mapping
 "a..b"	false	an empty interior label
 #
 # RFC 5892 Appendix A contextual rules. A.1 ZWNJ and A.2 ZWJ (CONTEXTJ) are

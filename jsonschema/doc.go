@@ -1633,7 +1633,11 @@
 //     per RFC 5890 §2.3.2.2, so hostname accepts names idn-hostname does not.
 //     idn-email follows hostname here, because RFC 6531 widens the RFC 5321
 //     domain grammar by admitting U-labels rather than importing IDNA's label
-//     rules.
+//     rules. Both refuse an all-numeric last label in a name of two or more
+//     labels ("a.123", "1.2.3.4"), the shape RFC 1123 §2.1 reserves for an
+//     IPv4 address, and idn-hostname judges the label after the UTS 46
+//     mapping, so fullwidth digits count. A single all-numeric label ("123")
+//     passes both, since no address form is one label long.
 //   - idn-hostname, and hostname on an A-label, hold every code point of a
 //     U-label to the RFC 5892 PVALID and CONTEXT categories, read off the
 //     Unicode general categories, so a symbol or emoji label ("xn--ls8h", a
