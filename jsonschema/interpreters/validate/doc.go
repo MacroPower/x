@@ -146,7 +146,11 @@
 // and marshaled, so a non-canonical spelling such as eq=5.0 or eq=1e2 constrains
 // the canonical text ("5", "100") the field actually emits, and a
 // string-marshaling type constrains whatever text it writes rather than the
-// number's own spelling.
+// number's own spelling. A oneof token on an integer kind is the exception:
+// go-playground's oneof formats the integer with strconv and compares that
+// text against the raw tokens whatever the json tag says, so a token must be
+// the canonical spelling on a coerced integer as on a native one, and -0 is
+// refused rather than enumerating a "0" that comparison never matches.
 //
 // A coerced float has two serializations of its zero, since Go's negative zero
 // compares equal to zero and encoding/json writes the sign bit for it. The

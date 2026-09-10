@@ -363,19 +363,21 @@ func readsGoKindAsText(kind reflect.Kind) bool {
 // retargets onto the elements, so the check descends through the element
 // contexts the same way and runs on every leaf; a oneof written on a []int
 // and one written under a dive then refuse the same tokens, and a []float64
-// refuses under both spellings. A coerced integer is exempt from the spelling
-// check: its scalars are canonicalized against the serialized text by design
-// (see the package doc).
+// refuses under both spellings. The spelling check reads the Go kind, not
+// the JSON form: go-playground formats an integer with strconv and compares
+// the text whatever the json tag says, so a coerced integer refuses -0 as a
+// native one does, where canonicalizing it against the serialized text would
+// enumerate a "0" that comparison never matches.
 func checkOneOf(field jsonschema.FieldContext, shape tagmodel.Shape, tokens []string) error {
 	if shape.Elem != nil && (numkind.IsFloat(shape.Kind) || shape.Kind == reflect.Bool) {
 		return fmt.Errorf("%w: %s", ErrOneOfKind, shape.Elem)
 	}
 
-	if shape.Form == tagmodel.FormNumber {
-		// An encoding/json.Number is the one string kind with a number form.
-		// Go-playground compares its text against the raw tokens, and
-		// encoding/json writes only literals inside the JSON grammar, so a
-		// token outside it can equal no marshaled value.
+	if shape.Form == tagmodel.FormNumber || shape.Form == tagmodel.FormCoercedNumber {
+		// An encoding/json.Number is the one string kind with a number form,
+		// bare or quoted. Go-playground compares its text against the raw
+		// tokens, and encoding/json writes only literals inside the JSON
+		// grammar, so a token outside it can equal no marshaled value.
 		if shape.Kind == reflect.String {
 			return checkJSONNumberOneOf(tokens)
 		}

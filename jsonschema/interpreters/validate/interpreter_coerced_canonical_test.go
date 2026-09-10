@@ -8,6 +8,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	jsonv1 "encoding/json"
+
 	"go.jacobcolvin.com/x/jsonschema"
 	"go.jacobcolvin.com/x/jsonschema/interpreters/validate"
 )
@@ -106,4 +108,90 @@ func TestValidateInterpreter_StringCoercedRangeChecked(t *testing.T) {
 			assert.Nil(t, s)
 		})
 	}
+}
+
+// TestValidateInterpreter_StringCoercedOneOfCanonicalSpelling pins that the
+// oneof spelling check reads the Go kind rather than the JSON form. Go-playground's
+// isOneOf formats an integer with strconv and compares that text against the
+// raw tokens whatever the json tag says, so a token spelled -0 matches no
+// value there; canonicalizing it to "0" on a json:",string" or
+// text-marshaling integer would enumerate a value the schema accepts and
+// go-playground rejects. A quoted json.Number takes the JSON grammar check a
+// bare one takes, and a canonical token still enumerates the serialized
+// text.
+func TestValidateInterpreter_StringCoercedOneOfCanonicalSpelling(t *testing.T) {
+	t.Parallel()
+
+	const (
+		canonical = "go-playground compares against"
+		grammar   = "is not a JSON number"
+	)
+
+	refused := map[string]struct {
+		gen  func(context.Context) (*jsonschema.Schema, error)
+		want string
+	}{
+		"negative zero on a coerced int": {
+			gen: func(ctx context.Context) (*jsonschema.Schema, error) {
+				type F struct {
+					V int `json:"v,string" validate:"oneof=-0 1"`
+				}
+
+				return jsonschema.GenerateFor[F](ctx, validateInterp())
+			},
+			want: canonical,
+		},
+		"leading plus on a coerced int": {
+			gen: func(ctx context.Context) (*jsonschema.Schema, error) {
+				type F struct {
+					V int `json:"v,string" validate:"oneof=+1"`
+				}
+
+				return jsonschema.GenerateFor[F](ctx, validateInterp())
+			},
+			want: canonical,
+		},
+		"negative zero on a text-marshaling int": {
+			gen: func(ctx context.Context) (*jsonschema.Schema, error) {
+				type F struct {
+					V levelText `json:"v" validate:"oneof=-0"`
+				}
+
+				return jsonschema.GenerateFor[F](ctx, validateInterp())
+			},
+			want: canonical,
+		},
+		"non-JSON token on a quoted json.Number": {
+			gen: func(ctx context.Context) (*jsonschema.Schema, error) {
+				type F struct {
+					V jsonv1.Number `json:"v,string" validate:"oneof=+1"`
+				}
+
+				return jsonschema.GenerateFor[F](ctx, validateInterp())
+			},
+			want: grammar,
+		},
+	}
+
+	for name, tc := range refused {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := tc.gen(t.Context())
+			require.ErrorContains(t, err, "oneof:")
+			assert.Contains(t, err.Error(), tc.want)
+		})
+	}
+
+	t.Run("canonical tokens enumerate the serialized text", func(t *testing.T) {
+		t.Parallel()
+
+		type F struct {
+			V int `json:"v,string" validate:"oneof=0 1"`
+		}
+
+		s, err := jsonschema.GenerateFor[F](t.Context(), validateInterp())
+		require.NoError(t, err)
+		assert.Equal(t, []any{"0", "1"}, s.Properties["v"].Enum)
+	})
 }
