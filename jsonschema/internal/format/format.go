@@ -1199,9 +1199,10 @@ const (
 // every engine, and Annex B keeps the early error that the first bound of
 // "{m,n}" must not exceed the second. A '{' that opens no braced quantifier
 // form is an Annex B ExtendedPatternCharacter, so "a{,5}" and "a{2,1" stay
-// literal. The assertions '^' and '$' are left quantifiable, as RE2 reads
-// them, and so is a lookahead, which Annex B's QuantifiableAssertion covers;
-// a lookbehind is not, since no Term production lets a Quantifier follow it.
+// literal. The assertions '^' and '$' and the word-boundary escapes "\b" and
+// "\B" are left quantifiable, as RE2 reads them, and so is a lookahead, which
+// Annex B's QuantifiableAssertion covers; a lookbehind is not, since no Term
+// production lets a Quantifier follow it.
 // A class range whose two ends are literal code points must run upward, the
 // early error 22.2.1.1 keeps; a range with an escape on either side is left
 // alone, since Annex B lets a class escape stand beside a literal '-'.
