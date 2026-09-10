@@ -252,12 +252,24 @@
 //
 // The uri tag maps to the uri-reference format rather than uri, because
 // go-playground's uri is [net/url.ParseRequestURI], which accepts an absolute
-// path such as "/a" that the uri format rejects, and the mapping widens
-// rather than tightens. The wider format admits the relative references
-// go-playground refuses ("a/b", "?q", "#f", and the empty string), so those
-// pass the schema and fail go-playground. The url tag maps to the uri
-// format, which admits a bare scheme ("http:") that go-playground's url
-// refuses.
+// path such as "/a" that the uri format rejects. The wider format admits the
+// relative references go-playground refuses ("a/b", "?q", "#f", and the
+// empty string), so those pass the schema and fail go-playground. The url
+// tag maps to the uri format, which admits a bare scheme ("http:") that
+// go-playground's url refuses.
+//
+// The mapping tightens as well. Go-playground's url and uri are [net/url]
+// parses, which take a space, a non-ASCII character, or a "|" as written,
+// while the uri and uri-reference formats hold the RFC 3986 grammar, which
+// admits those characters only percent-encoded. So "http://example.com/a b"
+// passes go-playground's url and uri and fails both formats. The ipv4 tag
+// maps to the ipv4 format, which reads dotted-quad text alone, while
+// go-playground's ipv4 is [net.ParseIP] followed by To4, which also takes
+// the IPv4-mapped IPv6 text "::ffff:1.2.3.4"; its ipv6 refuses that text
+// and the ipv6 format accepts it. A format asserts only where the run
+// checks formats, under Draft-07 by default and under Draft 2020-12 with
+// [jsonschema.WithFormats] or the format-assertion vocabulary, and is an
+// annotation otherwise.
 //
 // Two validators in one tag that map to one keyword, such as email and url on
 // format or alpha and numeric on pattern, are refused with
