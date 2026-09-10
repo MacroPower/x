@@ -83,6 +83,13 @@ var (
 		"go-playground runs a string validator on a non-string kind against the Go value, not its text",
 	)
 
+	// ErrUnsignedLiteral reports a parameter with a minus sign on an
+	// unsigned integer kind. Go-playground reads every numeric parameter
+	// on such a kind through [strconv.ParseUint], which refuses the sign
+	// outright, so -0 is a panic there rather than the zero the shared
+	// literal grammar reads it as.
+	ErrUnsignedLiteral = errors.New("go-playground's unsigned parser refuses a minus sign")
+
 	// ErrUniqueKind reports unique on a slice, array, or map whose elements
 	// a map cannot key: a map, slice, or function element, behind a pointer
 	// or not. Go-playground hashes each element to find a repeat and panics
@@ -386,6 +393,14 @@ func applyValidator(
 
 	if bound.Op == tagmodel.OpUnique && !uniqueHashable(field.Type) {
 		return fmt.Errorf("validate tag: %s: %w: %s", key, ErrUniqueKind, field.Type)
+	}
+
+	if numkind.IsUnsigned(shape.Kind) {
+		for _, param := range bound.Params.Values() {
+			if strings.HasPrefix(param, "-") {
+				return fmt.Errorf("validate tag: %s: %w: %q", key, ErrUnsignedLiteral, param)
+			}
+		}
 	}
 
 	if bound.Op.Overwrites() {

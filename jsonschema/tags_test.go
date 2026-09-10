@@ -1141,17 +1141,20 @@ func TestTagNegativeZeroBoundShipsAsZero(t *testing.T) {
 
 // TestTagNegativeZeroScalarOnUnsignedField pins that -0, a JSON integer the
 // documented tag grammar admits and the value 0 every unsigned field holds,
-// parses on an unsigned field as it does on a signed one, in both dialects.
-// The bound path already read minimum=-0 on a uint8; the scalar path reached
-// strconv.ParseUint, which refuses the sign, so const=-0 on a uint field
-// failed with a raw strconv message while the same tag on an int field
-// pinned 0.
+// parses on an unsigned field as it does on a signed one in the jsonschema
+// dialect. The bound path already read minimum=-0 on a uint8; the scalar
+// path reached strconv.ParseUint, which refuses the sign, so const=-0 on a
+// uint field failed with a raw strconv message while the same tag on an int
+// field pinned 0. The validate dialect refuses the sign on an unsigned field
+// instead, since go-playground reads the parameter through strconv.ParseUint
+// and panics there.
 func TestTagNegativeZeroScalarOnUnsignedField(t *testing.T) {
 	t.Parallel()
 
 	tests := map[string]struct {
 		generate func() (*jsonschema.Schema, error)
 		want     string // marshaled property schema
+		err      error
 	}{
 		"jsonschema const": {
 			generate: func() (*jsonschema.Schema, error) {
@@ -1182,7 +1185,7 @@ func TestTagNegativeZeroScalarOnUnsignedField(t *testing.T) {
 				return jsonschema.GenerateFor[doc](t.Context(),
 					jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()))
 			},
-			want: `{"type":"integer","const":0}`,
+			err: validate.ErrUnsignedLiteral,
 		},
 	}
 
@@ -1191,6 +1194,12 @@ func TestTagNegativeZeroScalarOnUnsignedField(t *testing.T) {
 			t.Parallel()
 
 			s, err := tc.generate()
+			if tc.err != nil {
+				require.ErrorIs(t, err, tc.err)
+
+				return
+			}
+
 			require.NoError(t, err)
 
 			got, err := json.Marshal(s.Properties["v"])
