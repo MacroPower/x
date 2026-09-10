@@ -1,0 +1,4 @@
+go test fuzz v1
+string("dive,keys,0")
+byte('\v')
+[]byte("0")

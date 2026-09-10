@@ -10,7 +10,9 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -69,6 +71,14 @@ type spellingKind struct {
 	name   string
 	typ    reflect.Type
 	probes []any
+	// The jsonTag field is the json tag the field carries, `json:"v"` when
+	// empty; a coerced kind spells `json:"v,string"`.
+	jsonTag string
+}
+
+// spellingObject is the struct a pointer-to-struct kind points at.
+type spellingObject struct {
+	X string `json:"x"`
 }
 
 // spellingKinds is the draw pool of kinds: the shape rig's nine plus the
@@ -130,6 +140,52 @@ func spellingKinds() []spellingKind {
 		{name: "[]byte", typ: reflect.TypeFor[[]byte](), probes: []any{
 			[]byte(nil), []byte{}, []byte("abc"), []byte("abcdef"),
 		}},
+
+		// The kinds below joined the pool after the review found gaps on
+		// them: a pointer to a struct, a text-marshaling pointer, an
+		// interface, the nested collections a keys block or a second dive
+		// reaches, and the coerced numerics.
+		{name: "*object", typ: reflect.TypeFor[*spellingObject](), probes: []any{
+			(*spellingObject)(nil), &spellingObject{}, &spellingObject{X: "a"},
+		}},
+		{name: "*time.Time", typ: reflect.TypeFor[*time.Time](), probes: []any{
+			(*time.Time)(nil), &time.Time{}, &spellingDate,
+		}},
+		{name: "any", typ: reflect.TypeFor[any](), probes: []any{
+			nil, "", "a", "abc", "abcde", 0, 1, 3, 7, true, []string{}, []string{"a"},
+		}},
+		{name: "[][]string", typ: reflect.TypeFor[[][]string](), probes: []any{
+			[][]string(nil),
+			[][]string{},
+			[][]string{nil},
+			[][]string{{}},
+			[][]string{{"a"}},
+			[][]string{{"a", "b"}, {"c"}},
+			[][]string{{"ab"}, {"ab"}},
+		}},
+		{name: "[]map[string]int", typ: reflect.TypeFor[[]map[string]int](), probes: []any{
+			[]map[string]int(nil),
+			[]map[string]int{},
+			[]map[string]int{nil},
+			[]map[string]int{{"a": 1}},
+			[]map[string]int{{"a": 1, "b": 2}, {"c": 3}},
+		}},
+		{name: "map[string][]string", typ: reflect.TypeFor[map[string][]string](), probes: []any{
+			map[string][]string(nil),
+			map[string][]string{},
+			map[string][]string{"a": nil},
+			map[string][]string{"a": {"x"}},
+			map[string][]string{"a": {"x", "y"}, "bb": {"z"}},
+		}},
+		{name: "int,string", typ: reflect.TypeFor[int](), jsonTag: `json:"v,string"`, probes: []any{
+			0, 1, 3, 7, 10, -1,
+		}},
+		{name: "uint8,string", typ: reflect.TypeFor[uint8](), jsonTag: `json:"v,string"`, probes: []any{
+			uint8(0), uint8(1), uint8(3), uint8(7), uint8(10),
+		}},
+		{name: "float64,string", typ: reflect.TypeFor[float64](), jsonTag: `json:"v,string"`, probes: []any{
+			0.0, 0.5, 1.5, 3.0, 7.0, 10.0, -1.0,
+		}},
 	}
 }
 
@@ -163,14 +219,6 @@ const (
 // order the classifier tries them.
 func spellingExclusions() []spellingExclusion {
 	return []spellingExclusion{
-		{reason: reasonOrOperatorUnmodeled, catches: func(tag string, _ spellingKind, _ string, _ error) bool {
-			return strings.Contains(tag, "|")
-		}},
-		{reason: reasonKeysBlockUnmodeled, catches: func(tag string, _ spellingKind, _ string, _ error) bool {
-			// An endkeys with no keys before it opens no block, so both
-			// sides read the tag the same way and the rig compares it.
-			return spells(tag, "keys")
-		}},
 		{reason: reasonCrossFieldUnmodeled, catches: func(tag string, _ spellingKind, _ string, _ error) bool {
 			return anyPart(tag, func(key, _ string) bool {
 				return strings.Contains(key, "field") || strings.HasPrefix(key, "required_") ||
@@ -179,18 +227,29 @@ func spellingExclusions() []spellingExclusion {
 		}},
 		{reason: reasonPartLenient, catches: func(tag string, _ spellingKind, _ string, _ error) bool {
 			// A padded parameter is not lenient: both sides read the
-			// literal with its whitespace, so the rig compares it.
+			// literal with its whitespace, so the rig compares it. A key
+			// is padded wherever it sits, since go-playground splits
+			// every OR alternative and looks each key up as written.
 			for part := range strings.SplitSeq(tag, ",") {
-				key, _, _ := strings.Cut(part, "=")
-				if part == "" || part == "-" || strings.TrimSpace(key) != key {
+				if part == "" || part == "-" {
 					return true
+				}
+
+				for alt := range strings.SplitSeq(part, "|") {
+					if key, _, _ := strings.Cut(alt, "="); strings.TrimSpace(key) != key {
+						return true
+					}
 				}
 			}
 
 			return false
 		}},
 		{reason: reasonOneOfSequenceRetarget, catches: func(tag string, kind spellingKind, _ string, _ error) bool {
-			return spells(tag, "oneof") && isCollectionKind(kind.typ) && !spellsAfterDive(tag, "oneof")
+			// The rule retargets from whatever collection it reaches, the
+			// field itself or a nested element behind a dive.
+			return anyRule(tag, kind.typ, func(key, _ string, target reflect.Type) bool {
+				return key == "oneof" && isCollectionKind(target)
+			})
 		}},
 		{reason: reasonByteSliceElements, catches: func(tag string, kind spellingKind, _ string, _ error) bool {
 			return kind.typ == reflect.TypeFor[[]byte]() && anyPart(tag, func(key, _ string) bool {
@@ -223,7 +282,7 @@ func spellingExclusions() []spellingExclusion {
 			})
 		}},
 		{reason: reasonOneOfTokenUnmatchable, catches: func(tag string, kind spellingKind, _ string, _ error) bool {
-			return anyPart(tag, func(key, param string) bool {
+			return anyRule(tag, kind.typ, func(key, param string, target reflect.Type) bool {
 				if key != "oneof" {
 					return false
 				}
@@ -233,12 +292,12 @@ func spellingExclusions() []spellingExclusion {
 					return true
 				}
 
-				if !isIntegerKind(kind.typ) {
+				if !isIntegerKind(target) {
 					return false
 				}
 
 				for _, tok := range tokens {
-					if !canonicalInteger(tok, isUnsignedKind(kind.typ)) {
+					if !canonicalInteger(tok, isUnsignedKind(target)) {
 						return true
 					}
 				}
@@ -353,6 +412,13 @@ func spellingExclusions() []spellingExclusion {
 			return errors.Is(err, validate.ErrRepeatedKeyword)
 		}},
 		{reason: reasonStringRuleOnOtherKind, catches: func(_ string, kind spellingKind, _ string, err error) bool {
+			// A coerced numeric, a text-marshaling type, and a byte slice
+			// are refused through the interpreter's own sentinel; a native
+			// number, bool, or collection through the model's.
+			if errors.Is(err, validate.ErrStringRuleKind) {
+				return true
+			}
+
 			if kind.typ.Kind() == reflect.String || !errors.Is(err, tagmodel.ErrUnsupported) {
 				return false
 			}
@@ -363,6 +429,23 @@ func spellingExclusions() []spellingExclusion {
 				strings.Contains(msg, "pattern is not supported on") ||
 				strings.Contains(msg, "content encoding is not supported on") ||
 				strings.Contains(msg, "content media type is not supported on")
+		}},
+		{reason: reasonCoercedNumericBounds, catches: func(_ string, _ spellingKind, _ string, err error) bool {
+			return errors.Is(err, tagmodel.ErrUnsupported) &&
+				strings.Contains(err.Error(), "coerced numeric field")
+		}},
+		{reason: reasonTimeRelativeRule, catches: func(tag string, kind spellingKind, _ string, err error) bool {
+			if err == nil || !isTimeKind(kind.typ) {
+				return false
+			}
+
+			return anyPart(tag, func(key, _ string) bool {
+				return contains([]string{"gt", "gte", "lt", "lte", "min", "max", "eq", "ne", "len"}, key)
+			})
+		}},
+		{reason: reasonOpaqueRuleDynamicKind, catches: func(_ string, kind spellingKind, _ string, err error) bool {
+			return kind.typ.Kind() == reflect.Interface && errors.Is(err, tagmodel.ErrUnsupported) &&
+				strings.Contains(err.Error(), "on a opaque value")
 		}},
 
 		// The remaining entries are verdict exclusions: the tag is usable on
@@ -402,9 +485,14 @@ func spellingExclusions() []spellingExclusion {
 // controlTags are the go-playground control tags this dialect skips. A tag
 // carrying one is compared one way: go-playground rejecting a value implies
 // the schema rejects it, since the schema never learns which values the
-// control tag told go-playground to skip (reasonControlTagSkipped).
+// control tag told go-playground to skip (reasonControlTagSkipped). The |
+// operator takes the same direction and a keys block the reverse; see
+// runSpelling.
 var (
 	controlTags = []string{"omitempty", "omitnil", "omitzero", "structonly", "nostructlevel"}
+
+	// The spellingDate value is the non-zero time probe.
+	spellingDate = time.Date(2024, time.March, 5, 6, 7, 8, 0, time.UTC)
 
 	// OneOfTokenRegexp is go-playground's oneof splitter: a single-quoted run
 	// or an unquoted run of non-space characters, with the quotes stripped
@@ -459,10 +547,15 @@ const (
 // kind. The tag is quoted so any byte sequence survives the struct tag
 // grammar; reflect and go-playground both read it back through Unquote.
 func spellingStruct(tag string, kind spellingKind) reflect.Type {
+	jsonTag := kind.jsonTag
+	if jsonTag == "" {
+		jsonTag = `json:"v"`
+	}
+
 	return reflect.StructOf([]reflect.StructField{{
 		Name: "V",
 		Type: kind.typ,
-		Tag:  reflect.StructTag(`json:"v" validate:` + strconv.Quote(tag)),
+		Tag:  reflect.StructTag(jsonTag + ` validate:` + strconv.Quote(tag)),
 	}})
 }
 
@@ -473,7 +566,14 @@ func probeValues(typ reflect.Type, kind spellingKind, valueBlob []byte) []reflec
 
 	for _, probe := range kind.probes {
 		v := reflect.New(typ).Elem()
-		v.Field(0).Set(reflect.ValueOf(probe).Convert(kind.typ))
+
+		// An untyped nil is the zero of an interface or pointer kind, which
+		// reflect.ValueOf cannot carry.
+		if probe == nil {
+			v.Field(0).Set(reflect.Zero(kind.typ))
+		} else {
+			v.Field(0).Set(reflect.ValueOf(probe).Convert(kind.typ))
+		}
 
 		out = append(out, v)
 	}
@@ -518,7 +618,16 @@ func referenceOutcome(tag string, kind spellingKind, probes []reflect.Value) ([]
 func referenceRunsEveryPart(tag string, kind spellingKind, probes []reflect.Value) bool {
 	var dives []string
 
-	for part := range strings.SplitSeq(tag, ",") {
+	// A keys block is one unit to go-playground's parser, so a part of it
+	// run alone is a fault of the split rather than of the tag; a tag
+	// spelling one runs whole, at the cost of a latent panic behind a
+	// rejecting part inside the block.
+	parts := strings.Split(tag, ",")
+	if spells(tag, "keys") || spells(tag, "endkeys") {
+		parts = []string{tag}
+	}
+
+	for _, part := range parts {
 		segment := strings.Join(append(slices.Clone(dives), part), ",")
 		typ := spellingStruct(segment, kind)
 		reference := playground.New(playground.WithRequiredStructEnabled())
@@ -629,8 +738,13 @@ func runSpelling(t *testing.T, tag string, kind spellingKind, valueBlob []byte) 
 	case ours == ourRefuses:
 		t.Fatalf("go-playground accepts validate:%q on %s but this side refuses it: %v", tag, kind.name, err)
 	case ours == ourConflict:
+		// A conflict behind a dive is vacuous on go-playground for a value
+		// with no element at that depth, as any element rule is, so only a
+		// probe that reaches an element must be rejected there.
+		depth := strings.Count(tag, "dive")
+
 		for i, reject := range refRejects {
-			if !reject {
+			if !reject && hasElementAt(probes[i].Field(0), depth) {
 				t.Fatalf("this side reports a conflict for validate:%q on %s but go-playground accepts %#v: %v",
 					tag, kind.name, probes[i].Field(0).Interface(), err)
 			}
@@ -649,13 +763,32 @@ func runSpelling(t *testing.T, tag string, kind spellingKind, valueBlob []byte) 
 	validator, err := jsonschema.Compile(ctx, schema)
 	require.NoError(t, err, "compile the schema for validate:%q on %s", tag, kind.name)
 
-	oneWay := anyPart(tag, func(key, _ string) bool { return contains(controlTags, key) })
+	// The schema is the stricter side under a control tag, whose skipped
+	// values it never learns of, and under the | operator, of which it reads
+	// the first alternative alone; it is the looser side inside a keys
+	// block, whose key constraints it does not model. A tag on both sides
+	// has no sound direction, so its values are not compared.
+	stricter := strings.Contains(tag, "|") ||
+		anyPart(tag, func(key, _ string) bool { return contains(controlTags, key) })
+	looser := spells(tag, "keys")
+
+	if stricter && looser {
+		return cellVerdictExcluded
+	}
+
 	required := spells(tag, "required")
+
+	pins := isFloatKind(kind.typ) && strings.Contains(kind.jsonTag, ",string") &&
+		anyPart(tag, func(key, _ string) bool { return key == "eq" || key == "len" || key == "oneof" })
 
 	for i, probe := range probes {
 		value := probe.Field(0)
-		if required && emptyBareCollection(value) {
+		if required && requiredReachesEmptyCollection(tag, value) {
 			continue // reasonRequiredCollectionEmptyFloor
+		}
+
+		if pins && value.Float() == 0 && math.Signbit(value.Float()) {
+			continue // reasonCoercedFloatNegativeZeroPin
 		}
 
 		instance, err := json.Marshal(probe.Interface())
@@ -666,8 +799,12 @@ func runSpelling(t *testing.T, tag string, kind spellingKind, valueBlob []byte) 
 		schemaReject := validator.ValidateJSON(ctx, instance) != nil
 
 		agree := refRejects[i] == schemaReject
-		if oneWay {
+
+		switch {
+		case stricter:
 			agree = !refRejects[i] || schemaReject
+		case looser:
+			agree = !schemaReject || refRejects[i]
 		}
 
 		if !agree {
@@ -684,6 +821,94 @@ func runSpelling(t *testing.T, tag string, kind spellingKind, valueBlob []byte) 
 	return cellCompared
 }
 
+// requiredReachesEmptyCollection reports whether the required in tag, behind
+// however many dives precede it, reaches an empty non-nil collection in
+// value, the one shape reasonRequiredCollectionEmptyFloor excludes.
+func requiredReachesEmptyCollection(tag string, value reflect.Value) bool {
+	depth := 0
+
+	for part := range strings.SplitSeq(tag, ",") {
+		// The key alone for required, since required= with an empty
+		// parameter is the bare required on both sides; dive is matched
+		// whole, as both sides match it.
+		key, _, _ := strings.Cut(part, "=")
+
+		switch {
+		case part == "dive":
+			depth++
+		case key == "required":
+			return emptyBareCollectionAt(value, depth)
+		}
+	}
+
+	return false
+}
+
+// hasElementAt reports whether value carries a value at the given dive
+// depth: itself at depth zero, else an element of a collection at the depth
+// above. A nil pointer or interface carries nothing.
+func hasElementAt(value reflect.Value, depth int) bool {
+	for value.Kind() == reflect.Pointer || value.Kind() == reflect.Interface {
+		if value.IsNil() {
+			return false
+		}
+
+		value = value.Elem()
+	}
+
+	if depth == 0 {
+		return true
+	}
+
+	switch value.Kind() {
+	case reflect.Slice, reflect.Array:
+		for i := range value.Len() {
+			if hasElementAt(value.Index(i), depth-1) {
+				return true
+			}
+		}
+
+	case reflect.Map:
+		for _, key := range value.MapKeys() {
+			if hasElementAt(value.MapIndex(key), depth-1) {
+				return true
+			}
+		}
+
+	default:
+	}
+
+	return false
+}
+
+// emptyBareCollectionAt reports whether an empty non-nil collection sits at
+// the given dive depth below value.
+func emptyBareCollectionAt(value reflect.Value, depth int) bool {
+	if depth == 0 {
+		return emptyBareCollection(value)
+	}
+
+	switch value.Kind() {
+	case reflect.Slice, reflect.Array:
+		for i := range value.Len() {
+			if emptyBareCollectionAt(value.Index(i), depth-1) {
+				return true
+			}
+		}
+
+	case reflect.Map:
+		for _, key := range value.MapKeys() {
+			if emptyBareCollectionAt(value.MapIndex(key), depth-1) {
+				return true
+			}
+		}
+
+	default:
+	}
+
+	return false
+}
+
 // drawSpellingKind picks a kind from the pool by the fuzzed byte.
 func drawSpellingKind(b byte) spellingKind {
 	kinds := spellingKinds()
@@ -698,10 +923,12 @@ type spellingSeed struct {
 	kind byte
 }
 
-// spellingSeeds is the seed corpus: every pool entry of the shape rig on the
-// kind whose pool it belongs to, the spellings past fixes pinned, the integer
-// literals go-playground reads in base 0, and validators outside this
-// dialect's vocabulary.
+// spellingSeeds is the seed corpus: every validator this dialect names, in
+// its bare form and with a numeric and a word parameter, on every kind, and
+// behind a dive on every collection kind; then every pool entry of the shape
+// rig on the kind whose pool it belongs to, the spellings past fixes pinned,
+// the integer literals go-playground reads in base 0, and validators outside
+// this dialect's vocabulary.
 func spellingSeeds() []spellingSeed {
 	var seeds []spellingSeed
 
@@ -709,7 +936,15 @@ func spellingSeeds() []spellingSeed {
 	index := map[reflect.Type]byte{}
 
 	for i, kind := range kinds {
-		index[kind.typ] = byte(i)
+		if _, seen := index[kind.typ]; !seen {
+			index[kind.typ] = byte(i)
+		}
+
+		for _, key := range validate.Keys() {
+			for _, spelling := range keySpellings(key, kind) {
+				seeds = append(seeds, spellingSeed{tag: spelling, kind: byte(i)})
+			}
+		}
 	}
 
 	for _, tk := range tagKinds() {
@@ -771,7 +1006,45 @@ func spellingSeeds() []spellingSeed {
 		spellingSeed{tag: "oneof=a b", kind: sequence},
 		// A part behind one that rejects every probe still has to run.
 		spellingSeed{tag: "min=7,min", kind: sequence},
+		// The review's findings: whitespace around a parameter, the keys
+		// block grammar, the OR operator's edges, and rules on the coerced
+		// and nested kinds the cross product now reaches.
+		spellingSeed{tag: " eq=a", kind: str},
+		spellingSeed{tag: "min= 2", kind: str},
+		spellingSeed{tag: "dive,keys,min=1,endkeys,min=2", kind: index[reflect.TypeFor[map[string]int]()]},
+		spellingSeed{tag: "dive,keys,min=1", kind: index[reflect.TypeFor[map[string]int]()]},
+		spellingSeed{tag: "keys,min=1,endkeys", kind: index[reflect.TypeFor[map[string]int]()]},
+		spellingSeed{tag: "dive,keys,endkeys,endkeys", kind: index[reflect.TypeFor[map[string]int]()]},
+		spellingSeed{tag: "dive,keys,endkeys", kind: sequence},
+		spellingSeed{tag: "dive,dive,keys,endkeys", kind: index[reflect.TypeFor[[]map[string]int]()]},
+		spellingSeed{tag: "dive,keys,endkeys,dive,min=1", kind: index[reflect.TypeFor[map[string][]string]()]},
+		spellingSeed{tag: "|", kind: str},
+		spellingSeed{tag: "min=1|", kind: str},
+		spellingSeed{tag: "|min=1", kind: str},
+		spellingSeed{tag: "required|", kind: str},
+		spellingSeed{tag: "min=1|max=3", kind: str},
+		spellingSeed{tag: "omitempty|min=1", kind: str},
+		spellingSeed{tag: "required|min=3", kind: str},
 	)
+}
+
+// keySpellings returns the spellings the cross product draws for one
+// validator on one kind: the bare key, a numeric parameter, and a word
+// parameter, with oneof spelled as the lists it takes, and each of those
+// behind a dive on a collection kind.
+func keySpellings(key string, kind spellingKind) []string {
+	forms := []string{key, key + "=3", key + "=abc"}
+	if key == "oneof" {
+		forms = []string{"oneof", "oneof=1 2 3", "oneof=alpha beta"}
+	}
+
+	if isCollectionKind(kind.typ) {
+		for _, form := range slices.Clone(forms) {
+			forms = append(forms, "dive,"+form)
+		}
+	}
+
+	return forms
 }
 
 // FuzzValidatorTagSpellings asserts the matrix over fuzzed tag strings.
@@ -791,24 +1064,46 @@ func FuzzValidatorTagSpellings(f *testing.F) {
 
 // TestSpellingSeedsReachEveryCell runs the seed corpus under plain go test
 // and asserts every matrix cell the rig can reach without a finding is
-// reached, so the corpus cannot quietly stop exercising one.
+// reached, so the corpus cannot quietly stop exercising one. The seeds run
+// as one subtest per kind, so the cross product parallelizes; a failure
+// names the tag and kind on its own.
 func TestSpellingSeedsReachEveryCell(t *testing.T) {
 	t.Parallel()
 
 	blob := differentialSeeds()[1]
-	reached := map[spellingCell]int{}
 
-	// The seeds run in one test rather than as subtests, since the tally
-	// is one map and a failure already names the tag and kind.
+	var (
+		mu      sync.Mutex
+		reached = map[spellingCell]int{}
+	)
+
+	byKind := map[byte][]spellingSeed{}
 	for _, s := range spellingSeeds() {
-		reached[runSpelling(t, s.tag, drawSpellingKind(s.kind), blob)]++
+		byKind[s.kind] = append(byKind[s.kind], s)
 	}
 
-	for _, cell := range []spellingCell{
-		cellExcluded, cellBothRefuse, cellVocabularyGap, cellConflict, cellCompared, cellVerdictExcluded,
-	} {
-		assert.Positive(t, reached[cell], "no seed reaches the %q cell", cell)
+	for kind, seeds := range byKind {
+		t.Run(drawSpellingKind(kind).name, func(t *testing.T) {
+			t.Parallel()
+
+			for _, s := range seeds {
+				cell := runSpelling(t, s.tag, drawSpellingKind(s.kind), blob)
+
+				mu.Lock()
+
+				reached[cell]++
+				mu.Unlock()
+			}
+		})
 	}
+
+	t.Cleanup(func() {
+		for _, cell := range []spellingCell{
+			cellExcluded, cellBothRefuse, cellVocabularyGap, cellConflict, cellCompared, cellVerdictExcluded,
+		} {
+			assert.Positive(t, reached[cell], "no seed reaches the %q cell", cell)
+		}
+	})
 }
 
 // TestSpellingExclusionsAreReasoned pins what each exclusion catches and what
@@ -855,6 +1150,38 @@ func TestSpellingExclusionsAreReasoned(t *testing.T) {
 			err:  fmt.Errorf("%w: format is not supported on a number", tagmodel.ErrUnsupported),
 			want: reasonStringRuleOnOtherKind,
 		},
+		"string rule on a coerced number": {
+			tag: "alpha", kind: "int,string",
+			err:  fmt.Errorf("validate tag: alpha: %w: int", validate.ErrStringRuleKind),
+			want: reasonStringRuleOnOtherKind,
+		},
+		"string rule on a byte slice": {
+			tag: "uri", kind: "[]byte",
+			err:  fmt.Errorf("validate tag: uri: %w: []uint8", validate.ErrStringRuleKind),
+			want: reasonStringRuleOnOtherKind,
+		},
+		"time-relative rule": {
+			tag: "gt", kind: "*time.Time",
+			err:  errors.New("validate tag: gt: requires a non-empty value"),
+			want: reasonTimeRelativeRule,
+		},
+		"required on a time is compared": {tag: "required", kind: "*time.Time", want: ""},
+		"value rule on an interface": {
+			tag:  "ne=0",
+			kind: "any",
+			err: fmt.Errorf(
+				"validate tag: ne: %w: forbidden value is not supported on a opaque value",
+				tagmodel.ErrUnsupported,
+			),
+			want: reasonOpaqueRuleDynamicKind,
+		},
+		"required on an interface is compared": {tag: "required", kind: "any", want: ""},
+		"oneof after a dive onto a nested sequence": {
+			tag: "dive,oneof=a b", kind: "[][]string", want: reasonOneOfSequenceRetarget,
+		},
+		"oneof tokens after a dive onto integers": {
+			tag: "dive,oneof=alpha beta", kind: "[]int8", want: reasonOneOfTokenUnmatchable,
+		},
 		"string rule on a string is compared": {
 			tag: "email", kind: "string",
 			err: fmt.Errorf("%w: format is not supported on a number", tagmodel.ErrUnsupported),
@@ -863,11 +1190,11 @@ func TestSpellingExclusionsAreReasoned(t *testing.T) {
 			tag: "min=abc", kind: "int64",
 			err: errors.New("invalid integer"),
 		},
-		"OR operator": {tag: "required|min=3", kind: "string", want: reasonOrOperatorUnmodeled},
-		"keys block": {
+		"OR operator is compared": {tag: "required|min=3", kind: "string", want: ""},
+		"keys block is compared": {
 			tag:  "dive,keys,min=1,endkeys",
 			kind: "map[string]int",
-			want: reasonKeysBlockUnmodeled,
+			want: "",
 		},
 		"trailing endkeys is compared": {tag: "required,endkeys", kind: "string", want: ""},
 		"stray endkeys is compared":    {tag: "endkeys,min=1", kind: "string", want: ""},
@@ -877,6 +1204,8 @@ func TestSpellingExclusionsAreReasoned(t *testing.T) {
 		"space after comma":            {tag: "required, min=3", kind: "int", want: reasonPartLenient},
 		"space after a bare key":       {tag: "required ", kind: "string", want: reasonPartLenient},
 		"dash part":                    {tag: "-,min=3", kind: "int", want: reasonPartLenient},
+		"padded key in an alternative": {tag: "eq |0", kind: "string", want: reasonPartLenient},
+		"padded key after the first":   {tag: "min=1| eq=a", kind: "string", want: reasonPartLenient},
 		"padded parameter is compared": {tag: "eq=a ", kind: "string", want: ""},
 		"oneof on bool":                {tag: "oneof=true false", kind: "bool", want: ""},
 		"oneof on float":               {tag: "oneof=1 2", kind: "float64", want: ""},
@@ -1010,14 +1339,6 @@ func anyRule(tag string, typ reflect.Type, pred func(key, param string, target r
 	return false
 }
 
-// spellsAfterDive reports whether rule appears after a dive, where it applies
-// to the elements on both sides.
-func spellsAfterDive(tag, rule string) bool {
-	_, after, found := strings.Cut(tag, "dive,")
-
-	return found && spells(after, rule)
-}
-
 // canonicalInteger reports whether tok is the text go-playground formats an
 // integer value as, which is the only spelling its oneof can match: a
 // decimal with no plus, no leading zero, and no negative zero.
@@ -1070,6 +1391,16 @@ func isUnsignedKind(typ reflect.Type) bool {
 
 func isFloatKind(typ reflect.Type) bool {
 	return typ.Kind() == reflect.Float32 || typ.Kind() == reflect.Float64
+}
+
+// isTimeKind reports whether typ is time.Time or a pointer to it, the one
+// kind go-playground's comparison rules read as a time.
+func isTimeKind(typ reflect.Type) bool {
+	for typ.Kind() == reflect.Pointer {
+		typ = typ.Elem()
+	}
+
+	return typ == reflect.TypeFor[time.Time]()
 }
 
 func isCollectionKind(typ reflect.Type) bool {

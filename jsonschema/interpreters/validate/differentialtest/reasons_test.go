@@ -76,14 +76,41 @@ const (
 	// field the interpreter documents both as no-ops.
 	reasonContentUnmodeled = "the content tags describe an encoded string, not the value go-playground checks"
 	// The constraints inside a keys...endkeys block apply to map keys, which
-	// the interpreter does not model at all.
-	reasonKeysBlockUnmodeled = "map-key constraints inside keys...endkeys are not modeled"
+	// the interpreter does not model at all, so the schema is the looser
+	// side there. The shape rigs never draw a block; the spelling rig
+	// compares whether both sides accept the block's grammar, and compares
+	// values one way, a schema rejection implying a go-playground one.
+	reasonKeysBlockUnmodeled = "map-key constraints inside keys...endkeys are not modeled; the schema is the looser side"
+	// Go-playground reads a comparison rule on a time.Time against the Go
+	// time, to the current time under a bare gt or lt and to a parsed
+	// parameter otherwise, which no schema over the marshaled text can
+	// express, so the interpreter refuses the rule and the rig compares the
+	// refusal alone. Required stays compared, since it reads a nil pointer
+	// there and a null here.
+	reasonTimeRelativeRule = "a comparison rule on a time.Time reads the Go time in go-playground, which no schema can express"
+	// Go-playground runs a value rule on an interface field against the
+	// dynamic value by its kind, so ne=0 there rejects the string "0", the
+	// integer 0, an empty collection, and false alike, which no schema over
+	// an untyped instance can express. The model refuses every value rule
+	// on an opaque shape, and the rig compares the refusal alone. Required
+	// stays compared, since it reads a nil interface there and a null here.
+	reasonOpaqueRuleDynamicKind = "a value rule on an interface reads the dynamic value's kind in go-playground, which no schema over an untyped instance can express"
+	// A coerced float has two serializations of its zero, since encoding/json
+	// writes the sign bit of a negative zero, and the pin side (eq, len,
+	// oneof) names the canonical "0" alone, as the interpreter documents. A
+	// "-0" instance is rejected here and accepted by go-playground, which
+	// compares the two zeros as one, so the rig skips the negative zero probe
+	// under a pin and compares every other value.
+	reasonCoercedFloatNegativeZeroPin = "a pin on a coerced float names the canonical \"0\" alone, so a \"-0\" instance is rejected here and accepted by go-playground"
 	// A cross-field or conditional validator reads a sibling field, which no
 	// single property schema can express.
 	reasonCrossFieldUnmodeled = "a cross-field or conditional validator reads a sibling the schema cannot see"
 	// Within one comma group the pipe separates OR alternatives, of which the
-	// interpreter reads only the first.
-	reasonOrOperatorUnmodeled = "the | OR operator is not modeled; only the first alternative is read"
+	// interpreter reads only the first, so the schema is the stricter side.
+	// The shape rigs never draw one; the spelling rig compares whether both
+	// sides accept the spelling, and compares values one way, a
+	// go-playground rejection implying a schema one.
+	reasonOrOperatorUnmodeled = "the | OR operator is not modeled; only the first alternative is read, so the schema is the stricter side"
 	// An omitempty or omitzero field at its zero is absent from the marshaled
 	// object, where the schema imposes nothing unless the field is required,
 	// while go-playground still validates the Go zero value.
@@ -149,6 +176,8 @@ func rigExclusions() []rigExclusion {
 		{what: "a keys...endkeys block", reason: reasonKeysBlockUnmodeled, rule: "keys"},
 		{what: "the cross-field validators", reason: reasonCrossFieldUnmodeled, rule: "eqfield"},
 		{what: "the | OR operator", reason: reasonOrOperatorUnmodeled, rule: "|"},
+		{what: "a comparison rule on a time.Time", reason: reasonTimeRelativeRule},
+		{what: "a value rule on an interface", reason: reasonOpaqueRuleDynamicKind},
 
 		// The remaining entries are not rules the draw could spell. They record
 		// where the harness itself compares less than the biconditional.
@@ -170,6 +199,10 @@ func rigExclusions() []rigExclusion {
 			reason: reasonRequiredOmitemptyDropped,
 		},
 		{what: "a field encoding/json dropped", reason: reasonOmitemptyDropsField},
+		{
+			what:   "a pin on a coerced float holding a negative zero",
+			reason: reasonCoercedFloatNegativeZeroPin,
+		},
 		{what: "a field whose instance is null and carries no required", reason: reasonNullableValueRule},
 	}
 }

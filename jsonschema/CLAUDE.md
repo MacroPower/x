@@ -183,7 +183,12 @@ is the only one that imports the parent package.
   (`interpreters/validate/differentialtest`): the validate tag agrees with
   go-playground where the marshaled object lets it.
 - `FuzzValidatorTagSpellings` (same module): a fuzzed tag string is usable on
-  both sides or neither, and the verdicts agree where both use it. Every
+  both sides or neither, and the verdicts agree where both use it. The seed
+  corpus is the cross product of `validate.Keys()` over every kind in
+  `spellingKinds`, which spans the coerced numerics, a pointer to a struct,
+  `*time.Time`, `any`, and the nested collections a keys block or a second
+  dive reaches. A `|` spelling and a control tag are compared one way, with
+  the schema the stricter side, and a keys block the other way. Every
   spelling left out is a reasoned entry in `spellingExclusions`, pinned by
   `TestSpellingExclusionsAreReasoned` and `TestSpellingSeedsReachEveryCell`.
 - `FuzzFormat*VsABNF` (format): the four URI and IRI formats agree with

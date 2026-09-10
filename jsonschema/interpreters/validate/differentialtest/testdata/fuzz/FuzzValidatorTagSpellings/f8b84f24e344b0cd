@@ -1,0 +1,4 @@
+go test fuzz v1
+string("len=0")
+byte('m')
+[]byte("\x80")
