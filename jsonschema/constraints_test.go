@@ -988,6 +988,53 @@ func TestConstraintsMultipleOfComposes(t *testing.T) {
 	})
 }
 
+// TestConstraintsForbidCopiesTheCanvasNot pins that a forbid composes onto a
+// copy of the not an interpreter placed on the canvas rather than rewriting
+// that object, the way the reconcile path copies a type not. A schema an
+// interpreter reused across fields used to accumulate every field's
+// forbidden values: the interpreter's own object became {"enum":[5,7]} and
+// the second field below, which forbade nothing, inherited the first field's
+// forbid.
+func TestConstraintsForbidCopiesTheCanvasNot(t *testing.T) {
+	t.Parallel()
+
+	five := any(5)
+	shared := &jsonschema.Schema{Const: &five}
+
+	seed := jsonschema.TagInterpreterFunc(
+		func(_ context.Context, fc jsonschema.FieldContext, _ jsonschema.Tag) error {
+			fc.Canvas.Not = shared
+
+			return nil
+		},
+	)
+
+	forbid := boundInterp(func(c *jsonschema.Constraints) error { return c.Forbid(7) })
+
+	type Payload struct {
+		A int `forbid:"x" json:"a" seed:"x"`
+		B int `json:"b"   seed:"x"`
+	}
+
+	s, err := jsonschema.GenerateFor[Payload](t.Context(),
+		jsonschema.WithTagInterpreter("seed", seed),
+		jsonschema.WithTagInterpreter("forbid", forbid))
+	require.NoError(t, err)
+
+	after, err := json.Marshal(shared)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"const":5}`, string(after), "the interpreter's own schema is untouched")
+
+	gotA, err := json.Marshal(s.Properties["a"])
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"type":"integer","not":{"enum":[5,7]}}`, string(gotA))
+
+	gotB, err := json.Marshal(s.Properties["b"])
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"type":"integer","not":{"const":5}}`, string(gotB),
+		"the field that forbade nothing keeps only the seeded value")
+}
+
 // infinityWriter is a tag interpreter that writes an infinite bound straight
 // onto the canvas, past the facade's finite check.
 type infinityWriter struct{}

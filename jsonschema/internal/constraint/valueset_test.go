@@ -2,6 +2,7 @@ package constraint_test
 
 import (
 	"fmt"
+	"slices"
 	"testing"
 
 	"github.com/google/jsonschema-go/jsonschema"
@@ -175,9 +176,59 @@ func TestValueSetForbidSchema(t *testing.T) {
 		s := renderValues(vs)
 		assert.Nil(t, s.Not, "a seeded not carrying sibling keywords cannot keep the slot")
 		require.Len(t, s.AllOf, 2)
-		assert.Same(t, seeded, s.AllOf[0].Not)
+		assert.Equal(t, seeded, s.AllOf[0].Not, "the seeded not moves under allOf as a copy")
+		assert.NotSame(t, seeded, s.AllOf[0].Not, "the seeded object itself is never written back")
 		assert.Same(t, forbidden, s.AllOf[1].Not)
 	})
+}
+
+// TestValueSetSeedNotLeavesTheSeededObjectUntouched pins that a forbid
+// composes onto a copy of the seeded not rather than rewriting that object,
+// the way ConjoinNot copies a type not. Forbid used to promote the seeded
+// const to an enum and append to a seeded enum in place, so a schema an
+// interpreter placed on several canvases accumulated every field's
+// forbidden values.
+func TestValueSetSeedNotLeavesTheSeededObjectUntouched(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		seeded *jsonschema.Schema
+		forbid []any
+		want   *jsonschema.Schema // the not written back
+	}{
+		"const promotes to an enum on the copy": {
+			seeded: &jsonschema.Schema{Const: new(any(5))},
+			forbid: []any{7},
+			want:   &jsonschema.Schema{Enum: []any{5, 7}},
+		},
+		"enum grows on the copy": {
+			seeded: &jsonschema.Schema{Enum: []any{5, 6}},
+			forbid: []any{7, 8},
+			want:   &jsonschema.Schema{Enum: []any{5, 6, 7, 8}},
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			before := *tc.seeded
+			before.Enum = slices.Clone(tc.seeded.Enum)
+
+			var vs constraint.ValueSet
+
+			vs.SeedNot(tc.seeded)
+
+			for _, v := range tc.forbid {
+				vs.Forbid(v)
+			}
+
+			s := renderValues(vs)
+			assert.Equal(t, tc.want, s.Not)
+			assert.Equal(t, &before, tc.seeded, "the seeded object is unchanged")
+			assert.NotSame(t, tc.seeded, s.Not)
+		})
+	}
 }
 
 func TestValueSetSeedNotWriteForbiddenPreservesOtherAllOf(t *testing.T) {

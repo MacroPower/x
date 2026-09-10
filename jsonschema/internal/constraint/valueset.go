@@ -88,7 +88,23 @@ func forbidsValuesOnly(s *jsonschema.Schema) bool {
 // [ValueSet.ForbidSchema] composes with it. A caller that accumulates forbidden
 // values onto a schema across separate calls seeds from the schema's current
 // Not, forbids, then writes back with [ValueSet.WriteForbidden].
-func (vs *ValueSet) SeedNot(not *jsonschema.Schema) { vs.not = not }
+//
+// The set works on a copy, with the enum slice cloned, so the object seeded
+// never changes: a forbid that promotes its const to an enum or appends to
+// its enum lands on the copy [ValueSet.WriteForbidden] writes back. A hook
+// that placed one schema on several canvases, or keeps the object it wrote,
+// sees no other field's forbidden values on it. A nil not seeds nothing.
+func (vs *ValueSet) SeedNot(not *jsonschema.Schema) {
+	if not == nil {
+		vs.not = nil
+
+		return
+	}
+
+	seed := *not
+	seed.Enum = slices.Clone(seed.Enum)
+	vs.not = &seed
+}
 
 // WriteForbidden writes the accumulated forbidden state onto s: it sets Not to
 // the single accumulated not (which an escalation to allOf may have cleared) and
@@ -109,17 +125,14 @@ func (vs ValueSet) WriteForbidden(s *jsonschema.Schema) {
 // under allOf beside the type's. A nil type not seeds nothing, so a bare
 // forbid takes the slot and a subschema still moves under allOf, the
 // placement [ValueSet.ForbidSchema] gives every forbidden subschema. The type
-// not is copied before mutation, so the pristine payload it came from never
-// changes. It returns the composed not (nil when the escalation moved
-// everything under allOf) and the allOf conjuncts to append.
+// not is seeded through [ValueSet.SeedNot], which works on a copy, so the
+// pristine payload it came from never changes. It returns the composed not
+// (nil when the escalation moved everything under allOf) and the allOf
+// conjuncts to append.
 func ConjoinNot(typeNot, authored *jsonschema.Schema) (*jsonschema.Schema, []*jsonschema.Schema) {
 	var vs ValueSet
 
-	if typeNot != nil {
-		seed := *typeNot
-		seed.Enum = slices.Clone(seed.Enum)
-		vs.not = &seed
-	}
+	vs.SeedNot(typeNot)
 
 	switch {
 	case authored.Const != nil && constrainsConstOnly(authored):
