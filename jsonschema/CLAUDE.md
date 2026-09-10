@@ -188,6 +188,9 @@ is the only one that imports the parent package.
   the shape carries no constraint. A refusal must be one a hook, a dialect, a
   conflict, or v2 reports. `FuzzFillNeverPanics` (fuzzfill) fills the same
   draw under every option set.
+- `FuzzIntervalAdmitsVsBigRat`, `FuzzComposeMultipleOfVsBigRat`,
+  `FuzzParseNumericBoundVsStrconv`, `FuzzParseUnsignedLiteralVsStrconv`
+  (constraint): the numeric algebra agrees with `math/big` and `strconv`.
 - `FuzzFieldSetKeys` (fieldset): the resolved names are the keys v2 writes.
 - `FuzzRefEnginesAgree`, `TestSuiteInlineAgrees`,
   `TestRefEnginesAgreeOnPastFixes`: `Compile`, `Inline`, and the substitute

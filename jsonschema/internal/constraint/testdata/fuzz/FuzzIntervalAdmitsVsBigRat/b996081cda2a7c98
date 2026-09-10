@@ -1,0 +1,7 @@
+go test fuzz v1
+float64(-94)
+float64(0)
+float64(0)
+float64(1e+308)
+byte('\b')
+string("1e1001000")
