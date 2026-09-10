@@ -2276,17 +2276,30 @@ func TestValidateInterpreter_LengthConstraintOnByteSlice(t *testing.T) {
 func TestValidateInterpreter_StringKeywordOnByteSlice(t *testing.T) {
 	t.Parallel()
 
-	// A []byte field's schema is a base64 string, so a string-only content tag
-	// applies even though the Go kind is not string.
+	// A []byte field's schema is a base64 string, and json is the one string
+	// validator go-playground reads from the raw bytes as contentMediaType
+	// reads the decoded content, so it applies even though the Go kind is
+	// not string.
 	type Doc struct {
-		Blob []byte `json:"blob" validate:"base64"`
+		Blob []byte `json:"blob" validate:"json"`
 	}
 
 	s, err := jsonschema.GenerateFor[Doc](t.Context(),
 		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 	)
 	require.NoError(t, err)
-	assert.Equal(t, "base64", s.Properties["blob"].ContentEncoding)
+	assert.Equal(t, "application/json", s.Properties["blob"].ContentMediaType)
+
+	// The other string validators read reflect's description of the slice
+	// in go-playground, so base64 on a []byte is refused.
+	type Bytes struct {
+		Blob []byte `json:"blob" validate:"base64"`
+	}
+
+	_, err = jsonschema.GenerateFor[Bytes](t.Context(),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
+	)
+	require.ErrorIs(t, err, validate.ErrStringRuleKind)
 
 	// On a non-string kind whose schema is not a string, the same tag is
 	// rejected rather than silently stamped onto an integer schema.
@@ -3752,4 +3765,19 @@ func TestValidateInterpreter_ParameterKeepsWhitespace(t *testing.T) {
 	require.Error(t, v.ValidateJSON(t.Context(),
 		[]byte(`{"trailing":"a","space":" ","leading":" a","key":"abc","oneof":"a"}`)),
 		`go-playground rejects "a" against eq=a followed by a space`)
+}
+
+// taggedField rebuilds the single-field struct type of value with its field
+// carrying the json name "v" and the given validate tag, so a table can spell
+// one rule per row on one Go type.
+func taggedField(tb testing.TB, value any, tag string) reflect.Type {
+	tb.Helper()
+
+	typ := reflect.TypeOf(value)
+	require.Equal(tb, 1, typ.NumField(), "taggedField takes a one-field struct")
+
+	field := typ.Field(0)
+	field.Tag = reflect.StructTag(`json:"v" validate:` + strconv.Quote(tag))
+
+	return reflect.StructOf([]reflect.StructField{field})
 }

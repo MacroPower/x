@@ -173,7 +173,14 @@
 // validators reject every one, whatever the text says. A keyword over that
 // text would agree with neither verdict. The refusal keys on the Go kind, so
 // a quoted [encoding/json.Number], a string kind whose text go-playground
-// does read, keeps its string validators.
+// does read, keeps its string validators. A non-string kind that marshals
+// itself as text, such as [time.Time], takes the same refusal, since
+// go-playground runs the validators over reflect's description of the value
+// and panics on json. So does a []byte field for the format and pattern tags
+// and for base64, since go-playground runs them over reflect's description of
+// the slice, which no base64 text equals, and panics on uri and url. The json
+// tag stays on a []byte: it reads the raw bytes there, as contentMediaType
+// reads the decoded content.
 //
 // A json:",string" string field double-encodes (the value abc marshals as the
 // JSON string "\"abc\""), so its scalar rules (eq, ne, oneof, and required's

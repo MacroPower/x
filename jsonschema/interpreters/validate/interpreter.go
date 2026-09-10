@@ -67,16 +67,20 @@ var (
 	ErrOneOfKind = errors.New("go-playground loads oneof only on a string or integer kind")
 
 	// ErrStringRuleKind reports a format, pattern, or content validator on a
-	// numeric or bool kind whose instance is a string: a json:",string" field
-	// or a type that marshals itself as text. Go-playground runs every string
-	// validator against the Go value by kind, never against the text the
-	// field marshals, so number and numeric accept every such field and the
-	// rest reject every one. A keyword over the marshaled text would agree
-	// with neither, so the interpreter refuses the tag. The refusal keys on
-	// the Go kind, so a quoted [encoding/json.Number], a string kind, keeps
-	// its string validators.
+	// field whose instance is a string but whose Go kind is not: a
+	// json:",string" numeric or bool, a non-string type that marshals itself
+	// as text such as [time.Time], or a byte slice, whose instance is base64
+	// text. Go-playground runs every string validator against the Go value
+	// by kind, never against the text the field marshals, so number and
+	// numeric accept every numeric field, the regex validators reject every
+	// such field, and uri, url, and json panic on a kind they do not switch
+	// on. A keyword over the marshaled text would agree with neither, so the
+	// interpreter refuses the tag. The one exception is json on a byte slice,
+	// which go-playground reads from the raw bytes as contentMediaType reads
+	// the decoded content. The refusal keys on the Go kind, so a quoted
+	// [encoding/json.Number], a string kind, keeps its string validators.
 	ErrStringRuleKind = errors.New(
-		"go-playground runs a string validator on a numeric or bool kind against the Go value, not its text",
+		"go-playground runs a string validator on a non-string kind against the Go value, not its text",
 	)
 
 	// The oneOfSplitRegexp pattern matches one oneof token, mirroring
@@ -366,7 +370,7 @@ func applyValidator(
 	// kind check lives here with the other go-playground kind rules. The
 	// native number and bool forms need no check: the model rejects a
 	// string keyword there for want of a string.
-	if bound.Op.IsStringKeyword() && isCoercedForm(shape.Form) && readsGoKindAsText(shape.Kind) {
+	if bound.Op.IsStringKeyword() && readsGoValueNotText(shape, bound.Op) {
 		return fmt.Errorf("validate tag: %s: %w: %s", key, ErrStringRuleKind, shape.Elem)
 	}
 
@@ -408,6 +412,26 @@ func isCoercedForm(form tagmodel.Form) bool {
 // equals.
 func readsGoKindAsText(kind reflect.Kind) bool {
 	return numkind.IsInteger(kind) || numkind.IsFloat(kind) || kind == reflect.Bool
+}
+
+// readsGoValueNotText reports whether go-playground judges the string
+// validator op on a field of this shape against the Go value rather than the
+// text the field marshals: a coerced numeric or bool kind, a non-string kind
+// that marshals itself as text, or a byte slice, whose base64 text no
+// validator there reads. The json validator is the one exception on a byte
+// slice, since go-playground reads the raw bytes there as contentMediaType
+// reads the decoded content. A string kind that marshals itself as text
+// keeps its validators: go-playground reads the Go string, which is the
+// text in every case the rig has found.
+func readsGoValueNotText(shape tagmodel.Shape, op tagmodel.Op) bool {
+	switch shape.Form {
+	case tagmodel.FormByteString:
+		return op != tagmodel.OpContentMediaType
+	case tagmodel.FormTextString:
+		return shape.Kind != reflect.String
+	default:
+		return isCoercedForm(shape.Form) && readsGoKindAsText(shape.Kind)
+	}
 }
 
 // checkOneOf rejects a oneof go-playground could never run or match on the

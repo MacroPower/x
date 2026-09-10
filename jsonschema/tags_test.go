@@ -4019,13 +4019,25 @@ func TestValidateContentTagsIgnoredOnRawMessage(t *testing.T) {
 // control case for the first-wins gate below.
 type refFormatName string
 
+// refFormatStamp is a named string type whose provider declares the date-time
+// format, the case the first-wins gate below runs on. It is a string kind,
+// since the validate dialect refuses a string validator on a non-string kind
+// such as [time.Time], and a provider, so generation extracts it to $defs.
+type refFormatStamp string
+
+func (refFormatStamp) JSONSchema(context.Context, jsonschema.TypeContext) (jsonschema.TypeSchema, error) {
+	return jsonschema.TypeSchema{
+		Value: &jsonschema.Schema{Type: "string", Format: "date-time"},
+	}, nil
+}
+
 // TestInterpreterFormatDefersToRefDeclared pins the first-wins contract through
 // a $defs-extracted type: an interpreter's inferred format never overrides --
 // or conjoins with -- one the referenced definition declares outright. Before
-// the ref read-through, validate:"email" on a time.Time field landed format:
-// "email" as a $ref sibling beside the definition's date-time, and the two
-// asserted conjunctively, so the field rejected the very RFC 3339 text it
-// marshals.
+// the ref read-through, validate:"email" on a field of a type declaring
+// date-time landed format: "email" as a $ref sibling beside the definition's
+// date-time, and the two asserted conjunctively, so the field rejected the
+// very RFC 3339 text it marshals.
 func TestInterpreterFormatDefersToRefDeclared(t *testing.T) {
 	t.Parallel()
 
@@ -4033,7 +4045,7 @@ func TestInterpreterFormatDefersToRefDeclared(t *testing.T) {
 		t.Parallel()
 
 		type T struct {
-			V time.Time `json:"v" validate:"email"`
+			V refFormatStamp `json:"v" validate:"email"`
 		}
 
 		s, err := jsonschema.GenerateFor[T](t.Context(),
