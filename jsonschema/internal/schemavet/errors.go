@@ -3,6 +3,7 @@ package schemavet
 import (
 	"errors"
 
+	"go.jacobcolvin.com/x/jsonschema/internal/format"
 	"go.jacobcolvin.com/x/jsonschema/internal/typename"
 )
 
@@ -24,6 +25,12 @@ var (
 
 	// ErrNegativeBound reports a negative value on a length or count keyword.
 	ErrNegativeBound = errors.New("negative bound")
+
+	// ErrInvalidPattern reports a pattern or a patternProperties key that is
+	// not an ECMA-262 regular expression. It is [format.ErrInvalidRegex], so
+	// a tag reading such a pattern and a document carrying one report the
+	// one sentinel.
+	ErrInvalidPattern = format.ErrInvalidRegex
 
 	// ErrNonPositiveMultipleOf reports a multipleOf value not strictly
 	// greater than zero.

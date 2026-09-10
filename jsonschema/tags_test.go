@@ -4088,6 +4088,28 @@ func TestInterpreterFormatDefersToRefDeclared(t *testing.T) {
 	})
 }
 
+// TestTagPatternMustBeRegex pins that a pattern= value outside the ECMA-262
+// grammar is refused at generation with the sentinel Compile reports, so a
+// generated schema never carries a pattern Compile would refuse.
+func TestTagPatternMustBeRegex(t *testing.T) {
+	t.Parallel()
+
+	type Bad struct {
+		V string `json:"v" jsonschema:"pattern=["`
+	}
+
+	_, err := jsonschema.GenerateFor[Bad](t.Context())
+	require.ErrorIs(t, err, jsonschema.ErrInvalidPattern)
+
+	type Good struct {
+		V string `json:"v" jsonschema:"pattern=^(?=a)\\1"`
+	}
+
+	s, err := jsonschema.GenerateFor[Good](t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, `^(?=a)\1`, s.Properties["v"].Pattern)
+}
+
 // TestTagUniqueItemsOnMapIsRejected pins that the jsonschema tag's explicit
 // uniqueItems on a map field is an error rather than a silent drop. The shared
 // model's cell is an ignore -- distinct map values are a real go-playground

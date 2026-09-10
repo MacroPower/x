@@ -101,6 +101,16 @@ var (
 	// metaschema) keeps the [Draft2020] default as before.
 	ErrUnsupportedDraft = errors.New("unsupported $schema dialect")
 
+	// ErrInvalidPattern is returned by [Compile] and [Inline] when a pattern
+	// or a patternProperties key is not an ECMA-262 regular expression, the
+	// grammar every draft fixes for both, and by [Generate] when a jsonschema
+	// tag's pattern= value is not one. Such a pattern is unusable in every
+	// engine, so it is refused up front rather than failing every instance
+	// it would judge. A pattern the grammar admits and Go's RE2 cannot
+	// compile (a backreference, a lookaround) is not refused: it is a legal
+	// schema, and validation fails closed on it.
+	ErrInvalidPattern = schemavet.ErrInvalidPattern
+
 	// ErrNegativeBound is returned by [Compile] and [Inline] when a length or
 	// count keyword (minLength, maxLength, minItems, maxItems, minProperties,
 	// maxProperties, minContains, maxContains) carries a negative value, which

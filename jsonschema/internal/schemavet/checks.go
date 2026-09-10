@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strconv"
 
+	"go.jacobcolvin.com/x/jsonschema/internal/format"
 	"go.jacobcolvin.com/x/jsonschema/internal/jsonptr"
 	"go.jacobcolvin.com/x/jsonschema/internal/keyword"
 	"go.jacobcolvin.com/x/jsonschema/internal/keywordmeta"
@@ -465,6 +466,44 @@ func init() {
 			declared, derived,
 		))
 	}
+}
+
+// checkPatterns rejects a pattern or a patternProperties key that is not an
+// ECMA-262 regular expression, the grammar every draft fixes for both. A
+// pattern outside the grammar is unusable in every engine, so it is refused
+// here rather than failing every instance at validation time. A pattern the
+// grammar admits and Go's RE2 cannot compile is not refused: the pattern is
+// a legal schema, and validation fails closed on it. The traversal mirrors
+// [checkBoundDomains].
+func checkPatterns(schema *Schema, schemaPath string, visited map[*Schema]bool) error {
+	if schema == nil || visited[schema] {
+		return nil
+	}
+
+	visited[schema] = true
+
+	if schema.Pattern != "" {
+		err := format.CheckRegex(schema.Pattern)
+		if err != nil {
+			return fmt.Errorf("%w: %q at %s/%s", err, schema.Pattern, schemaPath, keyword.Pattern)
+		}
+	}
+
+	for _, pattern := range slices.Sorted(maps.Keys(schema.PatternProperties)) {
+		err := format.CheckRegex(pattern)
+		if err != nil {
+			return fmt.Errorf("%w: %q at %s/%s", err, pattern, schemaPath, keyword.PatternProperties)
+		}
+	}
+
+	for _, entry := range Entries(schema) {
+		err := checkPatterns(entry.Schema, schemaPath+string(entry.Pointer), visited)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // checkBoundDomains rejects a keyword value outside the domain the spec fixes

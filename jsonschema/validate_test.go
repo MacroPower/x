@@ -7155,18 +7155,20 @@ func TestCompileNumericAndPatternConcurrent(t *testing.T) {
 	wg.Wait()
 }
 
-// TestCompileInvalidPatternFailsClosed pins that an uncompilable pattern
-// never produces an accept-all validator. Compile records each pattern's
-// regex-compile outcome per node and defers the failure to validation time:
-// Compile succeeds (a deliberate divergence from upstream, which rejects the
-// whole schema), and the cached fail-closed branch in validateString rejects
-// every string instance the pattern would have judged (see
-// TestInvalidPatternFailsClosed for the one-shot path).
+// TestCompileInvalidPatternFailsClosed pins that a pattern the ECMA-262
+// grammar admits and Go's RE2 cannot compile never produces an accept-all
+// validator. Compile records each pattern's regex-compile outcome per node
+// and defers the failure to validation time: Compile succeeds (a deliberate
+// divergence from upstream, which rejects the whole schema), and the cached
+// fail-closed branch in validateString rejects every string instance the
+// pattern would have judged (see TestInvalidPatternFailsClosed for the
+// one-shot path). A pattern outside the grammar is a compile error instead,
+// pinned by TestCompileRejectsInvalidPattern.
 func TestCompileInvalidPatternFailsClosed(t *testing.T) {
 	t.Parallel()
 
-	v, err := jsonschema.Compile(t.Context(), &jsonschema.Schema{Type: "string", Pattern: "[invalid"})
-	require.NoError(t, err, "an uncompilable pattern defers to validation time")
+	v, err := jsonschema.Compile(t.Context(), &jsonschema.Schema{Type: "string", Pattern: "(?=x)"})
+	require.NoError(t, err, "a pattern RE2 cannot compile defers to validation time")
 
 	require.Error(t, v.Validate(t.Context(), "any string"),
 		"an uncompilable pattern must fail closed, not yield an accept-all validator")

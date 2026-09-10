@@ -1024,6 +1024,58 @@ func TestCompileMetaschemaResolverContextNormalized(t *testing.T) {
 // domain vet report the underflowed zero as an authored one. An authored zero
 // and a negative underflowing literal stay rejected with
 // [jsonschema.ErrNonPositiveMultipleOf].
+// TestCompileRejectsInvalidPattern pins that a pattern or a patternProperties
+// key outside the ECMA-262 grammar is a compile error, since no engine could
+// run it, while a pattern the grammar admits and RE2 cannot compile still
+// compiles and fails closed at validation time. Compile used to accept "["
+// and fail every string it judged.
+func TestCompileRejectsInvalidPattern(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		schema string
+		err    error
+	}{
+		"unterminated class": {
+			schema: `{"pattern":"["}`,
+			err:    jsonschema.ErrInvalidPattern,
+		},
+		"unbalanced group in patternProperties": {
+			schema: `{"patternProperties":{"(":{}}}`,
+			err:    jsonschema.ErrInvalidPattern,
+		},
+		"nested under properties": {
+			schema: `{"properties":{"a":{"pattern":"a{2,1}"}}}`,
+			err:    jsonschema.ErrInvalidPattern,
+		},
+		"backreference compiles": {
+			schema: `{"pattern":"(a)\\1"}`,
+		},
+		"lookahead compiles": {
+			schema: `{"pattern":"^(?=a)"}`,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var s jsonschema.Schema
+
+			require.NoError(t, json.Unmarshal([]byte(tc.schema), &s))
+
+			_, err := jsonschema.Compile(t.Context(), &s)
+			if tc.err != nil {
+				require.ErrorIs(t, err, tc.err)
+
+				return
+			}
+
+			require.NoError(t, err)
+		})
+	}
+}
+
 func TestCompileMultipleOfUnderflow(t *testing.T) {
 	t.Parallel()
 

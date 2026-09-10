@@ -1395,9 +1395,12 @@
 // cannot locate, and a validation run reports it instead (see Remote
 // References below).
 //
-// An uncompilable pattern or patternProperties regex is deliberately not a
-// compile error. It fails every string instance, and for patternProperties
-// every object with a member, it would judge, at validation time.
+// A pattern or patternProperties key that is not an ECMA-262 regular
+// expression is a compile error ([ErrInvalidPattern]), since no engine could
+// run it. A pattern the grammar admits and Go's RE2 cannot compile (a
+// backreference, a lookaround) is deliberately not: it fails every string
+// instance, and for patternProperties every object with a member, it would
+// judge, at validation time.
 //
 // Instance numbers compare exactly. A validation run decodes them as
 // [encoding/json.Number] and compares them as [math/big.Rat], with one bound

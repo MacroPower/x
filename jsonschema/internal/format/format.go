@@ -28,6 +28,13 @@ func Validators() map[string]func(string) error {
 }
 
 var (
+	// ErrInvalidRegex reports a pattern that is not an ECMA-262 regular
+	// expression, the grammar the pattern and patternProperties keywords
+	// take. [CheckRegex] wraps every refusal of the regex format with it, so
+	// a caller vetting a keyword and a caller reading a tag report one
+	// sentinel.
+	ErrInvalidRegex = errors.New("pattern is not an ECMA-262 regular expression")
+
 	// Built-in format validators keyed by JSON Schema format name.
 	builtinFormats = map[string]func(string) error{
 		"date-time":             validateDateTime,
@@ -1189,6 +1196,20 @@ const (
 	// A quantifier, which a single lazy '?' may follow.
 	regexQuantifier
 )
+
+// CheckRegex reports whether s is an ECMA-262 regular expression, the
+// structural check the regex format runs, wrapping a refusal in
+// [ErrInvalidRegex]. It does not compile the pattern: a pattern the grammar
+// admits and Go's RE2 cannot compile is judged at validation time, where it
+// fails closed.
+func CheckRegex(s string) error {
+	err := validateRegex(s)
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalidRegex, err)
+	}
+
+	return nil
+}
 
 // validateRegex checks that s is a valid ECMA 262 regular expression. The
 // "regex" format is defined in terms of ECMA 262, which is a superset of Go's

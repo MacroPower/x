@@ -10,6 +10,7 @@ import (
 	"github.com/google/jsonschema-go/jsonschema"
 
 	"go.jacobcolvin.com/x/jsonschema/internal/constraint"
+	"go.jacobcolvin.com/x/jsonschema/internal/format"
 	"go.jacobcolvin.com/x/jsonschema/internal/numkind"
 	"go.jacobcolvin.com/x/jsonschema/internal/typename"
 )
@@ -430,6 +431,16 @@ func applyStringKeyword(t Target, r Rule, pol Policy) error {
 
 	if pol.Keywords == KeywordFirstWins && (*slot != "" || typeValue != "") {
 		return nil
+	}
+
+	// A pattern outside the ECMA-262 grammar is unusable in every engine
+	// and Compile refuses the schema carrying it, so the tag refuses it
+	// first, with the same sentinel.
+	if r.Op == OpPattern {
+		err := format.CheckRegex(r.Params.One())
+		if err != nil {
+			return err //nolint:wrapcheck // The sentinel is the shared one Compile reports.
+		}
 	}
 
 	*slot = r.Params.One()
