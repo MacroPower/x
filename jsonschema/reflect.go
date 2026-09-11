@@ -1682,6 +1682,17 @@ func (g *run) hookNodes(n *node, prefix string, seen map[*defEntry]bool) error {
 		}
 	}
 
+	// A type= pair replaced this node's subtree with the named type's and
+	// kept the reflected occurrence as a value copy. The fields inside the
+	// copy keep their own hooks: a malformed tag or a failing interpreter
+	// there aborts generation whether or not the pair kept the subtree.
+	if n.overrode != nil {
+		err := g.hookNodes(n.overrode, prefix, seen)
+		if err != nil {
+			return err
+		}
+	}
+
 	if n.kind == kindObject {
 		err := g.hookStruct(n, prefix)
 		if err != nil {

@@ -1401,10 +1401,49 @@ func TestTagTypeOverrideReplacedSubtreeStillHooked(t *testing.T) {
 		In overriddenInner `json:"in" jsonschema:"type=string"`
 	}
 
-	_, err := jsonschema.GenerateFor[outer](t.Context())
-	require.Error(t, err)
-	require.ErrorContains(t, err, `overriddenInner field "x"`)
-	require.ErrorContains(t, err, `key "minimum"`)
+	type anonymous struct {
+		In struct {
+			X int `json:"x" jsonschema:"minimum=abc"`
+		} `json:"in" jsonschema:"type=string"`
+	}
+
+	// The extracted case hooks the body through the definitions loop; the
+	// inline cases reach the replaced subtree only through the node the
+	// pair kept, which the hook walk used to skip.
+	cases := map[string]struct {
+		generate func() (*jsonschema.Schema, error)
+		field    string
+	}{
+		"extracted": {
+			generate: func() (*jsonschema.Schema, error) {
+				return jsonschema.GenerateFor[outer](t.Context())
+			},
+			field: `overriddenInner field "x"`,
+		},
+		"named inline": {
+			generate: func() (*jsonschema.Schema, error) {
+				return jsonschema.GenerateFor[outer](t.Context(), jsonschema.WithDefinitions(false))
+			},
+			field: `field "x"`,
+		},
+		"anonymous": {
+			generate: func() (*jsonschema.Schema, error) {
+				return jsonschema.GenerateFor[anonymous](t.Context())
+			},
+			field: `field "x"`,
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := tc.generate()
+			require.Error(t, err)
+			require.ErrorContains(t, err, tc.field)
+			require.ErrorContains(t, err, `key "minimum"`)
+		})
+	}
 }
 
 // TestTagEnumOnSequenceFields pins that an enum tag on a slice or array field
