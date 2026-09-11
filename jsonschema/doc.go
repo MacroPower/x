@@ -961,15 +961,17 @@
 //     concrete type in place of the one a pointer would make nil-able.
 //   - An override that keeps the field's container kind keeps its children:
 //     type=array on a slice keeps the element schema, and type=object on a
-//     map or an inline struct keeps the value schema or the property schemas.
-//     Each keeps its own null admission, tag, description, and interpreter
-//     output, so a pointer property under a type=object override still admits
-//     null. A slice, map, or provider-declared type extracted to $defs
-//     keeps them too: the override applies to a copy of the definition, so
-//     the occurrence renders inline with the definition's element schema
-//     and keywords, as the inline type would, while every other occurrence
-//     keeps the reference. A reference to a struct definition is the one
-//     exception; type=object on it is a leaf object.
+//     map or an anonymous struct keeps the value schema or the property
+//     schemas. Each keeps its own null admission, tag, description, and
+//     interpreter output, so a pointer property under a type=object override
+//     still admits null. A slice, map, or provider-declared type extracted
+//     to $defs keeps them too: the override applies to a copy of the
+//     definition, so the occurrence renders inline with the definition's
+//     element schema and keywords, as the inline type would, while every
+//     other occurrence keeps the reference. A named struct is the one
+//     exception; type=object on it is a leaf object, whether the struct is
+//     extracted to $defs or inlined by [WithDefinitions], so the setting
+//     changes nothing the override means.
 //   - When the new type is not numeric, the override also drops the numeric
 //     bounds derived from the Go kind. A constraint keyword the tag sets
 //     explicitly (a numeric bound such as minimum or multipleOf, or a string,

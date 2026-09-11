@@ -821,16 +821,27 @@ func (n *node) view(draft Draft) *Schema {
 //
 // Children stay only where the new type keeps the container kind: an array
 // keeps a list's element node or a tuple's prefix nodes, an object keeps a
-// map's value node or a struct's properties, embeds, and fallback value node.
-// Each kept node still carries its own null decision, canvas, and hooks. Any
-// other pairing is a leaf. A reference reaching here names a struct
-// definition or a verbatim body; [run.inlineTaggedRef] resolved every other
-// reference to a copy of its body before the pair applies.
+// map's value node or an anonymous struct's properties, embeds, and fallback
+// value node. Each kept node still carries its own null decision, canvas,
+// and hooks. Any other pairing is a leaf, a named struct under type=object
+// included, whether it reflected inline or as a reference to its
+// definition, so the definitions setting leaves the override's meaning
+// alone. A reference reaching here names a struct definition or a verbatim
+// body; [run.inlineTaggedRef] resolved every other reference to a copy of
+// its body before the pair applies.
 func (n *node) overrideType(typeName string) {
 	if n.overrode == nil {
 		replaced := *n
 		n.overrode = &replaced
 		n.payload = schemaclone.Clone(n.payload)
+	}
+
+	// A named struct reflected inline is the definition its reference would
+	// name under WithDefinitions, so the pair reads it as it reads the
+	// reference: a leaf carrying the new type alone, with none of the
+	// struct's own keywords.
+	if n.kind == kindObject && n.typ != nil && n.typ.Name() != "" {
+		n.payload = &Schema{}
 	}
 
 	tagparse.ApplyTypeOverride(n.payload, typeName)
@@ -845,7 +856,7 @@ func (n *node) overrideType(typeName string) {
 	case n.kind == kindList && typeName == typename.Array,
 		n.kind == kindTuple && typeName == typename.Array,
 		n.kind == kindMap && typeName == typename.Object,
-		n.kind == kindObject && typeName == typename.Object:
+		n.kind == kindObject && typeName == typename.Object && (n.typ == nil || n.typ.Name() == ""):
 		return
 	}
 

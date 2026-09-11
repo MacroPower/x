@@ -4432,6 +4432,60 @@ func TestTagTypeOverrideOnExtractedTypeKeepsChildNodes(t *testing.T) {
 		"the element schema constrains the overridden field")
 }
 
+// TestTagTypeObjectOnNamedStructIsALeafInlined pins that type=object on a
+// named struct is a leaf object under WithDefinitions(false) as it is on the
+// struct's reference under WithDefinitions(true), so the two settings accept
+// the same instances, while an anonymous struct keeps its properties under
+// both. The inlined named struct used to keep its properties, so an instance
+// the extracted form accepted, the inlined form rejected.
+func TestTagTypeObjectOnNamedStructIsALeafInlined(t *testing.T) {
+	t.Parallel()
+
+	type named struct {
+		N int `json:"n" jsonschema:"minimum=1"`
+	}
+
+	type doc struct {
+		Named   *named `json:"named" jsonschema:"type=object,minProperties=1"`
+		Unnamed struct {
+			N int `json:"n" jsonschema:"minimum=1"`
+		} `json:"unnamed" jsonschema:"type=object,minProperties=1"`
+	}
+
+	tests := map[string]struct {
+		definitions bool
+	}{
+		"extracted": {definitions: true},
+		"inlined":   {definitions: false},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			s, err := jsonschema.GenerateFor[doc](t.Context(), jsonschema.WithDefinitions(tc.definitions))
+			require.NoError(t, err)
+
+			got, err := json.Marshal(s.Properties["named"])
+			require.NoError(t, err)
+			assert.JSONEq(t, `{"type":"object","minProperties":1}`, string(got))
+
+			got, err = json.Marshal(s.Properties["unnamed"])
+			require.NoError(t, err)
+			assert.JSONEq(t, `{"type":"object","minProperties":1,"properties":{"n":{"type":"integer","minimum":1}},`+
+				`"required":["n"],"additionalProperties":false}`, string(got))
+
+			v, err := jsonschema.Compile(t.Context(), s)
+			require.NoError(t, err)
+
+			require.NoError(t, v.ValidateJSON(t.Context(), []byte(`{"named":{"n":0},"unnamed":{"n":1}}`)),
+				"the named struct's own bound no longer applies under the leaf")
+			require.Error(t, v.ValidateJSON(t.Context(), []byte(`{"named":{"n":1},"unnamed":{"n":0}}`)),
+				"the anonymous struct's property bound still applies")
+		})
+	}
+}
+
 // TestInterpreterNullLiteralOnAnOverriddenField pins that the null-literal
 // scan still reaches a field a type= pair rebuilt. The rebuilt node used to
 // carry no field origin, which the scan reads as "not a field", so an
