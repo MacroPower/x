@@ -110,18 +110,14 @@ func (g *run) renderBase(n *node) *Schema {
 // renderRef emits a $ref schema from a copy of payload, writing the def's
 // final name from the node link; the payload already carries it since
 // [run.finalizeRefs], so the write restates the link rather than resolving a
-// string. Under Draft-07 a $ref beside any sibling keyword moves into allOf,
-// since Draft-07 readers ignore keywords next to $ref; under 2020-12 the
-// siblings stay alongside.
+// string. Under Draft-07 a $ref beside any sibling keyword moves into allOf
+// ([run.wrapRefForDraft7]), since Draft-07 readers ignore keywords next to
+// $ref; under 2020-12 the siblings stay alongside.
 func (g *run) renderRef(payload *Schema, def *defEntry) *Schema {
 	s := schemaclone.Clone(payload)
 	s.Ref = g.profile.refPrefix() + def.name
 
-	if !g.profile.honorRefSiblings && schemashape.HasRefSiblings(s) {
-		inner := &Schema{Ref: s.Ref}
-		s.Ref = ""
-		s.AllOf = append(s.AllOf, inner)
-	}
+	g.wrapRefForDraft7(s)
 
 	return s
 }
