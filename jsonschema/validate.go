@@ -1550,8 +1550,9 @@ func MustCompile(schema *Schema, opts ...ValidateOption) *Validator {
 // An empty string under $ref, type, $anchor, or $dynamicAnchor, which
 // unmarshaling into a [Schema] directly reads as the absent keyword, returns
 // an error wrapping [ErrEmptyRef], [ErrInvalidType], or [ErrInvalidAnchor],
-// and a null under a keyword holding one sub-schema (items, not, contains),
-// which unmarshaling reads as the false schema, one wrapping
+// and a null under a keyword holding one sub-schema (items, not, contains)
+// or a null member of Draft-07 dependencies, which unmarshaling reads as
+// the false schema, one wrapping
 // [ErrNilSubschema], and a null element of a string list (required, a
 // dependentRequired or dependencies member), which unmarshaling reads as
 // the empty string, one wrapping [ErrKeywordType]. A null under any other
@@ -1676,7 +1677,9 @@ func refuseEmptyKeywords(s *Schema, doc map[string]any) error {
 // object holds under required, or under a member of dependentRequired or
 // Draft-07 dependencies, which the upstream decode reads as the empty
 // string. A member of dependencies holding a schema is a sub-schema the
-// vet judges, not a string list.
+// vet judges, not a string list, and a null member of dependencies reads
+// as the false schema, so it is refused as a null sub-schema is; a null
+// member of dependentRequired reads as a list requiring nothing.
 func refuseNullStrings(src map[string]any, pointer string) error {
 	if list, ok := src[KeywordRequired].([]any); ok && slices.Contains(list, nil) {
 		return fmt.Errorf("%w: null in %s/%s", ErrKeywordType, pointer, KeywordRequired)
@@ -1689,6 +1692,10 @@ func refuseNullStrings(src map[string]any, pointer string) error {
 		}
 
 		for _, name := range slices.Sorted(maps.Keys(members)) {
+			if members[name] == nil && key == KeywordDependencies {
+				return fmt.Errorf("%w at %s/%s/%s", ErrNilSubschema, pointer, key, jsonptr.Escape(name))
+			}
+
 			if list, ok := members[name].([]any); ok && slices.Contains(list, nil) {
 				return fmt.Errorf("%w: null in %s/%s/%s", ErrKeywordType, pointer, key, jsonptr.Escape(name))
 			}

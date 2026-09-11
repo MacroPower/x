@@ -7407,6 +7407,14 @@ func TestParseSchemaValue(t *testing.T) {
 			err:      jsonschema.ErrKeywordType,
 			contains: "null in /dependencies/a",
 		},
+		"null member of draft-07 dependencies": {
+			doc: map[string]any{
+				"$schema":      "http://json-schema.org/draft-07/schema#",
+				"dependencies": map[string]any{"a": nil},
+			},
+			err:      jsonschema.ErrNilSubschema,
+			contains: "nil subschema at /dependencies/a",
+		},
 		"null inside enum is data": {
 			doc:      map[string]any{"enum": []any{nil, 1}},
 			instance: nil,

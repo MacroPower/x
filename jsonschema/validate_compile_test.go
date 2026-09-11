@@ -1362,6 +1362,11 @@ func TestParseSchemaNullKeywordReadsAsAbsent(t *testing.T) {
 			valid:   `{}`,
 			invalid: `1`,
 		},
+		"dependentRequired member": {
+			schema:  `{"dependentRequired": {"a": null}, "type": "object"}`,
+			valid:   `{"a": 1}`,
+			invalid: `1`,
+		},
 		"contains inside a property": {
 			schema: `{"properties": {"a": {"contains": null}}}`,
 			err:    jsonschema.ErrNilSubschema,
