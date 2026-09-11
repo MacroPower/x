@@ -5557,3 +5557,65 @@ type boundedProvider int
 func (boundedProvider) JSONSchema(context.Context, jsonschema.TypeContext) (jsonschema.TypeSchema, error) {
 	return jsonschema.TypeSchema{Value: &jsonschema.Schema{Type: "integer", Maximum: new(10.0)}}, nil
 }
+
+// TestTagTypeObjectKeepsInterpreterRequired pins that an interpreter's
+// Required write on a field inside an anonymous struct a type=object pair
+// kept lands on the rendered object. The hooks used to run against the
+// pair's value copy first, whose stale payload took the write, and the live
+// node then skipped its fields as already hooked.
+func TestTagTypeObjectKeepsInterpreterRequired(t *testing.T) {
+	t.Parallel()
+
+	type doc struct {
+		Inner struct {
+			Name string `json:"name,omitempty" validate:"required"`
+		} `json:"inner" jsonschema:"type=object"`
+	}
+
+	s, err := jsonschema.GenerateFor[doc](t.Context(),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()))
+	require.NoError(t, err)
+	assert.Equal(t, []string{"name"}, s.Properties["inner"].Required)
+
+	v, err := jsonschema.Compile(t.Context(), s)
+	require.NoError(t, err)
+	require.Error(t, v.ValidateJSON(t.Context(), []byte(`{"inner":{}}`)), "the required name is enforced")
+}
+
+// TestTagReplacedElementCanvasRefusedOnInlinedCopy pins that an interpreter
+// replacing an element canvas slot is refused on a copy of a sequence
+// definition as it is on the definition itself. The copy shares the type=
+// pair's value copy with the original, whose canvas is the original's, so
+// the check used to pass the copy's replaced slot off the original's wiring.
+func TestTagReplacedElementCanvasRefusedOnInlinedCopy(t *testing.T) {
+	t.Parallel()
+
+	type doc struct {
+		Y slotSeq `json:"y" slot:"none"`
+	}
+
+	replaceSlot := func(_ context.Context, field jsonschema.FieldContext, tag jsonschema.Tag) error {
+		if tag.Value == "items" {
+			field.Canvas.Items = &jsonschema.Schema{Type: "string"}
+		}
+
+		return nil
+	}
+
+	replaceItems := jsonschema.WithTagInterpreter("slot", jsonschema.TagInterpreterFunc(replaceSlot))
+
+	_, err := jsonschema.GenerateFor[doc](t.Context(), replaceItems)
+	require.ErrorIs(t, err, jsonschema.ErrCanvasKeyword)
+}
+
+// slotSeq is an extractable sequence whose element carries a type= pair and
+// an interpreter tag, so an interpreted field of it copies the body inline
+// and the copy's element keeps the pair's value copy.
+type slotSeq []struct {
+	P []int `json:"p" jsonschema:"type=string" slot:"items"`
+}
+
+// JSONSchemaExtend implements [jsonschema.JSONSchemaExtender].
+func (slotSeq) JSONSchemaExtend(context.Context, jsonschema.TypeContext, *jsonschema.TypeSchema) error {
+	return nil
+}

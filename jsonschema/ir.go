@@ -1181,17 +1181,26 @@ func canvasKeywordReport(n *node) error {
 // element canvases [allocCanvasTree] wired into n's canvas: the single
 // element canvas of a list or map, or the per-position canvases of a tuple.
 // A node a type= pair rewrote keeps the canvas wired for the node as
-// reflected, so the slot is read against that copy too.
+// reflected, so the slot is read against that copy's children too. The
+// slot is always read off n's own canvas: a copy [cloneTree] made shares
+// the value copy with the original, whose canvas is the original's, and a
+// slot the copy's hook replaced must be judged on the copy's canvas.
 func canvasSlotWired(n *node, f *schemafield.Field) bool {
-	if n.overrode != nil && canvasSlotWired(n.overrode, f) {
+	if n.overrode != nil && slotHoldsChildren(n.overrode, n.authored, f) {
 		return true
 	}
 
+	return slotHoldsChildren(n, n.authored, f)
+}
+
+// slotHoldsChildren reports whether slot f of canvas holds exactly the
+// element canvases of n's children.
+func slotHoldsChildren(n *node, canvas *Schema, f *schemafield.Field) bool {
 	switch f.Name {
 	case "Items", "AdditionalProperties":
-		return n.items != nil && f.SingleOf(n.authored) == n.items.authored
+		return n.items != nil && f.SingleOf(canvas) == n.items.authored
 	case "PrefixItems", "ItemsArray":
-		elems := f.SliceOf(n.authored)
+		elems := f.SliceOf(canvas)
 		if len(elems) != len(n.prefix) {
 			return false
 		}
