@@ -5,7 +5,6 @@ import (
 	"reflect"
 	"sort"
 	"strconv"
-	"strings"
 
 	"go.jacobcolvin.com/x/jsonschema/internal/jsonptr"
 	"go.jacobcolvin.com/x/jsonschema/internal/keyword"
@@ -97,29 +96,32 @@ func (g *run) emittedDefs(root *node) (map[*defEntry]bool, *defEntry) {
 // name collisions among the emitted entries by prefixing with the package's
 // base directory name, then with the full import path if collisions persist.
 // An entry outside emitted (one a type= override, a tag replacing a
-// definition keyword, or root inlining orphaned)
-// never reaches the output, so it joins no collision group and takes a
-// token-shaped name instead, which no emitted key can spell. The one
-// exception is deferred, the root's own entry when nothing else refers to
-// it yet: a field hook can still name it in a canvas $ref, which
-// [run.maybeInlineRoot] reads, so it takes its base name where no emitted
-// key spells it and a suffixed one otherwise, placed after every emitted
-// name so it prefixes none of them. A hand-spelled ref to the base name
-// resolves to whichever entry holds that key, so the root is inlined or
-// kept in agreement with the key the ref names. It runs before render, so
-// renderRef emits final names directly; because refs are defEntry pointer
-// links, no ref re-pointing pass is needed for them. The provisional tokens
-// the reflection phase wrote into payloads are rewritten afterward by
-// [run.finalizeRefs].
+// definition keyword, or root inlining orphaned) joins no collision group,
+// since render reaches it through no reference the reflection phase wrote.
+// A field hook can still name it in a canvas $ref, which the reachability
+// scan at render follows, so every such entry takes a key of its own after
+// the emitted names are settled: its base name where no emitted key spells
+// it and a suffixed one otherwise, placed after every emitted name so it
+// prefixes none of them. A hand-spelled ref to the base name then resolves
+// to whichever entry holds that key, so an orphan a canvas $ref revives is
+// emitted under the key the ref names, and the root's own entry (deferred,
+// when nothing else refers to it yet) is inlined or kept in agreement with
+// the key the ref names, which [run.maybeInlineRoot] reads. It runs before
+// render, so renderRef emits final names directly; because refs are
+// defEntry pointer links, no ref re-pointing pass is needed for them. The
+// provisional tokens the reflection phase wrote into payloads are
+// rewritten afterward by [run.finalizeRefs].
 func (g *run) assignDefNames(emitted map[*defEntry]bool, deferred *defEntry) {
-	prefix := g.profile.refPrefix()
-
 	// Group emitted entries by their pre-disambiguation base name.
 	byBase := map[string][]*defEntry{}
 
+	var orphans []*defEntry
+
 	for _, e := range g.defs {
 		if !emitted[e] {
-			e.name = strings.TrimPrefix(e.token, prefix)
+			if e != deferred {
+				orphans = append(orphans, e)
+			}
 
 			continue
 		}
@@ -197,6 +199,12 @@ func (g *run) assignDefNames(emitted map[*defEntry]bool, deferred *defEntry) {
 
 	if deferred != nil {
 		deferred.name = uniqueName(deferred.baseName, used)
+		used[deferred.name] = true
+	}
+
+	for _, e := range orphans {
+		e.name = uniqueName(e.baseName, used)
+		used[e.name] = true
 	}
 }
 
@@ -210,14 +218,11 @@ func (g *run) assignDefNames(emitted map[*defEntry]bool, deferred *defEntry) {
 // to, so a name the collision pass escalated does not leave the hand-spelled
 // ref dangling. The walk covers the root graph, every def body whether
 // or not the root reaches it, and the node a type= override replaced, whose
-// view the jsonschema tag reads later. An entry render never emits keeps its
-// token-shaped name, so a field inside an orphaned body whose type is another
-// orphaned entry reads that spelling in its Base; only a hook on a body that
-// is never rendered observes it. The root's own entry is the exception,
-// since a field hook's canvas $ref can keep it emitted after this pass; it
-// holds a real key, so a field inside the root reads that key in its
-// Parent whether or not the root is inlined later. Payload subtrees are
-// scanned once each
+// view the jsonschema tag reads later. Every entry holds a real key by
+// then, an orphan included, so a field inside an orphaned body whose type
+// is another orphaned entry reads that key in its Base, and a field inside
+// the root reads the root's key in its Parent whether or not the root is
+// inlined later. Payload subtrees are scanned once each
 // through the scanned set, so a subtree a hook aliased into two slots is
 // rewritten once.
 func (g *run) finalizeRefs(root *node) {

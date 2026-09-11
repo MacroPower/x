@@ -597,6 +597,47 @@ func TestHookCanvasRefToRootKeepsItsDefinition(t *testing.T) {
 	})
 }
 
+// canvasRefOrphan orphans its Inner definition through a type= pair and then
+// names it again from a field hook's canvas $ref.
+type canvasRefOrphan struct {
+	A *canvasRefInner `json:"a"                           jsonschema:"type=string"`
+	B int             `canvasref:"#/$defs/canvasRefInner" json:"b"`
+}
+
+type canvasRefInner struct {
+	V int `json:"v"`
+}
+
+// TestHookCanvasRefRevivesAnOrphanedDefinition pins that a definition the
+// naming pass saw as orphaned (its only occurrence replaced by a type= pair)
+// is emitted under the key a later canvas $ref names. The pass used to leave
+// an orphan a token-shaped name, so the reachability scan at render, which
+// follows the hand-spelled ref through the base-name fallback, emitted the
+// body under "canvasRefInner@0" while the ref still spelled the base name,
+// and the output failed Compile with an unresolved $ref.
+func TestHookCanvasRefRevivesAnOrphanedDefinition(t *testing.T) {
+	t.Parallel()
+
+	interp := jsonschema.TagInterpreterFunc(
+		func(_ context.Context, fc jsonschema.FieldContext, tag jsonschema.Tag) error {
+			return fc.Constraints().ForbidSchema(&jsonschema.Schema{Ref: tag.Value})
+		},
+	)
+
+	s, err := jsonschema.GenerateFor[canvasRefOrphan](t.Context(), jsonschema.WithTagInterpreter("canvasref", interp))
+	require.NoError(t, err)
+
+	require.Contains(t, s.Defs, "canvasRefInner", "the revived orphan holds its base name")
+	assert.Equal(t, "#/$defs/canvasRefInner", s.Properties["b"].AllOf[0].Not.Ref)
+
+	for key := range s.Defs {
+		assert.NotContains(t, key, "@", "no provisional token reaches the output")
+	}
+
+	_, err = jsonschema.Compile(t.Context(), s)
+	require.NoError(t, err, "every $ref the output carries must resolve")
+}
+
 // TestGenerateFor_HandSpelledRefSurvivesNameEscalation pins the hand-spelled
 // "#/$defs/<name>" reference a hook authors from the namer's answer for a
 // type, under a base-name collision. The reachability scan resolved such a

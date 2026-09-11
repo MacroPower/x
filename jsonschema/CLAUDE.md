@@ -33,7 +33,8 @@ one generation derives from a config. `run.generate` is eight phases, in order:
    render will emit (reachable from the root, minus a bare `$ref` root that
    phase 5 inlines), and every one of them gets its final key, disambiguated
    among themselves alone, before any `$ref` string is emitted; an orphaned
-   entry keeps a token-shaped name. `finalizeRefs` then rewrites the
+   entry takes a key of its own after them, since a phase 4 canvas `$ref`
+   can revive it. `finalizeRefs` then rewrites the
    per-entry provisional token phase 1 wrote into every payload (a ref node's
    own, and any literal a type-level hook copied it into) to that key, so no
    later phase sees a token.

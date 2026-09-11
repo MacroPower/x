@@ -253,7 +253,7 @@ type defEntry struct {
 	typ      reflect.Type
 	body     *node  // bare value node; nil while a cycle placeholder
 	baseName string // namer output, pre-disambiguation; collisions are grouped on it
-	name     string // final $defs key, set by assignDefNames; token-shaped on an entry render never emits
+	name     string // final $defs key, set by assignDefNames for every entry, orphaned or not
 	// Token is the provisional $ref string every reference to the entry
 	// carries until assignDefNames settles the final key. It is unique per
 	// run, and its "@" separator is a character no final key contains, so a
