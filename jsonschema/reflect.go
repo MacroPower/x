@@ -1030,7 +1030,11 @@ func (g *run) schemaForMap(t reflect.Type, pointer bool) (*node, error) {
 	}, nil
 }
 
-// schemaForStruct generates a schema for struct types.
+// schemaForStruct generates a schema for struct types. A named type already
+// holding a definition never reaches here, since schemaForType returns its
+// reference first, so the body is built once; a cycle met during the build
+// registers a placeholder entry, which defineType fills, and the extraction
+// policy defines the rest of the named types.
 func (g *run) schemaForStruct(t reflect.Type, pointer bool) (*node, error) {
 	// Cycle detection: even when definitions are disabled, cyclic types must
 	// emit $defs/$ref to prevent infinite recursion.
@@ -1038,26 +1042,6 @@ func (g *run) schemaForStruct(t reflect.Type, pointer bool) (*node, error) {
 		return g.refNode(g.newDefEntry(t), pointer), nil
 	}
 
-	// Check for extraction to $defs.
-	if g.shouldExtract(t) {
-		// Check if already registered.
-		if e, exists := g.typeToDef[t]; exists {
-			return g.refNode(e, pointer), nil
-		}
-
-		g.visiting[t] = true
-
-		obj, stance, err := g.buildStructSchema(t)
-		if err != nil {
-			return nil, err
-		}
-
-		delete(g.visiting, t)
-
-		return g.defineType(t, obj, stance, pointer), nil
-	}
-
-	// Inline, but track visiting to detect cycles.
 	g.visiting[t] = true
 
 	obj, stance, err := g.buildStructSchema(t)
@@ -1067,9 +1051,7 @@ func (g *run) schemaForStruct(t reflect.Type, pointer bool) (*node, error) {
 
 	delete(g.visiting, t)
 
-	// If a cycle was detected during buildStructSchema (a self-reference created
-	// a placeholder def entry), defineType fills it and returns a reference.
-	if _, exists := g.typeToDef[t]; exists {
+	if _, cyclic := g.typeToDef[t]; cyclic || g.shouldExtract(t) {
 		return g.defineType(t, obj, stance, pointer), nil
 	}
 
