@@ -101,7 +101,9 @@ type TypeSchema struct {
 	Value *Schema
 	// Verbatim is an opaque escape hatch: the schema is emitted exactly as given,
 	// with no null encoding applied. Use it for a fully-formed schema (e.g. one
-	// loaded from a document). Reachability still scans it for raw $ref strings.
+	// loaded from a document). Reachability still scans it for raw $ref
+	// strings, which name a definition only where one exists: with
+	// [WithDefinitions] disabled only a circular type holds one.
 	Verbatim *Schema
 	// Ref declares that this schema is a reference to the named Go type, so
 	// generation keeps that type's definition reachable through a node-backed

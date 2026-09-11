@@ -433,7 +433,9 @@
 // generation registered first. A field-level hook runs after the keys are
 // settled and reads the final $ref in its Base, and a $ref it spells by
 // hand from the namer's answer is emitted with the disambiguated key the
-// same way. Generation
+// same way. Under [WithDefinitions] disabled only a circular type holds a
+// definition, so a $ref spelled by hand to any other type names nothing
+// and is emitted as written. Generation
 // copies the value the extender leaves, so a schema the extender assigned to
 // Value or spliced into it stays as the extender left it and a second run
 // with the same extender emits the same output.
@@ -663,7 +665,8 @@
 // it, stays out of the collision check but keeps a key of its own (its name,
 // or a suffixed one where another definition holds the name), so a $ref a
 // tag interpreter writes to it keeps the root a reference under that key
-// rather than dangling. For generic type
+// rather than dangling; with definitions disabled a non-circular root is
+// inlined and such a $ref names nothing. For generic type
 // instantiations, it replaces the brackets and commas in [reflect.Type.Name]
 // with underscores to form the $defs key (e.g., "MyStruct[int]" becomes
 // "MyStruct_int_"). The [WithNamer] option overrides this naming.
