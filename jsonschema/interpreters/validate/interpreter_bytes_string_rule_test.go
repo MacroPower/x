@@ -63,6 +63,19 @@ func TestValidateInterpreter_ByteSliceStringRules(t *testing.T) {
 		})
 	}
 
+	// A byte array takes the same base64 form, but go-playground's isJSON
+	// switches on the string and slice kinds alone and panics on it, so the
+	// json exception does not reach it.
+	t.Run("json on a byte array", func(t *testing.T) {
+		t.Parallel()
+
+		typ := taggedField(t, struct{ V [4]byte }{}, "json")
+
+		_, err := jsonschema.Generate(t.Context(), typ,
+			jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()))
+		require.ErrorIs(t, err, validate.ErrStringRuleKind)
+	})
+
 	for name, tc := range timeTests {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()

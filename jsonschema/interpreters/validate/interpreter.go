@@ -541,7 +541,10 @@ func readsGoKindAsText(kind reflect.Kind) bool {
 func readsGoValueNotText(shape tagmodel.Shape, op tagmodel.Op) bool {
 	switch shape.Form {
 	case tagmodel.FormByteString:
-		return op != tagmodel.OpContentMediaType
+		// The json exception is a byte slice's alone: go-playground's isJSON
+		// switches on the string and slice kinds and panics on a byte array,
+		// which takes the same base64 form here.
+		return op != tagmodel.OpContentMediaType || shape.Kind != reflect.Slice
 	case tagmodel.FormTextString:
 		return shape.Kind != reflect.String
 	default:
