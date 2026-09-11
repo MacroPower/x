@@ -15,6 +15,8 @@ import (
 	"go.jacobcolvin.com/x/jsonschema"
 	"go.jacobcolvin.com/x/jsonschema/internal/format"
 	"go.jacobcolvin.com/x/jsonschema/internal/fuzzfill"
+	"go.jacobcolvin.com/x/jsonschema/internal/jsonptr"
+	"go.jacobcolvin.com/x/jsonschema/internal/schemafield"
 )
 
 // suiteDocument is one schema from the vendored suite, with the $schema
@@ -32,6 +34,18 @@ type metaschemaTolerance struct {
 }
 
 var (
+	// SubschemaShapes maps each sub-schema keyword to the container shapes
+	// it can hold in JSON form, from [schemafield.Subschemas].
+	subschemaShapes = func() map[string][]schemafield.Shape {
+		m := make(map[string][]schemafield.Shape)
+
+		for _, f := range schemafield.Subschemas {
+			m[f.Keyword] = append(m[f.Keyword], f.Shape)
+		}
+
+		return m
+	}()
+
 	// SubschemaKeywords are the keywords whose value is a subschema in both
 	// drafts. A null in one of them unmarshals as an absent keyword, which
 	// is the one shape Compile cannot see and the metaschema rejects.
@@ -305,6 +319,12 @@ func FuzzCompileAgreesWithMetaschema(f *testing.F) {
 				}
 			}
 
+			for _, tolerance := range refusalTolerances() {
+				if tolerance.catches(value) {
+					return
+				}
+			}
+
 			t.Fatalf("Compile refuses a document the metaschema accepts\ndocument: %s\ncompile: %v", data, compileErr)
 		}
 	})
@@ -330,13 +350,147 @@ func effectiveDraft(doc map[string]any) jsonschema.Draft {
 	return jsonschema.Draft2020
 }
 
+// refusalTolerances records every way Compile refuses a document the
+// metaschema accepts that no sentinel alone identifies, each with a reason.
+// A refusal caught by no entry and carrying no vetBeyondMetaschema sentinel
+// is a finding.
+func refusalTolerances() []metaschemaTolerance {
+	return []metaschemaTolerance{
+		{
+			reason: "a $ref in a schema position whose pointer lands in a data position (examples, default, const, enum, or an unknown keyword), which the metaschema never judges as a schema and the pointer fallback vets on materialization, refusing it with the vet's own sentinel",
+			catches: func(doc map[string]any) bool {
+				found := false
+
+				walkSchemaObjects(doc, func(schema map[string]any) {
+					ref, ok := schema["$ref"].(string)
+					if ok && refIntoData(doc, ref) {
+						found = true
+					}
+				})
+
+				return found
+			},
+		},
+	}
+}
+
+// walkSchemaObjects calls visit on every schema object of the document,
+// descending through the sub-schema keywords by their JSON shapes and
+// leaving every other member alone as data.
+func walkSchemaObjects(schema map[string]any, visit func(map[string]any)) {
+	visit(schema)
+
+	for key, member := range schema {
+		for _, shape := range subschemaShapes[key] {
+			switch shape {
+			case schemafield.Map:
+				if m, ok := member.(map[string]any); ok {
+					for _, sub := range m {
+						if obj, ok := sub.(map[string]any); ok {
+							walkSchemaObjects(obj, visit)
+						}
+					}
+				}
+
+			case schemafield.Slice:
+				if list, ok := member.([]any); ok {
+					for _, sub := range list {
+						if obj, ok := sub.(map[string]any); ok {
+							walkSchemaObjects(obj, visit)
+						}
+					}
+				}
+
+			case schemafield.Single:
+				if obj, ok := member.(map[string]any); ok {
+					walkSchemaObjects(obj, visit)
+				}
+
+			case schemafield.None:
+			}
+		}
+	}
+}
+
+// refIntoData reports whether a local JSON-pointer ref, followed from the
+// root through the sub-schema keywords by their shapes, leaves the schema
+// positions before its last segment: the pointer then names data, which
+// the metaschema never judges as a schema. A pointer that stays in schema
+// positions, or that names nothing, reports false.
+func refIntoData(doc map[string]any, ref string) bool {
+	fragment, ok := strings.CutPrefix(ref, "#")
+	if !ok {
+		return false
+	}
+
+	segments, ok := jsonptr.FragmentSegments(fragment, true)
+	if !ok {
+		return false
+	}
+
+	var cur any = doc
+
+	// Members is set while cur is a map of schemas or a list of schemas,
+	// whose next segment names a schema rather than a keyword.
+	members := false
+
+	for _, seg := range segments {
+		switch c := cur.(type) {
+		case map[string]any:
+			next, present := c[seg]
+			if !present {
+				return false
+			}
+
+			if members {
+				cur, members = next, false
+
+				continue
+			}
+
+			shapes := subschemaShapes[seg]
+			if len(shapes) == 0 {
+				return true
+			}
+
+			switch next.(type) {
+			case map[string]any:
+				members = slices.Contains(shapes, schemafield.Map)
+			case []any:
+				members = slices.Contains(shapes, schemafield.Slice)
+			default:
+				return false
+			}
+
+			cur = next
+
+		case []any:
+			if !members {
+				return true
+			}
+
+			i, ok := jsonptr.ParseArrayIndex(seg)
+			if !ok || i >= len(c) {
+				return false
+			}
+
+			cur, members = c[i], false
+
+		default:
+			return false
+		}
+	}
+
+	return false
+}
+
 // TestMetaschemaTablesAreReasoned pins that every tolerance and every vet
 // entry carries a reason, so a row cannot enter either table as a bare
 // exception.
 func TestMetaschemaTablesAreReasoned(t *testing.T) {
 	t.Parallel()
 
-	for _, tolerance := range metaschemaTolerances() {
+	for _, tolerance := range slices.Concat(metaschemaTolerances(), refusalTolerances()) {
 		require.NotEmpty(t, tolerance.reason)
 		require.NotNil(t, tolerance.catches)
 	}
