@@ -798,3 +798,34 @@ func TestCircularRefShortCircuitRecordsNoAnnotations(t *testing.T) {
 	require.Error(t, err, "the short-circuited $ref evaluates nothing, so a is unevaluated")
 	assert.Contains(t, err.Error(), "unevaluatedProperties")
 }
+
+// TestValidateSiblingRefsAtOneDepthAreNoCycle pins the cycle guard's key: a
+// schema keyed by the depth of the instance position it is visited at, not
+// its rendered pointer. Two siblings sharing one $ref target sit at equal
+// depth, and the second is walked after the first returns, so the guard
+// sees no cycle and the failing sibling reports its error at its own path.
+func TestValidateSiblingRefsAtOneDepthAreNoCycle(t *testing.T) {
+	t.Parallel()
+
+	schema := &jsonschema.Schema{
+		Defs: map[string]*jsonschema.Schema{
+			"text": {Type: "string"},
+		},
+		Properties: map[string]*jsonschema.Schema{
+			"a": {Ref: "#/$defs/text"},
+			"b": {Ref: "#/$defs/text"},
+		},
+		Items: &jsonschema.Schema{Ref: "#/$defs/text"},
+	}
+
+	err := jsonschema.Validate(t.Context(), schema, map[string]any{"a": "x", "b": 1.0})
+
+	var verr *jsonschema.ValidationError
+
+	require.ErrorAs(t, err, &verr)
+	assert.Equal(t, "/b", string(verr.InstancePath))
+	assert.Equal(t, "/properties/b/$ref", string(verr.SchemaPath))
+
+	err = jsonschema.Validate(t.Context(), schema, map[string]any{"a": "x", "b": "y"})
+	require.NoError(t, err)
+}

@@ -145,19 +145,23 @@ func WithMetaSchemaResolver(r RefResolver) ValidateOption {
 // visitKey identifies a unique (schema, instance path) pair for cycle detection.
 // A schema may legitimately be visited multiple times for different instance
 // paths (e.g. recursive $ref: "#"), so only the same schema at the same
-// instance path indicates a true cycle.
+// instance path indicates a true cycle. The path is keyed by its depth: the
+// set holds the live frames of one depth-first walk alone, every frame's
+// path is a prefix of the current one, so one depth names one path among
+// them and no pointer string need be built or hashed per node.
 type visitKey struct {
 	//nolint:unused // Read via struct equality when used as a map key.
 	schema *Schema
 	//nolint:unused // Read via struct equality when used as a map key.
-	instancePath jsontext.Pointer
+	depth int
 }
 
 // instanceLocation is the position in the instance that the validation walk is
-// currently at, carried in two synchronized representations: the RFC 6901
-// JSON Pointer string surfaced as [ValidationError.InstancePath], and the typed
-// segments surfaced as [ValidationError.InstanceSegments]. The zero value is
-// the root location (empty pointer, nil segments).
+// currently at, as the typed segments surfaced as
+// [ValidationError.InstanceSegments]; the RFC 6901 JSON Pointer surfaced as
+// [ValidationError.InstancePath] is rendered from them on the error path
+// alone ([instanceLocation.pointer]), so a walk that reports nothing builds
+// no pointer text. The zero value is the root location (nil segments).
 //
 // Every location of one walk shares a single segment stack. The walk is
 // depth-first and sequential, so when a child location is built the
@@ -169,39 +173,50 @@ type visitKey struct {
 // Building two sibling locations before descending into the first would
 // break this discipline; no site does.
 type instanceLocation struct {
-	// The RFC 6901-encoded JSON Pointer.
-	ptr jsontext.Pointer
-	// One typed [Segment] per reference token of ptr.
+	// One typed [Segment] per reference token of the location.
 	segs []Segment
 }
 
-// key returns the location of the object member named name, extending both
-// representations.
+// key returns the location of the object member named name.
 func (l instanceLocation) key(name string) instanceLocation {
-	return instanceLocation{
-		ptr:  jsonptr.AppendToken(l.ptr, name),
-		segs: append(l.segs, Segment{Key: name}),
-	}
+	return instanceLocation{segs: append(l.segs, Segment{Key: name})}
 }
 
-// index returns the location of the array element at index i, extending both
-// representations.
+// index returns the location of the array element at index i.
 func (l instanceLocation) index(i int) instanceLocation {
-	return instanceLocation{
-		ptr:  jsonptr.AppendToken(l.ptr, strconv.Itoa(i)),
-		segs: append(l.segs, Segment{Index: i, IsIndex: true}),
+	return instanceLocation{segs: append(l.segs, Segment{Index: i, IsIndex: true})}
+}
+
+// pointer renders the location as its RFC 6901 JSON Pointer.
+func (l instanceLocation) pointer() jsontext.Pointer {
+	return segmentsPointer(l.segs)
+}
+
+// segmentsPointer renders typed segments as an RFC 6901 JSON Pointer, an
+// index as its decimal token and a key escaped as the RFC requires; no
+// segments render as the empty root pointer.
+func segmentsPointer(segs []Segment) jsontext.Pointer {
+	var ptr jsontext.Pointer
+
+	for _, seg := range segs {
+		if seg.IsIndex {
+			ptr = jsonptr.AppendToken(ptr, strconv.Itoa(seg.Index))
+		} else {
+			ptr = jsonptr.AppendToken(ptr, seg.Key)
+		}
 	}
+
+	return ptr
 }
 
 // schemaLocation is the position in the schema that the validation walk is
-// currently at, the schema-side counterpart of [instanceLocation]: the RFC
-// 6901 JSON Pointer surfaced as [ValidationError.SchemaPath], and the typed
-// segments surfaced as [ValidationError.SchemaSegments]. The zero value is
-// the root location (empty pointer, nil segments). Its segments share one
-// stack per walk under the discipline described on [instanceLocation].
+// currently at, the schema-side counterpart of [instanceLocation]: the typed
+// segments surfaced as [ValidationError.SchemaSegments], from which the RFC
+// 6901 JSON Pointer surfaced as [ValidationError.SchemaPath] is rendered on
+// the error path. The zero value is the root location (nil segments). Its
+// segments share one stack per walk under the discipline described on
+// [instanceLocation].
 type schemaLocation struct {
-	// The RFC 6901-encoded JSON Pointer.
-	ptr jsontext.Pointer
 	// The applicator keyword the location descended through most recently:
 	// the keyword whose subschema the walk is inside, not the keyword the
 	// walk is evaluating. It is empty at the root and set by every kw call,
@@ -210,40 +225,40 @@ type schemaLocation struct {
 	// instead of every applicator stamping it after the fact. Every
 	// subschema descent goes through kw, so no descent can leave it unset.
 	keyword string
-	// One typed [Segment] per reference token of ptr. It trails the strings
-	// so the slice's capacity word ends the pointer-bearing prefix.
+	// One typed [Segment] per reference token of the location.
 	segs []Segment
 }
 
-// kw returns the location of the keyword token named keyword, extending both
-// representations and recording keyword as the applicator in force.
+// kw returns the location of the keyword token named keyword, recording
+// keyword as the applicator in force.
 func (l schemaLocation) kw(keyword string) schemaLocation {
 	return schemaLocation{
-		ptr:     jsonptr.AppendToken(l.ptr, keyword),
 		segs:    append(l.segs, Segment{Key: keyword}),
 		keyword: keyword,
 	}
 }
 
 // key returns the location of the member named name under a map keyword
-// (properties, patternProperties, dependentSchemas, ...), extending both
-// representations.
+// (properties, patternProperties, dependentSchemas, ...).
 func (l schemaLocation) key(name string) schemaLocation {
 	return schemaLocation{
-		ptr:     jsonptr.AppendToken(l.ptr, name),
 		segs:    append(l.segs, Segment{Key: name}),
 		keyword: l.keyword,
 	}
 }
 
 // idx returns the location of the element at index i under a list keyword
-// (allOf, anyOf, oneOf, prefixItems, ...), extending both representations.
+// (allOf, anyOf, oneOf, prefixItems, ...).
 func (l schemaLocation) idx(i int) schemaLocation {
 	return schemaLocation{
-		ptr:     jsonptr.AppendToken(l.ptr, strconv.Itoa(i)),
 		segs:    append(l.segs, Segment{Index: i, IsIndex: true}),
 		keyword: l.keyword,
 	}
+}
+
+// pointer renders the location as its RFC 6901 JSON Pointer.
+func (l schemaLocation) pointer() jsontext.Pointer {
+	return segmentsPointer(l.segs)
 }
 
 // rootSegmentCapacity is the segment stack capacity each walk starts with, on
@@ -270,9 +285,9 @@ func newError(
 	causes []*ValidationError,
 ) *ValidationError {
 	return &ValidationError{
-		InstancePath: instancePath.ptr,
+		InstancePath: instancePath.pointer(),
 		segments:     cloneSegments(instancePath.segs),
-		SchemaPath:   schemaPath.ptr,
+		SchemaPath:   schemaPath.pointer(),
 		schemaSegs:   cloneSegments(schemaPath.segs),
 		Keyword:      keyword,
 		Message:      msg,
@@ -2151,7 +2166,7 @@ func (v *validator) validate(
 	// Only a reference can close such a cycle, so a reference-free graph
 	// skips the set (see refBearing).
 	if v.refBearing {
-		key := visitKey{schema, instancePath.ptr}
+		key := visitKey{schema, len(instancePath.segs)}
 		if v.visiting[key] {
 			return nil // treat as passing to avoid infinite recursion
 		}
