@@ -19,6 +19,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	jsonv1 "encoding/json"
+
 	"go.jacobcolvin.com/x/jsonschema"
 	"go.jacobcolvin.com/x/jsonschema/internal/tagmodel"
 	"go.jacobcolvin.com/x/jsonschema/internal/testtypes/alpha"
@@ -5618,4 +5620,88 @@ type slotSeq []struct {
 // JSONSchemaExtend implements [jsonschema.JSONSchemaExtender].
 func (slotSeq) JSONSchemaExtend(context.Context, jsonschema.TypeContext, *jsonschema.TypeSchema) error {
 	return nil
+}
+
+// TestTagSameTypeOverrideKeepsHookValues pins that a type= pair naming the
+// type a nilable container already has keeps the values and combinators a
+// hook declared for it, as it does on a fixed array or a struct. The
+// container's payload carries no type until render, so the override used
+// to read a same-type pair as a change of type and drop them.
+func TestTagSameTypeOverrideKeepsHookValues(t *testing.T) {
+	t.Parallel()
+
+	type doc struct {
+		Tags  []string       `json:"tags"  jsonschema:"type=array"`
+		Plain []string       `json:"plain"`
+		M     map[string]int `json:"m"     jsonschema:"type=object"`
+		B     []byte         `json:"b"     jsonschema:"type=string"`
+	}
+
+	pinSlice := func(_ context.Context, _ jsonschema.TypeContext, ts *jsonschema.TypeSchema) error {
+		ts.Value.Enum = []any{[]any{"a"}, []any{"b"}}
+		ts.Value.Not = &jsonschema.Schema{MaxItems: new(0)}
+
+		return nil
+	}
+
+	defaultMap := func(_ context.Context, _ jsonschema.TypeContext, ts *jsonschema.TypeSchema) error {
+		ts.Value.Default = jsonv1.RawMessage(`{"k":1}`)
+
+		return nil
+	}
+
+	defaultBytes := func(_ context.Context, _ jsonschema.TypeContext, ts *jsonschema.TypeSchema) error {
+		ts.Value.Default = jsonv1.RawMessage(`"AA=="`)
+
+		return nil
+	}
+
+	s, err := jsonschema.GenerateFor[doc](t.Context(),
+		jsonschema.WithTypeSchemaExtenderFor[[]string](jsonschema.TypeSchemaExtenderFunc(pinSlice)),
+		jsonschema.WithTypeSchemaExtenderFor[map[string]int](jsonschema.TypeSchemaExtenderFunc(defaultMap)),
+		jsonschema.WithTypeSchemaExtenderFor[[]byte](jsonschema.TypeSchemaExtenderFunc(defaultBytes)),
+	)
+	require.NoError(t, err)
+
+	for _, name := range []string{"tags", "plain"} {
+		assert.Len(t, s.Properties[name].Enum, 2, "%s keeps the hook's enum", name)
+		assert.NotNil(t, s.Properties[name].Not, "%s keeps the hook's not", name)
+	}
+
+	assert.NotNil(t, s.Properties["m"].Default, "the map keeps the hook's default")
+	assert.NotNil(t, s.Properties["b"].Default, "the byte slice keeps the hook's default")
+}
+
+// TestTagTypeOverrideDropsConditionalApplicators pins that a type= pair
+// naming a different type drops a hook's if, then, and else along with the
+// other combinators composed over the replaced type; they used to survive
+// and judge the new type by the old one's conditions.
+func TestTagTypeOverrideDropsConditionalApplicators(t *testing.T) {
+	t.Parallel()
+
+	type doc struct {
+		A conditionalProvider `json:"a" jsonschema:"type=string"`
+	}
+
+	s, err := jsonschema.GenerateFor[doc](t.Context())
+	require.NoError(t, err)
+
+	field := s.Properties["a"]
+	assert.Equal(t, "string", field.Type)
+	assert.Nil(t, field.If)
+	assert.Nil(t, field.Then)
+	assert.Nil(t, field.Else)
+}
+
+// conditionalProvider declares an integer schema with a conditional, so a
+// type= pair on a field of it has an if/then/else to drop.
+type conditionalProvider int
+
+// JSONSchema implements [jsonschema.JSONSchemaProvider].
+func (conditionalProvider) JSONSchema(context.Context, jsonschema.TypeContext) (jsonschema.TypeSchema, error) {
+	return jsonschema.TypeSchema{Value: &jsonschema.Schema{
+		Type: "integer",
+		If:   &jsonschema.Schema{Minimum: new(0.0)},
+		Then: &jsonschema.Schema{Const: new(any(5))},
+	}}, nil
 }

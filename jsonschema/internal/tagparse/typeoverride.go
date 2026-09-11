@@ -144,7 +144,7 @@ func conflictingGroup(groupsSet map[string]bool, typeName string) string {
 // are vacuous but emit as confusing dead structure. When the named type
 // differs from the one the schema declared, the values pinned for the old
 // type (const, enum, default, examples) and the combinators composed over it
-// (allOf, anyOf, oneOf, not) go too, since a value of the replaced type
+// (allOf, anyOf, oneOf, not, if/then/else) go too, since a value of the replaced type
 // describes nothing about the new one and a later const or enum pair would
 // otherwise conflict with it. Tag pairs apply in order, so keys after type=
 // still take effect. The generator applies the pair to the field's node
@@ -165,6 +165,9 @@ func ApplyTypeOverride(s *jsonschema.Schema, typeName string) {
 		s.AnyOf = nil
 		s.OneOf = nil
 		s.Not = nil
+		s.If = nil
+		s.Then = nil
+		s.Else = nil
 	}
 
 	s.Type = typeName

@@ -844,6 +844,14 @@ func (n *node) overrideType(typeName string) {
 		n.payload = &Schema{}
 	}
 
+	// A nilable container's payload carries no type until render restores
+	// it beside the null decision, so the type the schema declares is
+	// written first: the override reads it to tell a same-type pair, which
+	// keeps the type's own values and combinators, from a change of type.
+	if n.typeListEncoded() {
+		bareContainerType(n.payload, n.containerType())
+	}
+
 	tagparse.ApplyTypeOverride(n.payload, typeName)
 
 	n.def = nil
