@@ -1379,7 +1379,11 @@
 //     does not resolve to an absolute URI against
 //     its enclosing base (the parent $id chain, or [WithBaseURI] for the
 //     root, so a relative root $id compiles exactly when a base supplies the
-//     absolute prefix). Under Draft-07 two forms go unchecked, an $id beside
+//     absolute prefix; a fetched document whose $id repeats its own relative
+//     retrieval path is refused the same way when no base was given, the
+//     common shape of files a [FileResolver] serves, so such a set needs
+//     [WithBaseURI], or [WithRetrievalBase] under [Inline]). Under Draft-07
+//     two forms go unchecked, an $id beside
 //     a $ref (the draft ignores it, so not even the parse runs) and a $id
 //     carrying a plain-name fragment (the anchor spelling, fragment-only or
 //     on a URI; the fragment names an anchor within the document the URI
