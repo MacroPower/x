@@ -79,6 +79,28 @@ func TestTaggedTypeDrawsEveryClass(t *testing.T) {
 		"a by-value re-entrant type": func(f reflect.StructField) bool {
 			return namedIn(f.Type) == reflect.TypeFor[fuzzgen.Chain]()
 		},
+		"a nested tagged type": func(f reflect.StructField) bool {
+			return namedIn(f.Type) == reflect.TypeFor[fuzzgen.Tagged]()
+		},
+		"a declared string over a number": func(f reflect.StructField) bool {
+			return namedIn(f.Type) == reflect.TypeFor[fuzzgen.Coded]()
+		},
+		"a declared string over a struct": func(f reflect.StructField) bool {
+			return namedIn(f.Type) == reflect.TypeFor[fuzzgen.Labeled]()
+		},
+		"a declared object over a slice": func(f reflect.StructField) bool {
+			return namedIn(f.Type) == reflect.TypeFor[fuzzgen.Pairs]()
+		},
+		"a type= pair crossed with a validate tag on a hook type": func(f reflect.StructField) bool {
+			return namedIn(f.Type).PkgPath() == reflect.TypeFor[fuzzgen.Tagged]().PkgPath() &&
+				strings.HasPrefix(f.Tag.Get("jsonschema"), "type=") && f.Tag.Get("validate") != ""
+		},
+		"a tag the oracle admits": func(f reflect.StructField) bool {
+			return f.Tag.Get("jsonschema") != "" && fuzzgen.Admitted(reflect.StructOf([]reflect.StructField{f}))
+		},
+		"a tag the oracle leaves unjudged": func(f reflect.StructField) bool {
+			return f.Tag.Get("jsonschema") != "" && !fuzzgen.Admitted(reflect.StructOf([]reflect.StructField{f}))
+		},
 	}
 
 	seen := make(map[string]bool, len(classes))
@@ -194,4 +216,68 @@ func namedIn(t reflect.Type) reflect.Type {
 	}
 
 	return t
+}
+
+// TestInterpreterRunsReadTheDraw pins the hook-run prediction against the
+// population: a root field runs once when it carries the tag and is an
+// exported, unexcluded property, a nested tagged type's fields run once per
+// definition or per occurrence, and every answer occurs.
+func TestInterpreterRunsReadTheDraw(t *testing.T) {
+	t.Parallel()
+
+	tagged := reflect.TypeFor[fuzzgen.Tagged]()
+
+	var single, repeated, none int
+
+	// Two occurrences of one pool type among at most four fields is a rare
+	// draw, so this guard reads a wider population than the others.
+	for _, blob := range fuzzshape.Blobs(8 * drawCount) {
+		rt := fuzzgen.TaggedType(blob)
+		extracted := fuzzgen.InterpreterRuns(rt, true)
+		inlined := fuzzgen.InterpreterRuns(rt, false)
+
+		occurrences := 0
+
+		for f := range rt.Fields() {
+			key := fuzzgen.RunKey(rt, f.Name)
+			hooked := !f.Anonymous && f.PkgPath == "" && f.Tag.Get("json") != "-" && f.Tag.Get("validate") != ""
+
+			if hooked {
+				require.Equal(t, 1, extracted[key], "%s.%s runs once", rt, f.Name)
+				require.Equal(t, 1, inlined[key], "%s.%s runs once", rt, f.Name)
+			} else {
+				require.Zero(t, extracted[key], "%s.%s never runs", rt, f.Name)
+			}
+
+			if !f.Anonymous && f.PkgPath == "" && f.Tag.Get("json") != "-" && namedIn(f.Type) == tagged {
+				occurrences++
+			}
+		}
+
+		nested := fuzzgen.RunKey(tagged, "N")
+
+		switch occurrences {
+		case 0:
+			require.Zero(t, extracted[nested])
+			require.Zero(t, inlined[nested])
+
+			none++
+
+		case 1:
+			require.Equal(t, 1, extracted[nested])
+			require.Equal(t, 1, inlined[nested])
+
+			single++
+
+		default:
+			require.Equal(t, 1, extracted[nested])
+			require.Equal(t, occurrences, inlined[nested])
+
+			repeated++
+		}
+	}
+
+	require.Positive(t, none, "some draw holds no tagged type")
+	require.Positive(t, single, "some draw holds one tagged type")
+	require.Positive(t, repeated, "some draw holds a tagged type twice")
 }

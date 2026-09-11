@@ -1,7 +1,11 @@
 // Package fuzzgen synthesizes the struct types the generation invariants rig
 // draws: [fuzzshape.Type]'s shapes widened with hook types, recursive types,
-// and a jsonschema tag and a validate tag beside the json tag, plus the
-// generation options the rig runs them under. It lives beside fuzzshape
+// a struct whose own fields carry tags, and a jsonschema tag and a validate
+// tag beside the json tag, plus the generation options the rig runs them
+// under. It also answers two questions about a drawn type the rig holds
+// generation to: whether every jsonschema pair it carries is one the field's
+// shape admits ([Admitted]), and how often each tagged field reaches a tag
+// interpreter ([InterpreterRuns]). It lives beside fuzzshape
 // rather than in it because the hook types name the jsonschema package in
 // their method sets, which fuzzshape cannot import: the package's own tests
 // draw fuzzshape shapes, and a cycle through a test is still a cycle.
@@ -16,6 +20,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"go.jacobcolvin.com/x/jsonschema"
 	"go.jacobcolvin.com/x/jsonschema/internal/fuzzfill"
@@ -110,6 +115,53 @@ type Faulty struct {
 	N int `json:"n"`
 }
 
+// Tagged is a named struct whose own fields carry dialect tags, so a shape
+// holding one reaches field-level hooks below the root: inside an extracted
+// definition, an inlined body, and a subtree a type= pair replaced. Its
+// rules constrain the filled value, so a shape holding one is constrained.
+type Tagged struct {
+	S string `json:"s" validate:"required"`
+	N int    `json:"n" validate:"min=1"`
+	M int    `json:"m" jsonschema:"minimum=1"`
+}
+
+// Coded is a named integer type whose provider declares a string schema, so
+// a tag on a field of it is judged against the declared string rather than
+// the numeric Go kind.
+type Coded int64
+
+// JSONSchema implements [jsonschema.JSONSchemaProvider].
+func (Coded) JSONSchema(context.Context, jsonschema.TypeContext) (jsonschema.TypeSchema, error) {
+	return jsonschema.TypeSchema{Value: &jsonschema.Schema{Type: formString, Pattern: "^c[0-9]+$"}}, nil
+}
+
+// Labeled is a named struct whose extender replaces the reflected object with
+// a string schema, so a tag on a field of it is judged against the declared
+// string rather than the struct kind.
+type Labeled struct {
+	V string `json:"v"`
+}
+
+// JSONSchemaExtend implements [jsonschema.JSONSchemaExtender].
+func (Labeled) JSONSchemaExtend(_ context.Context, _ jsonschema.TypeContext, ts *jsonschema.TypeSchema) error {
+	ts.Value = &jsonschema.Schema{Type: formString, Description: "label"}
+
+	return nil
+}
+
+// Pairs is a named slice whose provider declares an object schema, so a tag
+// on a field of it is judged against the declared object rather than the
+// slice kind.
+type Pairs []string
+
+// JSONSchema implements [jsonschema.JSONSchemaProvider].
+func (Pairs) JSONSchema(context.Context, jsonschema.TypeContext) (jsonschema.TypeSchema, error) {
+	return jsonschema.TypeSchema{Value: &jsonschema.Schema{
+		Type:                 typeObject,
+		AdditionalProperties: &jsonschema.Schema{Type: formString},
+	}}, nil
+}
+
 // Ring reaches itself through a pointer, a slice, and a map, the three edges
 // a $defs cycle can take.
 type Ring struct {
@@ -145,10 +197,17 @@ const (
 	formBool     = "bool"
 	formSequence = "sequence"
 	formMap      = "map"
+	formObject   = "object"
+	formText     = "text"
 	formOther    = "other"
 
 	typeObject  = "object"
 	typeInteger = "integer"
+
+	// CrossOdds is the share of hook-typed and tagged-typed fields the draw
+	// hands a type= pair, a key the declared type admits, and a validate
+	// spelling for that type together, so the three seams meet on one field.
+	crossOdds = 4
 )
 
 // The pools the tagged draw adds to fuzzshape's component pool, each
@@ -177,6 +236,20 @@ var (
 		reflect.TypeFor[*Stamp](),
 		reflect.TypeFor[Marked](),
 		reflect.TypeFor[Faulty](),
+		reflect.TypeFor[Coded](),
+		reflect.TypeFor[*Coded](),
+		reflect.TypeFor[Labeled](),
+		reflect.TypeFor[Pairs](),
+	}
+
+	// TaggedTypes hold [Tagged] behind each edge a body is reached through,
+	// so the hooks its fields reach run under a definition, a pointer, and a
+	// collection element.
+	taggedTypes = []reflect.Type{
+		reflect.TypeFor[Tagged](),
+		reflect.TypeFor[*Tagged](),
+		reflect.TypeFor[[]Tagged](),
+		reflect.TypeFor[map[string]Tagged](),
 	}
 
 	// RecursiveTypes reach themselves, directly or through another type, so
@@ -190,9 +263,9 @@ var (
 		reflect.TypeFor[map[string]*Pong](),
 	}
 
-	// The hook and recursive types together are the plain-field types the
-	// tagged draw adds to fuzzshape's component pool.
-	extraTypes = slices.Concat(hookTypes, recursiveTypes)
+	// The hook, recursive, and tagged types together are the plain-field
+	// types the tagged draw adds to fuzzshape's component pool.
+	extraTypes = slices.Concat(hookTypes, recursiveTypes, taggedTypes)
 
 	// The named types each class contains, for [Constrained] and
 	// [Recursive] to look a field type up by.
@@ -203,6 +276,25 @@ var (
 		reflect.TypeFor[Stamp]():    true,
 		reflect.TypeFor[Marked]():   true,
 		reflect.TypeFor[Faulty]():   true,
+		reflect.TypeFor[Coded]():    true,
+		reflect.TypeFor[Labeled]():  true,
+		reflect.TypeFor[Pairs]():    true,
+		reflect.TypeFor[Tagged]():   true,
+	}
+
+	// The crossed draw spellings: a declared type, one key that type admits,
+	// and the form whose validate spellings pair with it.
+	crossDeclared = []struct {
+		typ  string
+		pair string
+		form string
+	}{
+		{formString, "minLength=1", formString},
+		{typeInteger, "minimum=0", formNumber},
+		{formNumber, "maximum=1e3", formNumber},
+		{"boolean", "const=true", formBool},
+		{"array", "minItems=1", formSequence},
+		{typeObject, "minProperties=1", formMap},
 	}
 
 	recursiveNamed = map[reflect.Type]bool{
@@ -278,6 +370,7 @@ var (
 	tagKeysBool     = []string{"const", "enum"}
 	tagKeysSequence = []string{"minItems", "maxItems", "uniqueItems"}
 	tagKeysMap      = []string{"minProperties", "maxProperties"}
+	tagKeysText     = []string{"minLength", "maxLength", "pattern", "format"}
 
 	// The validate spellings the draw pairs with each JSON form. They are
 	// spellings go-playground loads, since the validate parity rig judges the
@@ -332,7 +425,9 @@ var (
 			"unique",
 			"dive,keys,endkeys",
 		},
-		"other": {"required", "omitempty", "structonly", "nostructlevel", "omitnil"},
+		formObject: {"required", "omitempty", "structonly", "nostructlevel", "omitnil"},
+		formText:   {"required", "omitempty", "omitnil"},
+		"other":    {"required", "omitempty", "structonly", "nostructlevel", "omitnil"},
 	}
 )
 
@@ -404,6 +499,19 @@ func drawDialectTags(c *fuzzfill.Cursor, ft reflect.Type) reflect.StructTag {
 		parts = append(parts, jsonTag)
 	}
 
+	// A field of a hook type or a tagged type is where a type= pair, the
+	// keys after it, and an interpreter's rules meet a declared or nested
+	// schema, so a share of them draw all three at once.
+	if hookNamed[namedIn(ft)] && c.Intn(crossOdds) == 0 {
+		decl := crossDeclared[c.Intn(len(crossDeclared))]
+		spellings := validateSpellings[decl.form]
+
+		return reflect.StructTag(strings.Join(append(parts,
+			"jsonschema:"+strconv.Quote("type="+decl.typ+","+decl.pair),
+			"validate:"+strconv.Quote(spellings[c.Intn(len(spellings))]),
+		), " "))
+	}
+
 	if c.Bool() {
 		if pairs := drawJSONSchemaTag(c, form); pairs != "" {
 			parts = append(parts, "jsonschema:"+strconv.Quote(pairs))
@@ -450,8 +558,10 @@ func formKeys(form string) []string {
 		return slices.Concat(tagKeysAny, tagKeysBool)
 	case formSequence:
 		return slices.Concat(tagKeysAny, tagKeysSequence)
-	case formMap:
+	case formMap, formObject:
 		return slices.Concat(tagKeysAny, tagKeysMap)
+	case formText:
+		return slices.Concat(tagKeysAny, tagKeysText)
 	default:
 		return tagKeysAny
 	}
@@ -459,8 +569,9 @@ func formKeys(form string) []string {
 
 // jsonForm approximates the JSON form a field of ft takes: the form of the
 // kind behind its pointers, with a ,string coercion and a byte slice read as
-// a string, a text-marshaling type as a string, and every other named or
-// opaque type as other.
+// a string, a text-marshaling type as a string, a hook type as the form its
+// hook declares, a struct as an object, [time.Time] as text, and every other
+// named or opaque type as other.
 func jsonForm(ft reflect.Type, quoted bool) string {
 	for ft.Kind() == reflect.Pointer {
 		ft = ft.Elem()
@@ -471,6 +582,16 @@ func jsonForm(ft reflect.Type, quoted bool) string {
 	switch {
 	case ft == reflect.TypeFor[Stamp](), ft == reflect.TypeFor[[]byte]():
 		return formString
+	case ft == reflect.TypeFor[Coded](), ft == reflect.TypeFor[Labeled]():
+		return formString
+	case ft == reflect.TypeFor[Pairs]():
+		return formObject
+	case ft == reflect.TypeFor[time.Time]():
+		return formText
+	case ft == reflect.TypeFor[Marked]():
+		return formOther
+	case kind == reflect.Struct:
+		return formObject
 	case kind == reflect.String:
 		return formString
 	case kind >= reflect.Int && kind <= reflect.Float64:

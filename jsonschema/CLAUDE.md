@@ -173,7 +173,11 @@ is the only one that imports the parent package.
   recursive, and dialect-tag class; `TestKeysAreTheParsedVocabulary`
   (tagparse) holds the exported vocabulary to the parser.
 - `TestGenerateSeedsReachEveryClass` (fuzz_generate_test.go): the seed corpus
-  of the generation invariants rig reaches each class the tagged draw adds.
+  of the generation invariants rig reaches each class the tagged draw adds,
+  a crossed field, a nested tagged type, and an admitted tag among them.
+- `TestTaggedTypeDrawsEveryClass`, `TestInterpreterRunsReadTheDraw`
+  (fuzzgen): the tagged draw reaches every pool type and both oracle
+  answers, and the hook-run prediction reads the draw.
 
 ## Differential rigs
 
@@ -185,10 +189,13 @@ is the only one that imports the parent package.
   resolver, carries no provisional `@n` token, validates against its draft's
   metaschema, is pure across repeated and interleaved calls and leaves every
   handed-in override untouched, agrees between its extracted, inlined, and
-  `Inline` forms and between `T` and `*T`, and accepts a filled value where
-  the shape carries no constraint. A refusal must be one a hook, a dialect, a
-  conflict, or v2 reports. `FuzzFillNeverPanics` (fuzzfill) fills the same
-  draw under every option set.
+  `Inline` forms and between `T` and `*T`, accepts a filled value where
+  the shape carries no constraint, and runs the validate interpreter exactly
+  as often per tagged field as `fuzzgen.InterpreterRuns` predicts, inside a
+  subtree a type= pair replaced included. A refusal must be one a hook, a
+  dialect, a conflict, or v2 reports, and a jsonschema tag refusal on a shape
+  `fuzzgen.Admitted` vouches for is a failure. `FuzzFillNeverPanics`
+  (fuzzfill) fills the same draw under every option set.
 - `FuzzCompileAgreesWithMetaschema`: a vendored suite schema mutated one way
   is refused by `Compile` exactly when its draft's metaschema refuses it,
   outside `metaschemaTolerances` (what the Schema struct cannot see) and

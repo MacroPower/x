@@ -41,7 +41,7 @@ var (
 	// GenerateSeedDraws indexes the shape blobs the seed corpus takes from
 	// fuzzshape.Blobs, chosen so the seeds reach each class the tagged draw
 	// adds; TestGenerateSeedsReachEveryClass pins what the set covers.
-	generateSeedDraws = []int{125, 180, 194, 214, 247, 365}
+	generateSeedDraws = []int{71, 80, 125, 180, 214, 247, 365}
 )
 
 // FuzzGenerateInvariants asserts that every schema Generate emits is
@@ -68,11 +68,18 @@ var (
 //   - A shape drawn without constraint tags, hook types, or a constraining
 //     override accepts the filled value, the property FuzzShapeAccepts
 //     asserts on the plain draw.
+//   - The validate interpreter ran exactly as often as fuzzgen.InterpreterRuns
+//     predicts for each tagged field: once per field of the root, and for a
+//     field of a nested tagged type once per definition or per occurrence,
+//     inside a subtree a type= pair replaced included.
 //
 // A refused generation is classified rather than failed: a hook that asked to
 // refuse, a tag the dialect refuses on that field, a constraint conflict, a
 // defaults instance encoding/json/v2 cannot marshal, or a declaration
-// encoding/json/v2 refuses too. Any other error, and any panic, is a failure.
+// encoding/json/v2 refuses too. A jsonschema tag refusal is a failure when
+// fuzzgen.Admitted says every pair the shape carries is one its form admits,
+// so a refusal of a documented spelling is caught and not classified away.
+// Any other error, and any panic, is a failure.
 func FuzzGenerateInvariants(f *testing.F) {
 	ctx := context.Background()
 	metas := compileMetaSchemas(f)
@@ -86,7 +93,9 @@ func FuzzGenerateInvariants(f *testing.F) {
 		instance := reflect.New(rt)
 		fuzzfill.Fill(instance, values, append(fuzzshape.FillOptions(), fuzzfill.WithFull())...)
 
-		interpreter := jsonschema.WithTagInterpreter("validate", validate.NewInterpreter())
+		runs := map[string]int{}
+		interpreter := jsonschema.WithTagInterpreter("validate",
+			countingInterpreter{inner: validate.NewInterpreter(), runs: runs})
 		unrelated := append(slices.Clone(draw.Opts), interpreter)
 
 		opts := slices.Clone(unrelated)
@@ -102,6 +111,9 @@ func FuzzGenerateInvariants(f *testing.F) {
 
 			return
 		}
+
+		require.Equalf(t, fuzzgen.InterpreterRuns(rt, draw.Definitions), runs,
+			"the validate interpreter ran a different set of fields of %s than the draw predicts", rt)
 
 		requireHandedUntouched(t, rt, draw.Handed, handed)
 
@@ -187,10 +199,26 @@ func compileMetaSchemas(f *testing.F) map[jsonschema.Draft]*jsonschema.Validator
 	return out
 }
 
+// countingInterpreter records how often a tag interpreter runs per field,
+// keyed by fuzzgen.RunKey, and defers to the interpreter it wraps.
+type countingInterpreter struct {
+	inner jsonschema.TagInterpreter
+	runs  map[string]int
+}
+
+// Interpret implements [jsonschema.TagInterpreter].
+func (c countingInterpreter) Interpret(ctx context.Context, field jsonschema.FieldContext, tag jsonschema.Tag) error {
+	c.runs[fuzzgen.RunKey(field.Owner, field.StructField.Name)]++
+
+	return c.inner.Interpret(ctx, field, tag) //nolint:wrapcheck // A pass-through wrapper.
+}
+
 // classifyGenerateRefusal accepts a refusal generation documents and fails
 // on any other: a hook that asked to refuse, a tag the dialect refuses on
 // that field, a constraint conflict, a defaults instance encoding/json/v2
-// cannot marshal, or a declaration encoding/json/v2 refuses too.
+// cannot marshal, or a declaration encoding/json/v2 refuses too. A
+// jsonschema tag refusal on a shape whose every pair is admitted is a
+// failure.
 func classifyGenerateRefusal(t *testing.T, rt reflect.Type, instance reflect.Value, err error) {
 	t.Helper()
 
@@ -212,11 +240,20 @@ func classifyGenerateRefusal(t *testing.T, rt reflect.Type, instance reflect.Val
 
 		return
 
-	case strings.Contains(err.Error(), "jsonschema tag:"),
-		strings.Contains(err.Error(), `tag interpreter "validate":`):
-		// A drawn tag the dialect refuses on that field. The tag rigs and
-		// the validate parity rig judge which refusals are right; this rig
-		// asks only that a refusal is one a dialect reports.
+	case strings.Contains(err.Error(), "jsonschema tag:"):
+		// A drawn pair the dialect refuses on that field. The oracle names
+		// the pairs the package documents as admitted on the field's form;
+		// a refusal of one of those is the bug class the rig exists for,
+		// and any other refusal is one the tag rigs judge.
+		require.Falsef(t, fuzzgen.Admitted(rt),
+			"generation refused a jsonschema tag every field's form admits on %s: %v", rt, err)
+
+		return
+
+	case strings.Contains(err.Error(), `tag interpreter "validate":`):
+		// A drawn validate spelling the dialect refuses on that field. The
+		// validate parity rig judges which refusals are right; this rig asks
+		// only that a refusal is one the dialect reports.
 		return
 
 	default:
@@ -399,6 +436,23 @@ func TestGenerateSeedsReachEveryClass(t *testing.T) {
 		for field := range rt.Fields() {
 			seen["a jsonschema tag"] = seen["a jsonschema tag"] || field.Tag.Get("jsonschema") != ""
 			seen["a validate tag"] = seen["a validate tag"] || field.Tag.Get("validate") != ""
+			seen["a crossed field"] = seen["a crossed field"] ||
+				strings.HasPrefix(field.Tag.Get("jsonschema"), "type=") && field.Tag.Get("validate") != ""
+		}
+
+		if runs := fuzzgen.InterpreterRuns(rt, false); len(runs) > 0 {
+			seen["a hooked field"] = true
+		}
+
+		if fuzzgen.InterpreterRuns(rt, false)[fuzzgen.RunKey(reflect.TypeFor[fuzzgen.Tagged](), "N")] > 0 {
+			seen["a nested tagged type"] = true
+		}
+
+		if fuzzgen.Admitted(rt) {
+			for field := range rt.Fields() {
+				seen["an admitted jsonschema tag"] = seen["an admitted jsonschema tag"] ||
+					field.Tag.Get("jsonschema") != ""
+			}
 		}
 	}
 
@@ -412,7 +466,8 @@ func TestGenerateSeedsReachEveryClass(t *testing.T) {
 
 	for _, class := range []string{
 		"a constrained shape", "an unconstrained shape", "a recursive shape",
-		"a jsonschema tag", "a validate tag",
+		"a jsonschema tag", "a validate tag", "a crossed field", "a hooked field",
+		"a nested tagged type", "an admitted jsonschema tag",
 		"draft 7", "definitions off", "an override", "defaults",
 	} {
 		require.True(t, seen[class], "the seed corpus reaches no %s", class)
