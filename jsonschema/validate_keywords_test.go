@@ -801,6 +801,14 @@ func TestValidateNumericIntegerPathMatchesRationals(t *testing.T) {
 			instance: "9223372036854775807",
 			want:     []string{"9223372036854775807 is greater than 1"},
 		},
+		"bound past the float64 integer range": {
+			// The float64 nearest 1.0000000000000001e18 is 1000000000000000128,
+			// but a bound compares as its shortest decimal, 1000000000000000100,
+			// on the integer path as on the rational one.
+			schema:   &jsonschema.Schema{Maximum: new(1.0000000000000001e18)},
+			instance: "1000000000000000112",
+			want:     []string{"1000000000000000112 is greater than 1.0000000000000001e+18"},
+		},
 		"fractional divisor": {
 			schema:   &jsonschema.Schema{MultipleOf: new(0.5), Minimum: new(2.0)},
 			instance: "1",

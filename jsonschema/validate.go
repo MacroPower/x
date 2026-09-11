@@ -778,11 +778,14 @@ type precomputedBounds struct {
 	exclusiveMinimum *big.Rat
 	exclusiveMaximum *big.Rat
 
-	// The ints are the int64 forms of the same bounds, held when every set
-	// bound is an integer inside int64 range and multipleOf, when set, is
-	// positive, so an integer instance that fits an int64 is checked in
-	// machine arithmetic with no rational built. A bound with no such form
-	// (a fraction, a non-finite value, an out-of-range magnitude, or a
+	// The ints are the int64 forms of the same rationals, held when every
+	// set bound's rational is an integer inside int64 range and multipleOf,
+	// when set, is positive, so an integer instance that fits an int64 is
+	// checked in machine arithmetic with no rational built. They derive
+	// from the rationals rather than the floats, so a bound whose shortest
+	// decimal differs from its binary value (one past 2^53) compares on
+	// both paths as the same integer. A bound with no such form (a
+	// fraction, a non-finite value, an out-of-range magnitude, or a
 	// non-positive divisor) leaves it nil, and every instance takes the
 	// rational path.
 	ints *intBounds
@@ -1074,38 +1077,40 @@ func computeBounds(schema *Schema) *precomputedBounds {
 		b.exclusiveMaximum = numrat.Float64ToRat(*schema.ExclusiveMaximum)
 	}
 
-	b.ints = computeIntBounds(schema)
+	b.ints = computeIntBounds(schema, b)
 
 	return b
 }
 
-// computeIntBounds returns the int64 forms of a schema's set numeric bounds,
-// or nil when some set bound has none (see [precomputedBounds.ints]).
-func computeIntBounds(schema *Schema) *intBounds {
+// computeIntBounds returns the int64 forms of the rationals b holds for a
+// schema's set numeric bounds, or nil when some set bound has none (see
+// [precomputedBounds.ints]).
+func computeIntBounds(schema *Schema, b *precomputedBounds) *intBounds {
 	ib := &intBounds{}
 
 	var ok bool
 
 	if schema.MultipleOf != nil {
-		if ib.multipleOf, ok = boundInt64(*schema.MultipleOf); !ok || ib.multipleOf <= 0 {
+		if ib.multipleOf, ok = ratInt64(b.multipleOf); !ok || ib.multipleOf <= 0 {
 			return nil
 		}
 	}
 
 	for _, bound := range []struct {
-		f *float64
-		n *int64
+		r   *big.Rat
+		n   *int64
+		set bool
 	}{
-		{schema.Minimum, &ib.minimum},
-		{schema.Maximum, &ib.maximum},
-		{schema.ExclusiveMinimum, &ib.exclusiveMinimum},
-		{schema.ExclusiveMaximum, &ib.exclusiveMaximum},
+		{b.minimum, &ib.minimum, schema.Minimum != nil},
+		{b.maximum, &ib.maximum, schema.Maximum != nil},
+		{b.exclusiveMinimum, &ib.exclusiveMinimum, schema.ExclusiveMinimum != nil},
+		{b.exclusiveMaximum, &ib.exclusiveMaximum, schema.ExclusiveMaximum != nil},
 	} {
-		if bound.f == nil {
+		if !bound.set {
 			continue
 		}
 
-		if *bound.n, ok = boundInt64(*bound.f); !ok {
+		if *bound.n, ok = ratInt64(bound.r); !ok {
 			return nil
 		}
 	}
@@ -1113,15 +1118,14 @@ func computeIntBounds(schema *Schema) *intBounds {
 	return ib
 }
 
-// boundInt64 returns f as an int64 when it is an integer inside int64 range.
-// The range test compares against the float64 neighbors of the limits, since
-// 2^63 itself is a float64 while MaxInt64 is not.
-func boundInt64(f float64) (int64, bool) {
-	if f != math.Trunc(f) || f < math.MinInt64 || f >= -math.MinInt64 {
+// ratInt64 returns r as an int64 when it is an integer inside int64 range.
+// A nil r, the rational of a non-finite bound, has no form.
+func ratInt64(r *big.Rat) (int64, bool) {
+	if r == nil || !r.IsInt() || !r.Num().IsInt64() {
 		return 0, false
 	}
 
-	return int64(f), true
+	return r.Num().Int64(), true
 }
 
 // runContext returns the context of the current compile or validation run
