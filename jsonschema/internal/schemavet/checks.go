@@ -4,6 +4,7 @@ import (
 	"encoding/json/jsontext"
 	"fmt"
 	"maps"
+	"regexp"
 	"slices"
 	"strconv"
 
@@ -428,24 +429,31 @@ func checkItemsArrayDraft2020(schema *Schema, schemaPath string, visited map[*Sc
 	return nil
 }
 
-// The sizeBounds table lists the length and count keywords with their
-// *int accessors, for the compile-time domain check in
-// [checkBoundDomains]. The init guard below pins the list to
-// [keywordmeta.Sizes], so a count keyword added to the semantics table
-// cannot silently skip the check.
-var sizeBounds = []struct {
-	get     func(*Schema) *int
-	keyword string
-}{
-	{func(s *Schema) *int { return s.MinLength }, keyword.MinLength},
-	{func(s *Schema) *int { return s.MaxLength }, keyword.MaxLength},
-	{func(s *Schema) *int { return s.MinItems }, keyword.MinItems},
-	{func(s *Schema) *int { return s.MaxItems }, keyword.MaxItems},
-	{func(s *Schema) *int { return s.MinProperties }, keyword.MinProperties},
-	{func(s *Schema) *int { return s.MaxProperties }, keyword.MaxProperties},
-	{func(s *Schema) *int { return s.MinContains }, keyword.MinContains},
-	{func(s *Schema) *int { return s.MaxContains }, keyword.MaxContains},
-}
+var (
+	// The sizeBounds table lists the length and count keywords with their
+	// *int accessors, for the compile-time domain check in
+	// [checkBoundDomains]. The init guard below pins the list to
+	// [keywordmeta.Sizes], so a count keyword added to the semantics table
+	// cannot silently skip the check.
+	sizeBounds = []struct {
+		get     func(*Schema) *int
+		keyword string
+	}{
+		{func(s *Schema) *int { return s.MinLength }, keyword.MinLength},
+		{func(s *Schema) *int { return s.MaxLength }, keyword.MaxLength},
+		{func(s *Schema) *int { return s.MinItems }, keyword.MinItems},
+		{func(s *Schema) *int { return s.MaxItems }, keyword.MaxItems},
+		{func(s *Schema) *int { return s.MinProperties }, keyword.MinProperties},
+		{func(s *Schema) *int { return s.MaxProperties }, keyword.MaxProperties},
+		{func(s *Schema) *int { return s.MinContains }, keyword.MinContains},
+		{func(s *Schema) *int { return s.MaxContains }, keyword.MaxContains},
+	}
+
+	// AnchorName is the plain-name grammar Draft 2020-12 fixes for $anchor
+	// and $dynamicAnchor (core section 8.2.2): a letter or underscore, then
+	// letters, digits, hyphens, periods, and underscores.
+	anchorName = regexp.MustCompile(`^[A-Za-z_][-A-Za-z0-9._]*$`)
+)
 
 // init cross-checks sizeBounds against the semantics table's derived size
 // set. Panicking at load follows the dispatch table's convention: every test
@@ -498,6 +506,37 @@ func checkPatterns(schema *Schema, schemaPath string, visited map[*Schema]bool) 
 
 	for _, entry := range Entries(schema) {
 		err := checkPatterns(entry.Schema, schemaPath+string(entry.Pointer), visited)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// checkAnchorNames rejects an $anchor or $dynamicAnchor outside the
+// plain-name grammar, which no reference could spell as a fragment. The
+// check is draft-agnostic, since the Schema holds the fields under every
+// draft and a document meant for 2020-12 carries no $schema to say so; under
+// Draft-07 the keywords register nothing, so a refused name changed nothing
+// there. The traversal mirrors [checkPatterns].
+func checkAnchorNames(schema *Schema, schemaPath string, visited map[*Schema]bool) error {
+	if schema == nil || visited[schema] {
+		return nil
+	}
+
+	visited[schema] = true
+
+	if schema.Anchor != "" && !anchorName.MatchString(schema.Anchor) {
+		return fmt.Errorf("%w: %q at %s/%s", ErrInvalidAnchor, schema.Anchor, schemaPath, keyword.Anchor)
+	}
+
+	if schema.DynamicAnchor != "" && !anchorName.MatchString(schema.DynamicAnchor) {
+		return fmt.Errorf("%w: %q at %s/%s", ErrInvalidAnchor, schema.DynamicAnchor, schemaPath, keyword.DynamicAnchor)
+	}
+
+	for _, entry := range Entries(schema) {
+		err := checkAnchorNames(entry.Schema, schemaPath+string(entry.Pointer), visited)
 		if err != nil {
 			return err
 		}

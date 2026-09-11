@@ -446,6 +446,11 @@ func (f *Frozen) VetNode(pathPrefix string) (Node, error) {
 		return Node{}, err
 	}
 
+	err = checkAnchorNames(f.root, pathPrefix, map[*Schema]bool{})
+	if err != nil {
+		return Node{}, err
+	}
+
 	if f.profile.RejectItemsArray {
 		err = checkItemsArrayDraft2020(f.root, pathPrefix, map[*Schema]bool{})
 		if err != nil {

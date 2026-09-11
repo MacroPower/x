@@ -1335,6 +1335,11 @@
 // schema. Malformed JSON returns the wrapped decode error without the
 // sentinel.
 //
+// All three also return an error wrapping [ErrInvalidType] for a "type": ""
+// and [ErrInvalidAnchor] for an empty $anchor or $dynamicAnchor in any
+// sub-schema position, since unmarshaling into a [Schema] directly reads each
+// as the absent keyword and the document would silently lose it.
+//
 // All three also return an error wrapping [ErrEmptyRef] for a "$ref": "" in
 // any sub-schema position, naming the pointer of the offending node. RFC 3986
 // reads the empty reference as the current document, and unmarshaling into a
@@ -1367,6 +1372,10 @@
 //     JSON Schema types ("null", "boolean", "string", "integer", "number",
 //     "object", "array"). [CheckTypeNames] runs the same check standalone
 //     (see Traversal below), and the two produce textually identical errors.
+//   - [ErrInvalidAnchor]: an $anchor or $dynamicAnchor outside the
+//     plain-name grammar (a letter or underscore, then letters, digits,
+//     hyphens, periods, and underscores), under every draft. No reference
+//     could spell such a name as a fragment.
 //   - [ErrItemsArrayUnderDraft2020]: under [Draft2020], the array form of the
 //     items keyword (what a JSON "items": [ ... ] parses into). That form is
 //     the Draft-07 spelling of tuple validation. 2020-12 spells tuples with

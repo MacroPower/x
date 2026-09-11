@@ -7340,6 +7340,34 @@ func TestParseSchemaValue(t *testing.T) {
 			instance: map[string]any{"$ref": ""},
 			valid:    true,
 		},
+
+		// An empty type or anchor reads as the absent keyword the same way,
+		// so each is refused in the form the compile-time vet reports.
+		"empty type at the root": {
+			doc:      map[string]any{"type": ""},
+			err:      jsonschema.ErrInvalidType,
+			contains: `"" at /type`,
+		},
+		"empty type in a property": {
+			doc:      map[string]any{"properties": map[string]any{"a": map[string]any{"type": ""}}},
+			err:      jsonschema.ErrInvalidType,
+			contains: `"" at /properties/a/type`,
+		},
+		"empty $anchor": {
+			doc:      map[string]any{"$anchor": ""},
+			err:      jsonschema.ErrInvalidAnchor,
+			contains: `"" at /$anchor`,
+		},
+		"empty $dynamicAnchor in an items schema": {
+			doc:      map[string]any{"items": map[string]any{"$dynamicAnchor": ""}},
+			err:      jsonschema.ErrInvalidAnchor,
+			contains: `"" at /items/$dynamicAnchor`,
+		},
+		"type inside const is data": {
+			doc:      map[string]any{"const": map[string]any{"type": ""}},
+			instance: map[string]any{"type": ""},
+			valid:    true,
+		},
 	}
 
 	for name, tt := range tests {

@@ -1547,6 +1547,9 @@ func MustCompile(schema *Schema, opts ...ValidateOption) *Validator {
 // naming the Go type. This includes nil, the decoding of a top-level JSON
 // null, which [Schema.UnmarshalJSON] silently coerces to the false schema.
 // Values produced by [Normalize] ([jsonv1.Number] leaves) convert correctly.
+// An empty string under $ref, type, $anchor, or $dynamicAnchor, which
+// unmarshaling into a [Schema] directly reads as the absent keyword, returns
+// an error wrapping [ErrEmptyRef], [ErrInvalidType], or [ErrInvalidAnchor].
 // A bound keyword outside float64 range or a count keyword outside the int32
 // range returns an error wrapping [ErrKeywordOutOfRange], and a count
 // spelled with an exponent or a decimal point (1E2, 1.0e2) converts to the
@@ -1590,7 +1593,7 @@ func ParseSchemaValue(doc any) (*Schema, error) {
 			return nil, fmt.Errorf("decode schema document: %w", err)
 		}
 
-		err = refuseEmptyRef(&s, d)
+		err = refuseEmptyKeywords(&s, d)
 		if err != nil {
 			return nil, err
 		}
@@ -1605,14 +1608,17 @@ func ParseSchemaValue(doc any) (*Schema, error) {
 	}
 }
 
-// refuseEmptyRef refuses a "$ref": "" in any sub-schema position of the
-// decoded document. The upstream decode reads the empty string as the absent
-// keyword, so without the check RFC 3986's reference to the current document
-// would silently become the empty schema. Each typed node's [Location]
-// segments resolve its source object, the pairing restoreExactValues uses; a
-// boolean source has no members and is skipped. The error names the
-// pointer of the offending node.
-func refuseEmptyRef(s *Schema, doc map[string]any) error {
+// refuseEmptyKeywords refuses an empty string under a keyword whose empty
+// value the upstream decode reads as the absent keyword, in any sub-schema
+// position of the decoded document: a "$ref": "" is RFC 3986's reference to
+// the current document and would silently become the empty schema, a
+// "type": "" names no type and would silently constrain nothing, and an
+// empty $anchor or $dynamicAnchor is outside the plain-name grammar and
+// would silently register nothing. Each typed node's [Location] segments
+// resolve its source object, the pairing restoreExactValues uses; a boolean
+// source has no members and is skipped. The error names the pointer of the
+// offending node, in the form the compile-time vet reports for the keyword.
+func refuseEmptyKeywords(s *Schema, doc map[string]any) error {
 	return Walk(s, func(loc Location, node *Schema) error {
 		src, ok := resolveDocValue(doc, loc.Segments).(map[string]any)
 		if !ok {
@@ -1621,6 +1627,16 @@ func refuseEmptyRef(s *Schema, doc map[string]any) error {
 
 		if ref, present := src[KeywordRef]; present && ref == "" {
 			return fmt.Errorf("#%s: %w", loc.Pointer, ErrEmptyRef)
+		}
+
+		if typ, present := src[KeywordType]; present && typ == "" {
+			return fmt.Errorf("%w: %q at %s/%s", ErrInvalidType, "", loc.Pointer, KeywordType)
+		}
+
+		for _, key := range []string{KeywordAnchor, KeywordDynamicAnchor} {
+			if anchor, present := src[key]; present && anchor == "" {
+				return fmt.Errorf("%w: %q at %s/%s", ErrInvalidAnchor, "", loc.Pointer, key)
+			}
 		}
 
 		return nil

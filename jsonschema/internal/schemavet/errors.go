@@ -51,6 +51,10 @@ var (
 	// ErrInvalidID reports an $id outside the keyword's domain.
 	ErrInvalidID = errors.New("invalid $id")
 
+	// ErrInvalidAnchor reports an $anchor or $dynamicAnchor outside the
+	// plain-name grammar the keyword fixes.
+	ErrInvalidAnchor = errors.New("invalid anchor name")
+
 	// ErrMisplacedVocabulary reports a $vocabulary on a node whose $schema
 	// does not establish the Draft 2020-12 dialect.
 	ErrMisplacedVocabulary = errors.New("misplaced $vocabulary")

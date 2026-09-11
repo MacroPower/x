@@ -13,6 +13,7 @@ const (
 	KeywordAdditionalItems       = keyword.AdditionalItems
 	KeywordAdditionalProperties  = keyword.AdditionalProperties
 	KeywordAllOf                 = keyword.AllOf
+	KeywordAnchor                = keyword.Anchor
 	KeywordAnyOf                 = keyword.AnyOf
 	KeywordConst                 = keyword.Const
 	KeywordContains              = keyword.Contains
@@ -27,6 +28,7 @@ const (
 	KeywordDependentSchemas      = keyword.DependentSchemas
 	KeywordDeprecated            = keyword.Deprecated
 	KeywordDescription           = keyword.Description
+	KeywordDynamicAnchor         = keyword.DynamicAnchor
 	KeywordDynamicRef            = keyword.DynamicRef
 	KeywordElse                  = keyword.Else
 	KeywordEnum                  = keyword.Enum

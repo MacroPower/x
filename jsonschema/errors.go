@@ -202,6 +202,19 @@ var (
 	// originates in that package or here.
 	ErrInvalidID = schemavet.ErrInvalidID
 
+	// ErrInvalidAnchor is returned by [Compile] and [Inline] for an $anchor
+	// or $dynamicAnchor outside the plain-name grammar Draft 2020-12 fixes
+	// (a letter or underscore, then letters, digits, hyphens, periods, and
+	// underscores), under every draft, since no reference could spell such a
+	// name as a fragment. [ParseSchemaValue], [ParseSchema], and
+	// [CompileJSON] return it for an empty one, which unmarshaling into a
+	// [Schema] directly would read as the absent keyword.
+	//
+	// It is re-exported from internal/schemavet, the shared structural-vetting
+	// core, so [errors.Is] matches the sentinel identically whether a failure
+	// originates in that package or here.
+	ErrInvalidAnchor = schemavet.ErrInvalidAnchor
+
 	// ErrInvalidBaseURI is returned by [Compile] and [Inline] when the
 	// [WithBaseURI] value does not parse as a URI reference. Every ref and $id
 	// in the root document absolutizes against the base, so an unparsable base

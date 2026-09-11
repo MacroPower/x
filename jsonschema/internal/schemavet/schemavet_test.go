@@ -73,6 +73,18 @@ func TestVetViolationPaths(t *testing.T) {
 			err:    schemavet.ErrNegativeBound,
 			path:   "/minLength",
 		},
+		"anchor outside the plain-name grammar": {
+			schema: &schemavet.Schema{Properties: map[string]*schemavet.Schema{
+				"a": {Anchor: "1bad"},
+			}},
+			err:  schemavet.ErrInvalidAnchor,
+			path: "/properties/a/$anchor",
+		},
+		"dynamic anchor with a space": {
+			schema: &schemavet.Schema{DynamicAnchor: "a b"},
+			err:    schemavet.ErrInvalidAnchor,
+			path:   "/$dynamicAnchor",
+		},
 		"items array under 2020-12": {
 			schema:  &schemavet.Schema{ItemsArray: []*schemavet.Schema{{}}},
 			profile: schemavet.Profile{RejectItemsArray: true},
