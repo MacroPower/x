@@ -1025,7 +1025,9 @@
 //     refused on a bare slice and taken on a pointer to one.
 //   - enum on []byte is an error, because a base64 string has no item schema.
 //   - A validate dive or sequence-wide oneof reaches the same element
-//     schemas, so the two dialects agree about what an element is.
+//     schemas, so the two dialects agree about what an element is. A field
+//     carrying a registered interpreter's tag has an extracted sequence
+//     definition copied inline for it, as an enum has.
 //
 // A keyword the field's shape cannot carry is an error rather than an inert
 // keyword nothing enforces: minItems=3 on a string, or any numeric bound on a

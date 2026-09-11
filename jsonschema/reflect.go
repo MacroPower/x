@@ -1406,7 +1406,7 @@ func (g *run) buildFieldSchema(
 	// [run.applyFieldTag], which parses it again.
 	directives := fieldDirectives(fi)
 
-	g.inlineTaggedRef(fieldNode, directives)
+	g.inlineTaggedRef(fieldNode, directives, g.fieldInterpreted(fi))
 
 	// Allocate the authored canvas for the field and every sequence/map element
 	// beneath it. Field-level processing (the comment provider, the jsonschema
@@ -1500,26 +1500,43 @@ func applyTypeOverrideDirective(fieldNode *node, directives []tagparse.Directive
 // documented fate of an override on it. An enum on a sequence lands on the
 // element schemas, which a definition holds beneath its body, so a sequence
 // body is copied for the tag to reach, whether the field names the type or
-// an element beneath the field does. It runs in the build phase, so the
-// null pass decides the copy from the facts the entry recorded for the type
-// as it decides an inline occurrence, and the naming pass sees an entry no
-// occurrence refers to as the orphan it is. A verbatim body is emitted as
-// authored, so it stays referenced.
-func (g *run) inlineTaggedRef(n *node, directives []tagparse.Directive) {
-	enum := tagHasEnum(directives)
+// an element beneath the field does. A tag interpreter's rules reach the
+// elements the same way (a validate dive, or a sequence-wide oneof), and
+// the interpreter runs after this phase, so a field carrying any
+// registered interpreter's tag has its sequence body copied too; a rule
+// that never reaches the elements costs the copy alone. It runs in the
+// build phase, so the null pass decides the copy from the facts the entry
+// recorded for the type as it decides an inline occurrence, and the naming
+// pass sees an entry no occurrence refers to as the orphan it is. A
+// verbatim body is emitted as authored, so it stays referenced.
+func (g *run) inlineTaggedRef(n *node, directives []tagparse.Directive, interpreted bool) {
+	elements := tagHasEnum(directives) || interpreted
 
 	if body := refBody(n); body != nil {
 		switch {
 		case tagOverridesType(directives) && body.kind != kindObject,
 			body.kind == kindValue && tagReplacesKeyword(directives, body.payload),
-			enum && sequenceKind(body.kind):
+			elements && sequenceKind(body.kind):
 			n.inlineBody(g.draft)
 		}
 	}
 
-	if enum {
+	if elements {
 		g.inlineSequenceElements(n, map[*defEntry]bool{})
 	}
+}
+
+// fieldInterpreted reports whether the field carries the struct tag of a
+// registered tag interpreter, so its element rules can reach a sequence
+// definition's elements through a copy of the body.
+func (g *run) fieldInterpreted(fi fieldset.Field) bool {
+	for _, reg := range g.tagInterpreters {
+		if _, ok := fi.StructField.Tag.Lookup(reg.key); ok {
+			return true
+		}
+	}
+
+	return false
 }
 
 // inlineSequenceElements copies a sequence body into every reference the

@@ -3999,3 +3999,53 @@ func TestValidateInterpreter_LaterAlternativeWritesNoElement(t *testing.T) {
 		}
 	})
 }
+
+// extendedTags is a named slice extracted to $defs through its extender.
+type extendedTags []string
+
+func (extendedTags) JSONSchemaExtend(_ context.Context, _ jsonschema.TypeContext, ts *jsonschema.TypeSchema) error {
+	ts.Value.Description = "tags"
+
+	return nil
+}
+
+// TestValidateInterpreter_ElementRulesReachAnExtractedSequence pins that a
+// dive or a sequence-wide oneof on a field whose slice type is extracted to
+// $defs reaches the element schemas, as the jsonschema tag's enum does. The
+// build phase used to copy a sequence definition's body for the jsonschema
+// tag's own directives alone, so an interpreter's element rule found a bare
+// $ref with no item sub-schema to constrain.
+func TestValidateInterpreter_ElementRulesReachAnExtractedSequence(t *testing.T) {
+	t.Parallel()
+
+	type dive struct {
+		T extendedTags `json:"t" validate:"dive,required"`
+	}
+
+	type oneOf struct {
+		T extendedTags `json:"t" validate:"oneof=a b"`
+	}
+
+	t.Run("dive", func(t *testing.T) {
+		t.Parallel()
+
+		s, err := jsonschema.GenerateFor[dive](t.Context(), validateInterp())
+		require.NoError(t, err)
+
+		items := s.Properties["t"].Items
+		require.NotNil(t, items, "the sequence body is copied for the rule to reach")
+		require.NotNil(t, items.MinLength)
+		assert.Equal(t, 1, *items.MinLength)
+	})
+
+	t.Run("oneof", func(t *testing.T) {
+		t.Parallel()
+
+		s, err := jsonschema.GenerateFor[oneOf](t.Context(), validateInterp())
+		require.NoError(t, err)
+
+		items := s.Properties["t"].Items
+		require.NotNil(t, items)
+		assert.Equal(t, []any{"a", "b"}, items.Enum)
+	})
+}
