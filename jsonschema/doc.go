@@ -1423,8 +1423,9 @@
 // judge, at validation time.
 //
 // Instance numbers compare exactly. A validation run decodes them as
-// [encoding/json.Number] and compares them as [math/big.Rat], with one bound
-// on the work an adversarial literal can demand. For a JSON number whose
+// [encoding/json.Number] and compares them by value, as [math/big.Rat] past
+// the range of machine integers, with one bound on the work an adversarial
+// literal can demand. For a JSON number whose
 // exact value exceeds a cap of about 4096 significant digits or decimal
 // exponent magnitude:
 //

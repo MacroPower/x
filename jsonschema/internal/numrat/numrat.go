@@ -430,6 +430,27 @@ func (d DecNumber) IsIntegral() bool {
 	return d.sig == "" || d.exp >= len(d.sig)
 }
 
+// Int64 returns the value as an int64 when it is an integer of at most
+// machineDigits digits, which every such integer fits, reporting false for a
+// fraction or a longer integer. Zero, whatever its sign, is 0.
+func (d DecNumber) Int64() (int64, bool) {
+	if d.sig == "" {
+		return 0, true
+	}
+
+	if !d.IsIntegral() || d.exp > machineDigits {
+		return 0, false
+	}
+
+	//nolint:gosec // At most machineDigits digits, below 10^18, inside int64.
+	n := int64(digitsUint64(d.sig) * pow10(int64(d.exp-len(d.sig))))
+	if d.neg {
+		n = -n
+	}
+
+	return n, true
+}
+
 // ExactlyComparable reports whether the value can be expanded into a [big.Rat]
 // at bounded cost: at most MaxNumberLen significant digits scaled by at most
 // MaxNumberLen decimal places. Values outside these bounds are compared by

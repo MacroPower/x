@@ -777,6 +777,25 @@ type precomputedBounds struct {
 	maximum          *big.Rat
 	exclusiveMinimum *big.Rat
 	exclusiveMaximum *big.Rat
+
+	// The ints are the int64 forms of the same bounds, held when every set
+	// bound is an integer inside int64 range and multipleOf, when set, is
+	// positive, so an integer instance that fits an int64 is checked in
+	// machine arithmetic with no rational built. A bound with no such form
+	// (a fraction, a non-finite value, an out-of-range magnitude, or a
+	// non-positive divisor) leaves it nil, and every instance takes the
+	// rational path.
+	ints *intBounds
+}
+
+// intBounds is the int64 form of a schema's numeric bounds (see
+// [precomputedBounds]). A field of an absent keyword is zero and never read.
+type intBounds struct {
+	multipleOf       int64
+	minimum          int64
+	maximum          int64
+	exclusiveMinimum int64
+	exclusiveMaximum int64
 }
 
 // compiledPattern caches the result of compiling a regular expression pattern at
@@ -1055,7 +1074,54 @@ func computeBounds(schema *Schema) *precomputedBounds {
 		b.exclusiveMaximum = numrat.Float64ToRat(*schema.ExclusiveMaximum)
 	}
 
+	b.ints = computeIntBounds(schema)
+
 	return b
+}
+
+// computeIntBounds returns the int64 forms of a schema's set numeric bounds,
+// or nil when some set bound has none (see [precomputedBounds.ints]).
+func computeIntBounds(schema *Schema) *intBounds {
+	ib := &intBounds{}
+
+	var ok bool
+
+	if schema.MultipleOf != nil {
+		if ib.multipleOf, ok = boundInt64(*schema.MultipleOf); !ok || ib.multipleOf <= 0 {
+			return nil
+		}
+	}
+
+	for _, bound := range []struct {
+		f *float64
+		n *int64
+	}{
+		{schema.Minimum, &ib.minimum},
+		{schema.Maximum, &ib.maximum},
+		{schema.ExclusiveMinimum, &ib.exclusiveMinimum},
+		{schema.ExclusiveMaximum, &ib.exclusiveMaximum},
+	} {
+		if bound.f == nil {
+			continue
+		}
+
+		if *bound.n, ok = boundInt64(*bound.f); !ok {
+			return nil
+		}
+	}
+
+	return ib
+}
+
+// boundInt64 returns f as an int64 when it is an integer inside int64 range.
+// The range test compares against the float64 neighbors of the limits, since
+// 2^63 itself is a float64 while MaxInt64 is not.
+func boundInt64(f float64) (int64, bool) {
+	if f != math.Trunc(f) || f < math.MinInt64 || f >= -math.MinInt64 {
+		return 0, false
+	}
+
+	return int64(f), true
 }
 
 // runContext returns the context of the current compile or validation run
@@ -2609,10 +2675,20 @@ func evalNumeric(ctx evalContext) []*ValidationError {
 		return validateNumericNonComparable(schema, desc, instancePath, schemaPath)
 	}
 
+	// An integer instance that fits an int64, against bounds that all fit,
+	// is checked in machine arithmetic; any other shape expands the
+	// rational. Both paths report the same keywords in the same order with
+	// the same messages.
+	d, _ := instance.Dec()
+
+	if bounds.ints != nil {
+		if n, ok := d.Int64(); ok {
+			return validateNumericInt64(schema, bounds.ints, n, instancePath, schemaPath)
+		}
+	}
+
 	val, ok := instance.Rat()
 	if !ok {
-		d, _ := instance.Dec()
-
 		return validateNumericUnbounded(schema, bounds, d, literal, instancePath, schemaPath)
 	}
 
@@ -2681,6 +2757,44 @@ func evalNumeric(ctx evalContext) []*ValidationError {
 				fmt.Sprintf("%s is greater than or equal to %v", numrat.RatString(val), *schema.ExclusiveMaximum),
 			)
 		}
+	}
+
+	return errs
+}
+
+// validateNumericInt64 checks the numeric bound keywords for an integer
+// instance n against bounds that all hold an int64 form, in the keyword
+// order and wording of the rational path. The divisor is positive by
+// [computeIntBounds], so the remainder test cannot fault.
+func validateNumericInt64(
+	schema *Schema, ints *intBounds, n int64, instancePath instanceLocation, schemaPath schemaLocation,
+) []*ValidationError {
+	var errs []*ValidationError
+
+	add := func(keyword, msg string) {
+		errs = append(errs, leafError(instancePath, schemaPath, keyword, msg))
+	}
+
+	text := strconv.FormatInt(n, 10)
+
+	if schema.MultipleOf != nil && n%ints.multipleOf != 0 {
+		add(KeywordMultipleOf, fmt.Sprintf("%s is not a multiple of %v", text, *schema.MultipleOf))
+	}
+
+	if schema.Minimum != nil && n < ints.minimum {
+		add(KeywordMinimum, fmt.Sprintf("%s is less than %v", text, *schema.Minimum))
+	}
+
+	if schema.Maximum != nil && n > ints.maximum {
+		add(KeywordMaximum, fmt.Sprintf("%s is greater than %v", text, *schema.Maximum))
+	}
+
+	if schema.ExclusiveMinimum != nil && n <= ints.exclusiveMinimum {
+		add(KeywordExclusiveMinimum, fmt.Sprintf("%s is less than or equal to %v", text, *schema.ExclusiveMinimum))
+	}
+
+	if schema.ExclusiveMaximum != nil && n >= ints.exclusiveMaximum {
+		add(KeywordExclusiveMaximum, fmt.Sprintf("%s is greater than or equal to %v", text, *schema.ExclusiveMaximum))
 	}
 
 	return errs

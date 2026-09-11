@@ -320,3 +320,40 @@ func TestFloat64ToRat(t *testing.T) {
 		assert.Nil(t, numrat.Float64ToRat(inf))
 	})
 }
+
+func TestDecNumberInt64(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		input string
+		want  int64
+		ok    bool
+	}{
+		"zero":                     {input: "0", want: 0, ok: true},
+		"negative zero":            {input: "-0", want: 0, ok: true},
+		"integer":                  {input: "12", want: 12, ok: true},
+		"negative integer":         {input: "-7", want: -7, ok: true},
+		"integer via fraction":     {input: "1.20e1", want: 12, ok: true},
+		"integer via exponent":     {input: "120e-1", want: 12, ok: true},
+		"eighteen digits":          {input: "999999999999999999", want: 999999999999999999, ok: true},
+		"eighteen digits negative": {input: "-999999999999999999", want: -999999999999999999, ok: true},
+		"nineteen digits":          {input: "1000000000000000000", ok: false},
+		"int64 maximum":            {input: "9223372036854775807", ok: false},
+		"power of ten past digits": {input: "1e18", ok: false},
+		"fraction":                 {input: "1.5", ok: false},
+		"tiny fraction":            {input: "12e-1", ok: false},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			d, parsed := numrat.ParseDecNumber(tc.input)
+			require.True(t, parsed)
+
+			got, ok := d.Int64()
+			assert.Equal(t, tc.ok, ok)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}

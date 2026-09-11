@@ -739,3 +739,124 @@ func TestValidateAdditionalPropertiesOrderWithoutPatterns(t *testing.T) {
 
 	assert.Equal(t, []string{"/alpha", "/zeta"}, paths)
 }
+
+// TestValidateNumericIntegerPathMatchesRationals pins the machine-integer
+// path of the numeric keywords against the rational one: an integer
+// instance under integral bounds is checked in int64 arithmetic, and the
+// same instance under the same bounds plus an upper bound outside int64
+// range, which forces the rationals and can fail no instance the integer
+// path judges, reports the same errors word for word. The expected messages
+// pin the wording both paths share. No row sets both upper bounds, so the
+// widening always has one free.
+func TestValidateNumericIntegerPathMatchesRationals(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		schema   *jsonschema.Schema
+		instance jsonv1.Number
+		want     []string
+	}{
+		"inside every bound": {
+			schema: &jsonschema.Schema{
+				MultipleOf: new(3.0), Minimum: new(-9.0), Maximum: new(9.0),
+				ExclusiveMinimum: new(-9.0),
+			},
+			instance: "6",
+		},
+		"every bound violated": {
+			schema: &jsonschema.Schema{
+				MultipleOf: new(3.0), Minimum: new(-9.0), Maximum: new(-11.0),
+				ExclusiveMinimum: new(-10.0),
+			},
+			instance: "-10",
+			want: []string{
+				"-10 is not a multiple of 3",
+				"-10 is less than -9",
+				"-10 is greater than -11",
+				"-10 is less than or equal to -10",
+			},
+		},
+		"exclusive maximum at the boundary": {
+			schema:   &jsonschema.Schema{ExclusiveMaximum: new(5.0)},
+			instance: "5",
+			want:     []string{"5 is greater than or equal to 5"},
+		},
+		"integer spelled with an exponent": {
+			schema:   &jsonschema.Schema{Minimum: new(100.0)},
+			instance: "9.9e1",
+			want:     []string{"99 is less than 100"},
+		},
+		"negative zero": {
+			schema:   &jsonschema.Schema{ExclusiveMinimum: new(0.0)},
+			instance: "-0",
+			want:     []string{"0 is less than or equal to 0"},
+		},
+		"eighteen digit multiple": {
+			schema:   &jsonschema.Schema{MultipleOf: new(17.0)},
+			instance: "999999999999999999",
+			want:     []string{"999999999999999999 is not a multiple of 17"},
+		},
+		"nineteen digit instance": {
+			schema:   &jsonschema.Schema{Maximum: new(1.0)},
+			instance: "9223372036854775807",
+			want:     []string{"9223372036854775807 is greater than 1"},
+		},
+		"fractional divisor": {
+			schema:   &jsonschema.Schema{MultipleOf: new(0.5), Minimum: new(2.0)},
+			instance: "1",
+			want:     []string{"1 is less than 2"},
+		},
+		"fractional instance": {
+			schema:   &jsonschema.Schema{MultipleOf: new(2.0), Maximum: new(1.0)},
+			instance: "1.5",
+			want:     []string{"1.5 is not a multiple of 2", "1.5 is greater than 1"},
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := numericMessages(t, tc.schema, tc.instance)
+			assert.Equal(t, tc.want, got)
+
+			widened := *tc.schema
+			if widened.ExclusiveMaximum == nil {
+				widened.ExclusiveMaximum = new(1e19)
+			} else {
+				require.Nil(t, widened.Maximum)
+
+				widened.Maximum = new(1e19)
+			}
+
+			assert.Equal(t, got, numericMessages(t, &widened, tc.instance))
+		})
+	}
+}
+
+// numericMessages returns the messages of the numeric keyword errors schema
+// reports for instance, in report order, nil when it accepts the instance. A
+// lone failure is the error itself; several are its causes.
+func numericMessages(t *testing.T, schema *jsonschema.Schema, instance jsonv1.Number) []string {
+	t.Helper()
+
+	err := jsonschema.Validate(t.Context(), schema, instance)
+	if err == nil {
+		return nil
+	}
+
+	var verr *jsonschema.ValidationError
+
+	require.ErrorAs(t, err, &verr)
+
+	if len(verr.Causes) == 0 {
+		return []string{verr.Message}
+	}
+
+	msgs := make([]string, 0, len(verr.Causes))
+	for _, cause := range verr.Causes {
+		msgs = append(msgs, cause.Message)
+	}
+
+	return msgs
+}
