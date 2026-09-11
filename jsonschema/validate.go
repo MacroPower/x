@@ -263,7 +263,8 @@ func (l schemaLocation) pointer() jsontext.Pointer {
 
 // rootSegmentCapacity is the segment stack capacity each walk starts with, on
 // both the instance and the schema side, so the ordinary depth of a descent
-// never reallocates the stack.
+// never reallocates the stack. The two stacks share one allocation, split at
+// this capacity, so a walk grows one side past it before either reallocates.
 const rootSegmentCapacity = 16
 
 // newError builds a validation error at the given instance location and the
@@ -608,8 +609,9 @@ func (v *validator) buildRefReg() {
 }
 
 // forInstance returns a per-validation view of a compiled validator with fresh
-// mutable walk state (the visiting set on a reference-bearing graph, and a
-// fresh per-run refSession), so a
+// mutable walk state (the visiting set and a fresh per-run refSession, both
+// on a reference-bearing graph alone, since only a $ref or $dynamicRef row
+// reads either), so a
 // [Validator] can be reused and is safe for concurrent use. The immutable
 // per-schema state (the compiled refReg, resolved vocabularies, draft, and
 // format configuration) is shared. The caller's ctx is carried on the per-run
@@ -625,12 +627,13 @@ func (v *validator) forInstance(ctx context.Context) *validator {
 	rv := *v
 	rv.ctx = ctx
 	rv.lateEnums = nil
+	rv.lateConsts = nil
 
-	if v.refBearing {
-		rv.visiting = map[visitKey]bool{}
+	if !v.refBearing {
+		return &rv
 	}
 
-	rv.lateConsts = nil
+	rv.visiting = map[visitKey]bool{}
 
 	// A JSON-pointer fallback target materialized during this run is a fresh
 	// object no compile-time pass saw (a run re-materializes every target, and
@@ -1988,9 +1991,12 @@ func (c *Validator) validateNormalized(ctx context.Context, instance jsonvalue.V
 	// The run context reaches the resolver through the per-run ctx field set
 	// by forInstance: the recursive walk cannot thread a parameter.
 	// Each run starts its own segment stacks, so runs on a shared Validator
-	// never share one.
-	instancePath := instanceLocation{segs: make([]Segment, 0, rootSegmentCapacity)}
-	schemaPath := schemaLocation{segs: make([]Segment, 0, rootSegmentCapacity)}
+	// never share one. The two stacks are halves of one allocation, each
+	// capped at its half, so an append past either half reallocates that
+	// side alone and never writes into the other.
+	stacks := make([]Segment, 2*rootSegmentCapacity)
+	instancePath := instanceLocation{segs: stacks[:0:rootSegmentCapacity]}
+	schemaPath := schemaLocation{segs: stacks[rootSegmentCapacity:rootSegmentCapacity]}
 
 	//nolint:contextcheck // See the comment above.
 	errs := v.validate(v.root, instance, instancePath, schemaPath, nil)
@@ -2180,8 +2186,10 @@ func (v *validator) validate(
 	// when validation crosses into a schema whose resource base URI differs
 	// from the current scope top. EnterScope returns nil when the scope is empty
 	// (Draft 7, where it is never seeded) or unchanged, so the defer is
-	// registered only on the rarer boundary crossing, not on every node.
-	if v.profile.dynamicRef {
+	// registered only on the rarer boundary crossing, not on every node. Only
+	// a $dynamicRef reads the scope, so a reference-free run, which holds no
+	// session, tracks none.
+	if v.refBearing && v.profile.dynamicRef {
 		if leave := v.refSession.EnterScope(v.refSession.SchemaBase(schema)); leave != nil {
 			defer leave()
 		}
