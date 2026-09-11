@@ -69,8 +69,8 @@ const (
 	FormUnresolvedRef
 	// FormDeclaredObject is a payload declaring an object outright over a Go
 	// kind that is not a map: an inline (anonymous) struct field is the common
-	// case, and a verbatim or overridden object schema on an opaque kind is
-	// the other. The instance is an object, so a property-count keyword a
+	// case, and a verbatim or overridden object schema on any other kind, a
+	// slice included, is the other. The instance is an object, so a property-count keyword a
 	// dialect names outright applies exactly as it does on the $defs-backed
 	// named spelling. What the object holds is not classifiable from here, so
 	// element- and value-wise rules still report, and a rule-shaped bound has
@@ -257,9 +257,10 @@ func ShapeOf(t reflect.Type, base *jsonschema.Schema) Shape {
 // ShapeOfQuoted is [ShapeOf] carrying the two inputs the type and base
 // cannot express. The json:",string" flag: with it, an [encoding/json.Number]
 // under a string-typed base classifies as [FormCoercedNumber] (its instance
-// is the once-quoted numeric literal) rather than a plain string. The flag is
-// redundant for every other kind: the numeric kinds' coercion the base
-// already states, and every other kind under the flag is a generation error
+// is the once-quoted numeric literal) rather than a plain string, and a
+// numeric kind under a string-typed base classifies as the coercion rather
+// than as the string a type-level hook declared, which a base alone cannot
+// tell apart; every other kind under the flag is a generation error
 // upstream. And the definition a bare $ref base names: def returns its
 // schema, or nil while it is unreadable, and a reference then classifies as
 // that schema would over the same Go type, so a bound on a reference to an
@@ -292,11 +293,15 @@ func ShapeOfQuoted(t reflect.Type, base *jsonschema.Schema, quoted bool, def fun
 //
 // The type-derived base is the authority whenever it declares a type: a verbatim
 // type schema, a type= override, or a provider can make a string-kinded field's
-// instance a number, and a bound written against that instance is a numeric one
-// no matter what the Go kind says. The Go kind fills in what the base leaves
-// open, and is the only thing that can distinguish a coerced shape from a native
-// one -- a string-typed schema over a numeric kind is the json:",string" (or
-// MarshalText) shape, whose scalars compare against the serialized text.
+// instance a number, a slice's an object, or a struct's an array, and a
+// keyword written against that instance is the declared form's one no
+// matter what the Go kind says. The Go kind fills in what the base leaves
+// open. A string-typed schema over a non-string kind is the one reading
+// the base cannot settle alone: the json:",string" option and a marshal
+// method coerce the value to a text the tag cannot spell, so their scalars
+// compare against the serialized text, while a string a type-level hook
+// declared over a plain kind is the caller's own and its literals are
+// strings.
 //
 // A base that is a bare $ref classifies as the definition it names, read
 // once through def: the definition's schema takes the base's place over the
@@ -339,23 +344,38 @@ func classifyForm(t reflect.Type, base *jsonschema.Schema, quoted bool, def func
 		return FormByteString
 	}
 
-	// The two scalar kinds that can be coerced decide on the base's string-ness
-	// alone; nothing else about the base can override what the Go value is.
+	// The two scalar kinds that can be coerced decide on the base's
+	// string-ness and the coercion's source, the json:",string" option or a
+	// marshal method of the type's own, whose output the coerced round-trip
+	// reproduces; nothing else about the base can override what the Go
+	// value is.
+	coerced := quoted || reflectkind.ImplementsAnyMarshaler(t)
+
 	switch {
 	case numkind.IsInteger(t.Kind()) || numkind.IsFloat(t.Kind()):
-		if str {
+		switch {
+		case str && coerced:
 			return FormCoercedNumber
+		case str:
+			return FormString
 		}
 
 		return FormNumber
 
 	case t.Kind() == reflect.Bool:
-		if str {
+		switch {
+		case str && coerced:
 			return FormCoercedBool
+		case str:
+			return FormString
 		}
 
 		return FormBool
 	}
+
+	// A declared object or array outranks the Go kind below: a hook that
+	// declares one describes the instance the type marshals as.
+	declared := declaredForm(base)
 
 	switch t.Kind() {
 	case reflect.String:
@@ -386,41 +406,60 @@ func classifyForm(t reflect.Type, base *jsonschema.Schema, quoted bool, def func
 
 	case reflect.Slice, reflect.Array:
 		if str {
-			return FormTextString
+			return textString(t)
+		}
+
+		if declared == FormObject {
+			return FormDeclaredObject
 		}
 
 		return FormArray
 
 	case reflect.Map:
 		if str {
-			return FormTextString
+			return textString(t)
+		}
+
+		if declared == FormArray {
+			return FormArray
 		}
 
 		return FormObject
 
 	default:
 		if str {
-			return FormTextString
+			return textString(t)
 		}
 
-		// The scalar forms and the object form are read off the base here. A
-		// declared object -- an anonymous struct's inline payload, or a
-		// verbatim object override -- is judged by what it declares, so its
-		// count keywords apply while its values stay unclassifiable
-		// ([FormDeclaredObject] carries exactly that split). A declared array
-		// stays opaque: nothing inlines one over these kinds without an
-		// explicit override, and its elements are equally unclassifiable.
-		f := declaredForm(base)
-		if f == FormNumber || f == FormBool {
-			return f
-		}
-
-		if f == FormObject {
+		// The scalar forms, the array form, and the object form are read off
+		// the base here. A declared object -- an anonymous struct's inline
+		// payload, or a verbatim object override -- is judged by what it
+		// declares, so its count keywords apply while its values stay
+		// unclassifiable ([FormDeclaredObject] carries exactly that split).
+		// A declared array is an array whose elements the target supplies,
+		// none for these kinds, so a value rule reports there.
+		switch declared {
+		case FormNumber, FormBool, FormArray:
+			return declared
+		case FormObject:
 			return FormDeclaredObject
+		default:
+			return FormOpaque
 		}
-
-		return FormOpaque
 	}
+}
+
+// textString classifies a string-typed schema over a non-scalar Go kind: a
+// type marshaling itself, such as [time.Time] or big.Rat, writes a text the
+// tag cannot spell, so its scalars are refused, while a string a type-level
+// hook declared over a plain struct, slice, or map is the caller's own and
+// its literals are strings.
+func textString(t reflect.Type) Form {
+	if reflectkind.ImplementsAnyMarshaler(t) {
+		return FormTextString
+	}
+
+	return FormString
 }
 
 // declaredForm returns the form the type-derived schema names outright, or

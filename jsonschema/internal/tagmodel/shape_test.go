@@ -3,6 +3,7 @@ package tagmodel_test
 import (
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/stretchr/testify/assert"
@@ -35,7 +36,27 @@ func TestRefClassification(t *testing.T) {
 		},
 		"struct over a string body": {
 			typ: reflect.TypeFor[object](), def: body(&jsonschema.Schema{Type: "string"}),
+			want: tagmodel.FormString,
+		},
+		"time over a string body": {
+			typ: reflect.TypeFor[time.Time](), def: body(&jsonschema.Schema{Type: "string"}),
 			want: tagmodel.FormTextString,
+		},
+		"int over a string body": {
+			typ: reflect.TypeFor[int](), def: body(&jsonschema.Schema{Type: "string"}),
+			want: tagmodel.FormString,
+		},
+		"slice over an object body": {
+			typ: reflect.TypeFor[[]string](), def: body(&jsonschema.Schema{Type: "object"}),
+			want: tagmodel.FormDeclaredObject,
+		},
+		"map over an array body": {
+			typ: reflect.TypeFor[map[string]int](), def: body(&jsonschema.Schema{Type: "array"}),
+			want: tagmodel.FormArray,
+		},
+		"struct over an array body": {
+			typ: reflect.TypeFor[object](), def: body(&jsonschema.Schema{Type: "array"}),
+			want: tagmodel.FormArray,
 		},
 		"int over an integer body": {
 			typ: reflect.TypeFor[int](), def: body(&jsonschema.Schema{Type: "integer"}),

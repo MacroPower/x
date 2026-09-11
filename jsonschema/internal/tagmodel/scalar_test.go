@@ -159,7 +159,9 @@ func TestShapeParseScalarCoerced(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			sh := tagmodel.ShapeOf(tc.typ, stringSchema())
+			// The string base over a numeric kind is the json:",string"
+			// option's, which the quoted flag names.
+			sh := tagmodel.ShapeOfQuoted(tc.typ, stringSchema(), true, nil)
 			require.Equal(t, tc.form, sh.Form)
 
 			got, err := sh.ParseScalar(tc.lit, tagmodel.Policy{})
@@ -183,7 +185,7 @@ func TestShapeParseScalarRangeChecked(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			sh := tagmodel.ShapeOf(reflect.TypeFor[int8](), base)
+			sh := tagmodel.ShapeOfQuoted(reflect.TypeFor[int8](), base, true, nil)
 
 			_, err := sh.ParseScalar("200", tagmodel.Policy{})
 			require.ErrorIs(t, err, constraint.ErrNotRepresentable, "200 does not fit an int8")
@@ -191,7 +193,7 @@ func TestShapeParseScalarRangeChecked(t *testing.T) {
 			// A float32 holds 0.1 in that the nearest float32 renders as
 			// 0.1, and not 10.0000001, which every float32 near it renders
 			// as 10.
-			wide := tagmodel.ShapeOf(reflect.TypeFor[float32](), base)
+			wide := tagmodel.ShapeOfQuoted(reflect.TypeFor[float32](), base, true, nil)
 
 			_, err = wide.ParseScalar("0.1", tagmodel.Policy{})
 			require.NoError(t, err)
@@ -318,7 +320,7 @@ func TestShapeParseScalarIntegerGrammar(t *testing.T) {
 			t.Parallel()
 
 			for _, typ := range []reflect.Type{reflect.TypeFor[int](), reflect.TypeFor[uint8]()} {
-				sh := tagmodel.ShapeOf(typ, base)
+				sh := tagmodel.ShapeOfQuoted(typ, base, true, nil)
 
 				for _, lit := range []string{"+5", "05", "0x5", "1_0"} {
 					_, err := sh.ParseScalar(lit, tagmodel.Policy{})

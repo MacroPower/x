@@ -1388,6 +1388,67 @@ type overriddenInner struct {
 	X int `json:"x" jsonschema:"minimum=abc"`
 }
 
+// TestTagHookDeclaredShapeClassifiesAsDeclared pins that a field whose type
+// supplies its schema through a hook answers the tag by what that schema
+// declares. The classifier used to read the declared type for the scalar
+// kinds alone: a string over a numeric kind parsed the tag's literals at the
+// Go kind, a string over a plain struct refused const and enum as a text
+// marshal it could not spell, and an object over a slice or an array over
+// a struct kept the Go kind's form and refused the declared form's counts.
+func TestTagHookDeclaredShapeClassifiesAsDeclared(t *testing.T) {
+	t.Parallel()
+
+	type stringOverStruct struct{ A int }
+
+	type objectOverSlice []string
+
+	type arrayOverStruct struct{ X, Y int }
+
+	type doc struct {
+		D time.Duration    `json:"d" jsonschema:"default=15m"`
+		S stringOverStruct `json:"s" jsonschema:"const=b"`
+		P objectOverSlice  `json:"p" jsonschema:"minProperties=1"`
+		A arrayOverStruct  `json:"a" jsonschema:"minItems=1"`
+	}
+
+	s, err := jsonschema.GenerateFor[doc](
+		t.Context(),
+		jsonschema.WithTypeSchemaFor[time.Duration](jsonschema.TypeSchema{Value: &jsonschema.Schema{Type: "string"}}),
+		jsonschema.WithTypeSchemaFor[stringOverStruct](
+			jsonschema.TypeSchema{Value: &jsonschema.Schema{Type: "string"}},
+		),
+		jsonschema.WithTypeSchemaFor[objectOverSlice](jsonschema.TypeSchema{Value: &jsonschema.Schema{Type: "object"}}),
+		jsonschema.WithTypeSchemaFor[arrayOverStruct](jsonschema.TypeSchema{
+			Value: &jsonschema.Schema{Type: "array", Items: &jsonschema.Schema{Type: "integer"}},
+		}),
+	)
+	require.NoError(t, err)
+
+	// A named type with an override may be extracted, so the tag's keyword
+	// rides beside a $ref or inside the inline schema; either way it is a
+	// member of the property.
+	property := func(name string) map[string]any {
+		t.Helper()
+
+		raw, err := json.Marshal(s.Properties[name])
+		require.NoError(t, err)
+
+		var got map[string]any
+
+		require.NoError(t, json.Unmarshal(raw, &got))
+
+		return got
+	}
+
+	assert.Equal(t, "15m", property("d")["default"], "a hook's string over a numeric kind takes a string literal")
+	assert.Equal(t, "b", property("s")["const"], "a hook's string over a plain struct takes a const")
+	assert.InDelta(t, 1.0, property("p")["minProperties"], 0, "a hook's object over a slice takes a property count")
+	assert.InDelta(t, 1.0, property("a")["minItems"], 0, "a hook's array over a struct takes an item count")
+
+	_, err = jsonschema.Compile(t.Context(), s)
+	require.NoError(t, err)
+}
+
 // TestTagTypeOverrideReplacedSubtreeStillHooked pins that a type= pair
 // replaces the occurrence but not the reflection beneath it: the replaced
 // struct's fields still run every field-level hook, so a malformed tag inside
