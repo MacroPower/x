@@ -408,7 +408,7 @@ type validator struct {
 	patternCache       []*compiledPattern           // schema.Pattern compiled (see numericBounds)
 	patternProps       []map[string]compiledPattern // patternProperties keys compiled (see numericBounds)
 	constVals          []*jsonvalue.Value           // document view of the const value (see documentConst)
-	enumVals           [][]jsonvalue.Value          // document view of the enum members (see documentEnum)
+	enumVals           []*jsonvalue.Set             // document view of the enum members (see documentEnum)
 	sortedPropertyKeys [][]string                   // schema.Properties keys, sorted (see numericBounds)
 	sortedPatternKeys  [][]string                   // schema.PatternProperties keys, sorted (see numericBounds)
 	itemsPlans         []*itemsPlan                 // normalized array item keywords (see numericBounds)
@@ -422,7 +422,7 @@ type validator struct {
 	// and forInstance clears both, while constView and enumView allocate
 	// each map lazily, so a run that reaches no out-of-index schema pays
 	// nothing.
-	lateEnums  map[*Schema][]jsonvalue.Value
+	lateEnums  map[*Schema]*jsonvalue.Set
 	lateConsts map[*Schema]jsonvalue.Value
 
 	// The WithDraft override; nil leaves the draft to $schema detection.
@@ -907,15 +907,16 @@ func documentConst(val any) jsonvalue.Value {
 	return dv
 }
 
-// documentEnum returns a fresh slice holding [documentConst] of each enum
-// member.
-func documentEnum(members []any) []jsonvalue.Value {
+// documentEnum returns a fresh set holding [documentConst] of each enum
+// member, indexed by hash past the set's scan limit so a lookup in a large
+// enum costs a hash and a short chain rather than a scan of every member.
+func documentEnum(members []any) *jsonvalue.Set {
 	out := make([]jsonvalue.Value, len(members))
 	for i, member := range members {
 		out[i] = documentConst(member)
 	}
 
-	return out
+	return jsonvalue.NewSet(out)
 }
 
 // stringCompile caches a schema's compiled Pattern for the string row's eval,
@@ -2414,10 +2415,8 @@ func evalEnum(ctx evalContext) []*ValidationError {
 		return nil
 	}
 
-	for _, allowed := range ctx.v.enumView(ctx.nodeID, schema) {
-		if allowed.Equal(ctx.instance) {
-			return nil
-		}
+	if ctx.v.enumView(ctx.nodeID, schema).Contains(ctx.instance) {
+		return nil
 	}
 
 	return []*ValidationError{
@@ -2480,9 +2479,9 @@ func (v *validator) constView(id int, schema *Schema) jsonvalue.Value {
 
 // enumView returns the document view of schema's enum members, on the same
 // terms as [validator.constView] (the per-node cache first, then the run's
-// lateEnums memo). The returned slice is an operand only; callers must not
-// mutate it.
-func (v *validator) enumView(id int, schema *Schema) []jsonvalue.Value {
+// lateEnums memo). The returned set is an operand only; callers must not
+// mutate its members.
+func (v *validator) enumView(id int, schema *Schema) *jsonvalue.Set {
 	if v.inIndex(id) && v.enumVals[id] != nil {
 		return v.enumVals[id]
 	}
@@ -2494,7 +2493,7 @@ func (v *validator) enumView(id int, schema *Schema) []jsonvalue.Value {
 	members := documentEnum(schema.Enum)
 
 	if v.lateEnums == nil {
-		v.lateEnums = map[*Schema][]jsonvalue.Value{}
+		v.lateEnums = map[*Schema]*jsonvalue.Set{}
 	}
 
 	v.lateEnums[schema] = members
