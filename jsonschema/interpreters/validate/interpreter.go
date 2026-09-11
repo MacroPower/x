@@ -628,7 +628,12 @@ func checkOneOf(field jsonschema.FieldContext, shape tagmodel.Shape, tokens []st
 // width is left to the model, which reports the parse or range fault. A
 // float kind never reaches here, since checkOneOf refuses it first.
 func checkCanonicalOneOfKind(kind reflect.Kind, tokens []string) error {
-	bits := kindBits(kind)
+	// The width is the one the model parses the token at, so the two agree
+	// on a platform-sized kind, which is 32 bits wide on a 32-bit build.
+	bits := numkind.IntBitSize(kind)
+	if numkind.IsUnsigned(kind) {
+		bits = numkind.UintBitSize(kind)
+	}
 
 	for _, tok := range tokens {
 		var canonical string
@@ -746,21 +751,6 @@ func addRequired(parent *jsonschema.Schema, name string) {
 	}
 
 	parent.Required = append(parent.Required, name)
-}
-
-// kindBits returns the bit width a numeric kind parses at, 64 for the
-// platform-sized and 64-bit kinds.
-func kindBits(kind reflect.Kind) int {
-	switch kind {
-	case reflect.Int8, reflect.Uint8:
-		return 8
-	case reflect.Int16, reflect.Uint16:
-		return 16
-	case reflect.Int32, reflect.Uint32, reflect.Float32:
-		return 32
-	default:
-		return 64
-	}
 }
 
 // splitOneOfValues tokenizes a oneof tag value the way go-playground/validator
