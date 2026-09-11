@@ -5,7 +5,6 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
-	"fmt"
 	"maps"
 	"slices"
 	"strings"
@@ -67,6 +66,10 @@ var (
 		{"two subschemas declaring one $id", jsonschema.ErrIDCollision},
 		{"a schema field the same keyword names twice through an extension", jsonschema.ErrConflictingSchemaFields},
 		{"a format name no draft this package implements defines", jsonschema.ErrUnknownFormat},
+		{
+			"a bound outside float64 range or a count outside the int32 range, which the Schema's fields cannot hold and the metaschema's number type admits",
+			jsonschema.ErrKeywordOutOfRange,
+		},
 		{
 			"a pattern or patternProperties key outside the ECMA-262 grammar, which the metaschema's regex format judges only when formats are asserted",
 			jsonschema.ErrInvalidPattern,
@@ -295,17 +298,15 @@ func TestMetaschemaTablesAreReasoned(t *testing.T) {
 	}
 }
 
-// compileDocument unmarshals and compiles a document under the suite's
-// resolvers, reporting the first refusal.
+// compileDocument parses a document through ParseSchema and compiles it
+// under the suite's resolvers, reporting the first refusal.
 func compileDocument(ctx context.Context, data []byte) error {
-	var schema jsonschema.Schema
-
-	err := json.Unmarshal(data, &schema)
+	schema, err := jsonschema.ParseSchema(data)
 	if err != nil {
-		return fmt.Errorf("unmarshal: %w", err)
+		return err //nolint:wrapcheck // The sentinel is what the caller classifies.
 	}
 
-	_, err = jsonschema.Compile(ctx, &schema, suiteBaseOpts()...)
+	_, err = jsonschema.Compile(ctx, schema, suiteBaseOpts()...)
 
 	return err //nolint:wrapcheck // The sentinel is what the caller classifies.
 }
