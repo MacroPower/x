@@ -1445,7 +1445,8 @@
 // [WithRetrievalBase] and [WithRefFallback] each narrow the rest.
 //
 // Three list shapes the metaschema refuses compile without a sentinel. An
-// empty type array rejects every instance, since no type admits it. An
+// empty type array rejects every instance, since no type admits it, and so
+// does an empty enum, which Draft-07 alone refuses. An
 // empty allOf, anyOf, oneOf, prefixItems, or Draft-07 items array
 // constrains nothing, as the absent keyword does: the [Schema] marshals an
 // empty slice as the absent keyword, so no other reading survives a round

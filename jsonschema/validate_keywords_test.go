@@ -339,6 +339,41 @@ func TestValidateEmptyTypeArrayRejectsEverything(t *testing.T) {
 	})
 }
 
+// TestValidateEmptyEnumRejectsEverything pins that an empty enum, which the
+// Draft-07 metaschema refuses and the 2020-12 metaschema admits, compiles
+// under both drafts and admits no instance, since no member equals one.
+func TestValidateEmptyEnumRejectsEverything(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		schema string
+	}{
+		"2020-12": {schema: `{"enum": []}`},
+		"draft-07": {
+			schema: `{"$schema": "http://json-schema.org/draft-07/schema#", "enum": []}`,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			v, err := jsonschema.CompileJSON(t.Context(), []byte(tc.schema))
+			require.NoError(t, err, "an empty enum compiles")
+
+			for _, instance := range []string{`1`, `"s"`, `null`, `[]`, `{}`, `true`} {
+				err = v.ValidateJSON(t.Context(), []byte(instance))
+				require.Error(t, err, "an empty enum admits no instance: %s", instance)
+
+				var verr *jsonschema.ValidationError
+
+				require.ErrorAs(t, err, &verr)
+				assert.Equal(t, jsonschema.KeywordEnum, verr.Keyword)
+			}
+		})
+	}
+}
+
 // TestValidateEmptyApplicatorArrayConstrainsNothing pins that an empty
 // allOf, anyOf, oneOf, prefixItems, or Draft-07 items array, which the
 // metaschema refuses, compiles and constrains nothing, as the absent keyword

@@ -163,12 +163,12 @@ func suiteDocuments(tb testing.TB) []suiteDocument {
 func metaschemaTolerances() []metaschemaTolerance {
 	return []metaschemaTolerance{
 		{
-			reason: "an empty type array compiles and rejects every instance, as TestValidateEmptyTypeArrayRejectsEverything pins, where the metaschema requires one member",
+			reason: "an empty type array or an empty enum compiles and rejects every instance, as TestValidateEmptyTypeArrayRejectsEverything and TestValidateEmptyEnumRejectsEverything pin, where the metaschema requires one member (of an enum under Draft-07)",
 			catches: func(doc map[string]any) bool {
 				return anyValue(doc, func(key string, val any) bool {
 					arr, ok := val.([]any)
 
-					return ok && key == "type" && len(arr) == 0
+					return ok && len(arr) == 0 && (key == "type" || key == "enum")
 				})
 			},
 		},
