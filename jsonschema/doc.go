@@ -73,7 +73,11 @@
 //     (every field unexported and untagged).
 //
 // Each of the three verdicts is v2's own, and generation reports v2's reason.
-// No user marshal method runs during generation. Two gaps remain. A func
+// No user marshal method runs to reach a verdict; the one place generation
+// runs one is the coerced tag round-trip of the Struct Tag section, which
+// marshals the value a tag literal names on a field whose type marshals
+// itself as text and reports a panic there as [ErrMarshalPanic]. Two gaps
+// remain. A func
 // field under omitzero marshals, since v2 never writes it, while generation
 // refuses the func type. A type with a direct JSON marshaler marshals without
 // v2 reading its field declarations, while generation reflects those fields
@@ -82,6 +86,8 @@
 //
 //   - [ErrProviderPanic] wraps a panic recovered from a [JSONSchemaProvider]
 //     or [JSONSchemaExtender] method.
+//   - [ErrMarshalPanic] wraps a panic recovered from a user MarshalText or
+//     MarshalJSON method the coerced tag round-trip ran.
 //   - [ErrConflictingTypeSchema] reports a malformed [TypeSchema] from a
 //     type-level hook: more than one of Value, Verbatim, or Ref set, a Ref
 //     naming a type that is not extractable to $defs (a Ref naming a type

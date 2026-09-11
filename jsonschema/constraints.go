@@ -38,6 +38,14 @@ var (
 	// recognizable through this one.
 	ErrConstraintConflict = tagmodel.ErrConflict
 
+	// ErrMarshalPanic reports a panic recovered from a user MarshalText or
+	// MarshalJSON method that the coerced tag round-trip ran on the value a
+	// tag literal names (a const, default, enum, or validate scalar on a
+	// field whose type marshals itself as text), the one place a user
+	// marshal method runs during generation. The panic is recovered so
+	// Generate returns this error instead of crashing.
+	ErrMarshalPanic = tagmodel.ErrMarshalPanic
+
 	// ErrBoundNotRepresentable reports a numeric literal no value of its
 	// field renders as: a bound the schema's *float64 cannot ship exactly (an
 	// integer the float64's shortest-decimal interpretation, the value the

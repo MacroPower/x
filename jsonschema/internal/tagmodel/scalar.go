@@ -25,7 +25,15 @@ const (
 // the type the literal had nothing to assign to. A front-end that refuses the
 // literal before calling [Shape.ParseScalar] returns the same sentinel, so one
 // identity covers both sites.
-var ErrNullNotAdmitted = errors.New("cannot assign null to non-nullable type")
+var (
+	ErrNullNotAdmitted = errors.New("cannot assign null to non-nullable type")
+
+	// ErrMarshalPanic marks a panic recovered from a user marshal method the
+	// coerced round-trip ran to learn the text a tag literal takes: the value
+	// the literal names is one the type never expected to write. The panic is
+	// recovered so generation reports the literal instead of crashing.
+	ErrMarshalPanic = errors.New("marshal method panicked")
+)
 
 // ParseScalar turns one tag literal into the value a const, enum member,
 // default, or forbidden value carries. It dispatches on [Shape.Form], so a
@@ -210,7 +218,7 @@ func (sh Shape) coercedText(lit string, keepSign bool) (any, error) {
 		parsed = float64(0)
 	}
 
-	out, err := json.Marshal(reflect.ValueOf(parsed).Convert(sh.Elem).Interface())
+	out, err := marshalRecovered(reflect.ValueOf(parsed).Convert(sh.Elem).Interface())
 	if err != nil {
 		return nil, fmt.Errorf("cannot serialize %q as %s: %w", lit, sh.Elem, err)
 	}
@@ -227,6 +235,21 @@ func (sh Shape) coercedText(lit string, keepSign bool) (any, error) {
 	}
 
 	return string(out), nil
+}
+
+// marshalRecovered marshals v, reporting a panic in the value's own marshal
+// method as [ErrMarshalPanic] rather than letting it escape generation, the
+// backstop every other user hook has.
+//
+//nolint:nonamedreturns // Recover needs named returns.
+func marshalRecovered(v any) (out []byte, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("%w: %v", ErrMarshalPanic, r)
+		}
+	}()
+
+	return json.Marshal(v) //nolint:wrapcheck // The caller names the literal and the type.
 }
 
 // zeroLiterals are the literals whose serialized forms the non-zero assertion

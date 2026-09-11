@@ -1388,6 +1388,39 @@ type overriddenInner struct {
 	X int `json:"x" jsonschema:"minimum=abc"`
 }
 
+// panickingLevel marshals through a table its value can index past.
+type panickingLevel int
+
+func (l panickingLevel) MarshalText() ([]byte, error) {
+	names := []string{"low", "high"}
+
+	return []byte(names[l]), nil
+}
+
+// TestTagCoercedLiteralRecoversMarshalPanic pins that a panic in the user
+// marshal method the coerced round-trip runs is reported as ErrMarshalPanic
+// rather than escaping Generate, as a provider's or extender's panic is. The
+// round-trip used to call the method bare.
+func TestTagCoercedLiteralRecoversMarshalPanic(t *testing.T) {
+	t.Parallel()
+
+	type doc struct {
+		L panickingLevel `json:"l" jsonschema:"const=7"`
+	}
+
+	_, err := jsonschema.GenerateFor[doc](t.Context())
+	require.ErrorIs(t, err, jsonschema.ErrMarshalPanic)
+	require.ErrorContains(t, err, `key "const"`)
+
+	type inRange struct {
+		L panickingLevel `json:"l" jsonschema:"const=1"`
+	}
+
+	s, err := jsonschema.GenerateFor[inRange](t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, "high", *s.Properties["l"].Const)
+}
+
 // TestTagHookDeclaredShapeClassifiesAsDeclared pins that a field whose type
 // supplies its schema through a hook answers the tag by what that schema
 // declares. The classifier used to read the declared type for the scalar
