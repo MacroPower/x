@@ -281,6 +281,15 @@ var (
 	// positions, so the refusal names the keyword and the literal.
 	ErrKeywordOutOfRange = errors.New("keyword value outside the representable range")
 
+	// ErrKeywordType is returned by [ParseSchemaValue], [ParseSchema], and
+	// [CompileJSON] for a keyword value the [Schema] field cannot hold: a
+	// string under deprecated, a fraction under maxLength, an object under
+	// required. The fields are typed under every draft, so a keyword the
+	// document's draft does not define (deprecated or prefixItems under
+	// Draft-07, say) is held to its type as well, where the draft's
+	// metaschema reads it as an unknown keyword and judges nothing.
+	ErrKeywordType = errors.New("keyword value of a type the schema field cannot hold")
+
 	// ErrNilSchema is returned by [Compile] (and the one-shot [Validate]
 	// helper) when the schema argument is nil. A nil *Schema carries no draft,
 	// vocabulary, or structure to compile; it is reported through the error

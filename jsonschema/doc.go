@@ -1333,7 +1333,11 @@
 // top-level value that is not an object or boolean. That includes JSON null,
 // which unmarshaling into a [Schema] directly silently coerces to the false
 // schema. Malformed JSON returns the wrapped decode error without the
-// sentinel.
+// sentinel. A keyword value the [Schema] field cannot hold (a string under
+// deprecated, a fraction under maxLength) returns an error wrapping
+// [ErrKeywordType], under every draft: the fields are typed whether or not
+// the document's draft defines the keyword, where a draft that does not
+// reads it as an unknown keyword and judges nothing.
 //
 // All three also return an error wrapping [ErrInvalidType] for a "type": ""
 // and [ErrInvalidAnchor] for an empty $anchor or $dynamicAnchor in any

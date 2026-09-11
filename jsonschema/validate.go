@@ -1553,7 +1553,10 @@ func MustCompile(schema *Schema, opts ...ValidateOption) *Validator {
 // A bound keyword outside float64 range or a count keyword outside the int32
 // range returns an error wrapping [ErrKeywordOutOfRange], and a count
 // spelled with an exponent or a decimal point (1E2, 1.0e2) converts to the
-// integer it names.
+// integer it names. Any other keyword value the [Schema] field cannot hold
+// (a string under deprecated, a fraction under maxLength) returns an error
+// wrapping [ErrKeywordType], under every draft, a keyword the document's
+// draft does not define included.
 // A document string holding invalid UTF-8 (reachable only from a hand-built
 // or non-JSON-sourced document) returns a wrapped encode error rather than
 // being silently rewritten with U+FFFD, matching the package's RFC 7493
@@ -1588,9 +1591,11 @@ func ParseSchemaValue(doc any) (*Schema, error) {
 
 		var s Schema
 
+		// The data is a marshal of a decoded document, never malformed, so
+		// every refusal here is a keyword value the typed field cannot hold.
 		err = json.Unmarshal(data, &s)
 		if err != nil {
-			return nil, fmt.Errorf("decode schema document: %w", err)
+			return nil, fmt.Errorf("%w: decode schema document: %w", ErrKeywordType, err)
 		}
 
 		err = refuseEmptyKeywords(&s, d)
@@ -2048,7 +2053,8 @@ func copySourceMember(src map[string]any, key string) (any, bool) {
 // a [Schema] directly silently coerces to the false schema. Malformed JSON
 // returns the wrapped decode error without the sentinel. A bound or count
 // keyword the Schema cannot hold returns an error wrapping
-// [ErrKeywordOutOfRange] (see [ParseSchemaValue]).
+// [ErrKeywordOutOfRange], and any other keyword value it cannot hold one
+// wrapping [ErrKeywordType] (see [ParseSchemaValue]).
 func ParseSchema(data []byte) (*Schema, error) {
 	doc, err := jsonvalue.Decode(data)
 	if err != nil {
@@ -2065,8 +2071,10 @@ func ParseSchema(data []byte) (*Schema, error) {
 // or boolean returns an error wrapping [ErrInvalidSchemaDocument]; this
 // includes JSON null, which unmarshaling into a [Schema] directly silently
 // coerces to the false schema. Malformed JSON returns the wrapped decode error
-// without the sentinel, and a bound or count keyword the Schema cannot hold
-// returns an error wrapping [ErrKeywordOutOfRange] (see [ParseSchemaValue]).
+// without the sentinel, a bound or count keyword the Schema cannot hold
+// returns an error wrapping [ErrKeywordOutOfRange], and any other keyword
+// value it cannot hold one wrapping [ErrKeywordType] (see
+// [ParseSchemaValue]).
 //
 // The context is passed to the [RefResolver] for refs resolved during
 // compilation (see [Compile]).

@@ -1269,6 +1269,7 @@ func TestParseSchemaOutOfRangeNumberLiteral(t *testing.T) {
 		"fractional count": {
 			doc:     `{"maxLength": 1.5}`,
 			refused: true,
+			err:     jsonschema.ErrKeywordType,
 		},
 		"count as a property name is data": {
 			doc:   `{"properties": {"maxLength": {"const": 1E2}}}`,

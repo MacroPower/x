@@ -7368,6 +7368,24 @@ func TestParseSchemaValue(t *testing.T) {
 			instance: map[string]any{"type": ""},
 			valid:    true,
 		},
+
+		// A value the typed field cannot hold is refused under every draft,
+		// a keyword the document's draft does not define included.
+		"string under deprecated": {
+			doc:      map[string]any{"deprecated": "yes"},
+			err:      jsonschema.ErrKeywordType,
+			contains: "deprecated",
+		},
+		"string under deprecated under draft-07": {
+			doc:      map[string]any{"$schema": "http://json-schema.org/draft-07/schema#", "deprecated": "yes"},
+			err:      jsonschema.ErrKeywordType,
+			contains: "deprecated",
+		},
+		"object under required": {
+			doc:      map[string]any{"required": map[string]any{"a": true}},
+			err:      jsonschema.ErrKeywordType,
+			contains: "required",
+		},
 	}
 
 	for name, tt := range tests {
