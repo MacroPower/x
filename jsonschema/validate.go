@@ -3123,11 +3123,25 @@ func evalObjectApplicators(ctx evalContext) []*ValidationError {
 	var errs []*ValidationError
 
 	// Track locally evaluated properties for additionalProperties. Only that
-	// keyword reads the map, so allocate it lazily and leave it nil otherwise.
+	// keyword reads the set, and with no patternProperties the set is the
+	// properties keys themselves, so the map is built only when a pattern
+	// can add a name to it, sized for the instance it records.
 	var localEvaluated map[string]bool
 
-	if schema.AdditionalProperties != nil {
-		localEvaluated = map[string]bool{}
+	if schema.AdditionalProperties != nil && len(schema.PatternProperties) > 0 {
+		localEvaluated = make(map[string]bool, len(obj))
+	}
+
+	// The evaluated predicate reports whether a sibling properties or
+	// patternProperties keyword matched the member named name.
+	evaluated := func(name string) bool {
+		if localEvaluated != nil {
+			return localEvaluated[name]
+		}
+
+		_, ok := schema.Properties[name]
+
+		return ok
 	}
 
 	// Properties. Iterate in sorted-key order so the emitted error order is
@@ -3158,12 +3172,24 @@ func evalObjectApplicators(ctx evalContext) []*ValidationError {
 
 	// PatternProperties, additionalProperties, and propertyNames all iterate
 	// the instance keys in sorted order; compute that ordering once and share
-	// it rather than re-sorting per pattern and per keyword. The applicator
-	// walk never mutates obj.
+	// it rather than re-sorting per pattern and per keyword. When
+	// additionalProperties alone reads it, only the names outside properties
+	// reach that keyword, so those alone are sorted. The applicator walk
+	// never mutates obj.
 	var sortedObjKeys []string
 
-	if len(schema.PatternProperties) > 0 || schema.AdditionalProperties != nil || schema.PropertyNames != nil {
+	switch {
+	case len(schema.PatternProperties) > 0 || schema.PropertyNames != nil:
 		sortedObjKeys = slices.Sorted(maps.Keys(obj))
+
+	case schema.AdditionalProperties != nil:
+		for name := range obj {
+			if !evaluated(name) {
+				sortedObjKeys = append(sortedObjKeys, name)
+			}
+		}
+
+		slices.Sort(sortedObjKeys)
 	}
 
 	// PatternProperties. Sorted iteration keeps the error order
@@ -3218,7 +3244,7 @@ func evalObjectApplicators(ctx evalContext) []*ValidationError {
 
 		for _, propName := range sortedObjKeys {
 			val := obj[propName]
-			if localEvaluated[propName] {
+			if evaluated(propName) {
 				continue
 			}
 

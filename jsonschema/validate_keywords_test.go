@@ -705,3 +705,37 @@ func falseSubschemaLeaves(e *jsonschema.ValidationError) []*jsonschema.Validatio
 
 	return out
 }
+
+// TestValidateAdditionalPropertiesOrderWithoutPatterns pins the order of
+// additionalProperties errors when no patternProperties sibling is set: the
+// names outside properties are sorted among themselves, so the errors come
+// in name order whatever order the object's members are read in.
+func TestValidateAdditionalPropertiesOrderWithoutPatterns(t *testing.T) {
+	t.Parallel()
+
+	schema := &jsonschema.Schema{
+		Properties: map[string]*jsonschema.Schema{
+			"kept": {Type: "string"},
+		},
+		AdditionalProperties: &jsonschema.Schema{Type: "string"},
+	}
+
+	err := jsonschema.Validate(t.Context(), schema, map[string]any{
+		"kept":  "x",
+		"zeta":  1.0,
+		"alpha": 2.0,
+		"mid":   "ok",
+	})
+
+	var verr *jsonschema.ValidationError
+
+	require.ErrorAs(t, err, &verr)
+
+	var paths []string
+
+	for _, cause := range verr.Causes {
+		paths = append(paths, string(cause.InstancePath))
+	}
+
+	assert.Equal(t, []string{"/alpha", "/zeta"}, paths)
+}
