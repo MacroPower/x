@@ -196,6 +196,9 @@ is the only one that imports the parent package.
   dialect, a conflict, or v2 reports, and a jsonschema tag refusal on a shape
   `fuzzgen.Admitted` vouches for is a failure. `FuzzFillNeverPanics`
   (fuzzfill) fills the same draw under every option set.
+- `FuzzNumericIntegerPathVsRat` (validate_internal_test.go): the numeric
+  keywords' machine-integer path and the public `Validate` entry agree with
+  a `math/big` comparison of an int64 instance against each bound.
 - `FuzzCompileAgreesWithMetaschema`: a vendored suite schema mutated one way
   is refused by `Compile` exactly when its draft's metaschema refuses it,
   outside `metaschemaTolerances` (what the Schema struct cannot see) and
