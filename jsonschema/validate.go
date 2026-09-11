@@ -1551,9 +1551,11 @@ var subschemaForms = func() map[string][]schemafield.Shape {
 // literal fails the decode wherever it sits, although const, enum, examples,
 // default, and an unknown keyword hold it as data the validator compares
 // exactly. The walk follows the sub-schema keywords into each schema object
-// and leaves the numeric-domain keywords ([keywordmeta.Bounds]) alone: their
-// float64 and int fields cannot hold such a literal, and the typed decode
-// reports the refusal for them. Every replaced member is one
+// and leaves the numeric-domain keywords alone, the bounds
+// ([keywordmeta.Bounds]) and the sizes ([keywordmeta.Sizes], which add the
+// two contains counts no bound row covers): their float64 and int fields
+// cannot hold such a literal, and the typed decode reports the refusal for
+// them. Every replaced member is one
 // restoreExactValues re-copies from the untouched doc, so the placeholder
 // never reaches the returned schema. The copy is on write, so a document
 // with no such literal comes back as the same map.
@@ -1570,7 +1572,7 @@ func placeholderOutOfRange(doc map[string]any) map[string]any {
 // reporting whether the returned map is a changed copy.
 func rangeSafeSchema(obj map[string]any) (map[string]any, bool) {
 	return rangeSafeMap(obj, func(key string, member any) (any, bool) {
-		if kw := keywordmeta.ByName[key]; kw != nil && kw.Bound {
+		if kw := keywordmeta.ByName[key]; kw != nil && (kw.Bound || kw.Size) {
 			return member, false
 		}
 

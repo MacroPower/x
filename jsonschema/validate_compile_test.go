@@ -1211,6 +1211,19 @@ func TestParseSchemaOutOfRangeNumberLiteral(t *testing.T) {
 			doc:     `{"minLength": 1e400}`,
 			refused: true,
 		},
+		// The contains counts are sizes with no bound row, and the
+		// placeholder walk used to exempt the bound keywords alone, so an
+		// out-of-range count was rewritten to 0 and never restored:
+		// maxContains 1e400 refused every match and minContains -1e400
+		// slipped past the negative-bound vet.
+		"maxContains stays refused": {
+			doc:     `{"contains": {"type": "string"}, "maxContains": 1e400}`,
+			refused: true,
+		},
+		"negative minContains stays refused": {
+			doc:     `{"contains": {"type": "string"}, "minContains": -1e400}`,
+			refused: true,
+		},
 		"nested multipleOf stays refused": {
 			doc:     `{"properties": {"p": {"multipleOf": 1e400}}}`,
 			refused: true,
