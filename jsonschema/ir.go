@@ -477,8 +477,9 @@ func (g *run) defineType(t reflect.Type, body *node, stance Nullability, pointer
 // functions over [nullFacts]; a reference reads its body's container kind
 // and stance off the def entry, both recorded when the body was defined, and
 // never the body's own decision, so the walk order does not matter. The
-// occurrence a type= pair replaced is decided too, since the directives
-// before the pair read it.
+// occurrence a type= pair replaced is decided too, with the subtree beneath
+// it, since the directives before the pair read it and the field hooks
+// inside the subtree still run.
 func (g *run) resolveNullability(root *node) {
 	entries := make(map[*node]*defEntry, len(g.defs))
 	for _, e := range g.defs {
@@ -488,11 +489,14 @@ func (g *run) resolveNullability(root *node) {
 	}
 
 	seen := map[*defEntry]bool{}
-	visit := func(n *node) {
+
+	var visit func(n *node)
+
+	visit = func(n *node) {
 		n.null = g.decideNull(n, entries[n])
 
 		if n.overrode != nil {
-			n.overrode.null = g.decideNull(n.overrode, nil)
+			walkNodes(n.overrode, seen, visit)
 		}
 	}
 

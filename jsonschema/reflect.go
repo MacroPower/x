@@ -1859,7 +1859,7 @@ func elemRefs(n *node) []tagparse.ElemRef {
 
 	out := make([]tagparse.ElemRef, len(children))
 	for i, c := range children {
-		out[i] = tagparse.ElemRef{Def: defBodyPayload(c.def), Elems: elemRefs(c)}
+		out[i] = tagparse.ElemRef{Def: defBodyPayload(c.def), Elems: elemRefs(c), Nullable: c.null.admit}
 	}
 
 	return out

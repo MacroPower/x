@@ -921,11 +921,10 @@
 //     const=null fails there for the same reason const=5 does, on a pointer
 //     to a container as much as on a bare one.
 //   - An enum on a sequence constrains the elements, and each element answers
-//     from its own Go type rather than from the container's decision. This is
-//     the one case that takes the literal against a schema admitting no null.
-//     A []*string takes a null enum member even where a stance leaves the
-//     element schema no null branch to match it, because the member belongs
-//     to the element and the field's decision never reaches it.
+//     from its own occurrence's decision rather than from the container's:
+//     a []*string takes a null enum member and a []string does not, a
+//     stance on the element type moves the answer either way, and the
+//     field's decision never reaches the member.
 //   - A type= pair replaces the occurrence, so the null admission the tag
 //     read no longer applies and a null literal is an error wherever the pair
 //     sits in the tag. The one exception is a literal that precedes

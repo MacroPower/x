@@ -83,6 +83,10 @@ var (
 type ElemRef struct {
 	Def   func() *jsonschema.Schema
 	Elems []ElemRef
+	// Nullable is the generator's null decision for the element occurrence,
+	// the answer [Input.Nullable] carries for the field, so an element whose
+	// type's hook admits null takes a null literal as the field would.
+	Nullable bool
 }
 
 // Input is one field occurrence for [Apply] to read: the field's Go type, the
@@ -653,7 +657,12 @@ func newTarget(shape tagmodel.Shape, canvas, payload *jsonschema.Schema, refs []
 					ref = refs[i]
 				}
 
-				elem := newTarget(tagmodel.ShapeOfQuoted(elemType, p, false, ref.Def), c, p, ref.Elems)
+				shape := tagmodel.ShapeOfQuoted(elemType, p, false, ref.Def)
+				if i < len(refs) {
+					shape.Nullable = ref.Nullable
+				}
+
+				elem := newTarget(shape, c, p, ref.Elems)
 				if ref.Def != nil {
 					elem = elem.WithRefBase(ref.Def)
 				}

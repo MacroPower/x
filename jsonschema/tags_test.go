@@ -2553,9 +2553,11 @@ func TestTagNullLiteralFollowsTheNullDecision(t *testing.T) {
 			},
 			err: "cannot assign null to non-nullable type string",
 		},
-		// An element occurrence answers from its own decision, so a stance
-		// that leaves the element no null branch refuses the member the tag
-		// wrote onto the element canvas.
+		// An element occurrence answers from its own decision, as the field
+		// does, so a stance that leaves the element no null branch refuses
+		// the member as the tag reads it. The tag used to read the element's
+		// pointer-ness alone and take the member, which the canvas scan then
+		// refused.
 		"null enum member on a slice of pointers to a null-forbidding type": {
 			generate: func() (*jsonschema.Schema, error) {
 				type T struct {
@@ -2568,7 +2570,25 @@ func TestTagNullLiteralFollowsTheNullDecision(t *testing.T) {
 						Nullability: jsonschema.NullForbidden,
 					}))
 			},
-			err: `element: authored canvas: keyword "enum"`,
+			err: `key "enum": cannot assign null`,
+		},
+		// The opposite stance reaches the element the same way: a value
+		// element of a null-allowing type takes the member, as a value field
+		// of that type would.
+		"null enum member on a slice of a null-allowing type": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V []nullStancedString `json:"v" jsonschema:"enum=a|null"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context(),
+					jsonschema.WithTypeSchemaFor[nullStancedString](jsonschema.TypeSchema{
+						Value:       &jsonschema.Schema{Type: "string"},
+						Nullability: jsonschema.NullAllowed,
+					}))
+			},
+			prop: "v",
+			want: `{"type":"array","items":{"anyOf":[{"type":"string","enum":["a",null]},{"type":"null"}]}}`,
 		},
 	}
 
