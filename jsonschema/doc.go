@@ -1466,7 +1466,12 @@
 // exclusiveMinimum, exclusiveMaximum, multipleOf) are float64 fields, so an
 // integer beyond 2^53 rounds when the schema is decoded, even though the
 // instance value it is compared against is exact, and a literal outside
-// float64 range (1e400) fails the decode. Both const and enum values keep
+// float64 range (1e400) is refused with [ErrKeywordOutOfRange]. The count
+// keywords (minLength, maxLength, minItems, maxItems, minProperties,
+// maxProperties, minContains, maxContains) are int fields holding an
+// integer within the int32 range: any spelling of such an integer parses
+// (100, 1.0e2, 1E2), and a larger one is refused with the same sentinel.
+// Both const and enum values keep
 // exact precision (decoded as [encoding/json.Number]), and a literal outside
 // float64 range survives there, as it does in examples, default, and an
 // unknown keyword, so a const of 1e400 admits the instance 1e400 alone.

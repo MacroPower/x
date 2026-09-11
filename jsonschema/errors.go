@@ -258,6 +258,16 @@ var (
 	// keyword.
 	ErrEmptyRef = errors.New("empty $ref names the current document; spell it \"#\"")
 
+	// ErrKeywordOutOfRange is returned by [ParseSchemaValue], [ParseSchema],
+	// and [CompileJSON] for a bound keyword (minimum, maximum,
+	// exclusiveMinimum, exclusiveMaximum, multipleOf) whose literal is
+	// outside float64 range, or a count keyword (minLength, maxLength,
+	// minItems, maxItems, minProperties, maxProperties, minContains,
+	// maxContains) whose integer is outside the int32 range, the ranges the
+	// [Schema] fields hold. The metaschema admits any number in those
+	// positions, so the refusal names the keyword and the literal.
+	ErrKeywordOutOfRange = errors.New("keyword value outside the representable range")
+
 	// ErrNilSchema is returned by [Compile] (and the one-shot [Validate]
 	// helper) when the schema argument is nil. A nil *Schema carries no draft,
 	// vocabulary, or structure to compile; it is reported through the error

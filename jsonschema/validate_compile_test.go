@@ -5,6 +5,7 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -1152,6 +1153,7 @@ func TestParseSchemaOutOfRangeNumberLiteral(t *testing.T) {
 		valid   []string
 		invalid []string
 		refused bool
+		err     error // the sentinel a refusal carries, when it carries one
 	}{
 		"const": {
 			doc:     `{"const": 1e400}`,
@@ -1206,10 +1208,12 @@ func TestParseSchemaOutOfRangeNumberLiteral(t *testing.T) {
 		"minimum stays refused": {
 			doc:     `{"minimum": 1e400}`,
 			refused: true,
+			err:     jsonschema.ErrKeywordOutOfRange,
 		},
 		"minLength stays refused": {
 			doc:     `{"minLength": 1e400}`,
 			refused: true,
+			err:     jsonschema.ErrKeywordOutOfRange,
 		},
 		// The contains counts are sizes with no bound row, and the
 		// placeholder walk used to exempt the bound keywords alone, so an
@@ -1219,14 +1223,57 @@ func TestParseSchemaOutOfRangeNumberLiteral(t *testing.T) {
 		"maxContains stays refused": {
 			doc:     `{"contains": {"type": "string"}, "maxContains": 1e400}`,
 			refused: true,
+			err:     jsonschema.ErrKeywordOutOfRange,
 		},
 		"negative minContains stays refused": {
 			doc:     `{"contains": {"type": "string"}, "minContains": -1e400}`,
 			refused: true,
+			err:     jsonschema.ErrKeywordOutOfRange,
 		},
 		"nested multipleOf stays refused": {
 			doc:     `{"properties": {"p": {"multipleOf": 1e400}}}`,
 			refused: true,
+			err:     jsonschema.ErrKeywordOutOfRange,
+		},
+		// The upstream decode holds a count in an int32 and reads the plain
+		// integer spelling alone, where the metaschema admits any
+		// integer-valued number, so the parse spells an in-range count
+		// plainly and refuses a larger one by name; a fraction stays the
+		// decode's own refusal, since the metaschema refuses it too.
+		"count spelled with an exponent": {
+			doc:     `{"maxLength": 1E2}`,
+			want:    `{"maxLength":100}`,
+			valid:   []string{`"ab"`},
+			invalid: []string{`"` + strings.Repeat("a", 101) + `"`},
+		},
+		"count spelled with a point and an exponent": {
+			doc:   `{"minItems": 1.0e1}`,
+			want:  `{"minItems":10}`,
+			valid: []string{`[1,2,3,4,5,6,7,8,9,10]`},
+		},
+		"count at the int32 ceiling": {
+			doc:   `{"maxItems": 2147483647}`,
+			want:  `{"maxItems":2147483647}`,
+			valid: []string{`[]`},
+		},
+		"count past the int32 ceiling": {
+			doc:     `{"maxItems": 2147483648}`,
+			refused: true,
+			err:     jsonschema.ErrKeywordOutOfRange,
+		},
+		"count past the int64 range": {
+			doc:     `{"maxProperties": 1e30}`,
+			refused: true,
+			err:     jsonschema.ErrKeywordOutOfRange,
+		},
+		"fractional count": {
+			doc:     `{"maxLength": 1.5}`,
+			refused: true,
+		},
+		"count as a property name is data": {
+			doc:   `{"properties": {"maxLength": {"const": 1E2}}}`,
+			want:  `{"properties":{"maxLength":{"const":1E2}}}`,
+			valid: []string{`{"maxLength": 100}`},
 		},
 	}
 
@@ -1236,7 +1283,13 @@ func TestParseSchemaOutOfRangeNumberLiteral(t *testing.T) {
 
 			s, err := jsonschema.ParseSchema([]byte(tc.doc))
 			if tc.refused {
-				require.Error(t, err, "a float64-typed keyword cannot hold the literal")
+				require.Error(t, err, "a typed keyword cannot hold the literal")
+
+				if tc.err != nil {
+					require.ErrorIs(t, err, tc.err)
+				} else {
+					require.NotErrorIs(t, err, jsonschema.ErrKeywordOutOfRange)
+				}
 
 				return
 			}

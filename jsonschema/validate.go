@@ -1547,6 +1547,10 @@ func MustCompile(schema *Schema, opts ...ValidateOption) *Validator {
 // naming the Go type. This includes nil, the decoding of a top-level JSON
 // null, which [Schema.UnmarshalJSON] silently coerces to the false schema.
 // Values produced by [Normalize] ([jsonv1.Number] leaves) convert correctly.
+// A bound keyword outside float64 range or a count keyword outside the int32
+// range returns an error wrapping [ErrKeywordOutOfRange], and a count
+// spelled with an exponent or a decimal point (1E2, 1.0e2) converts to the
+// integer it names.
 // A document string holding invalid UTF-8 (reachable only from a hand-built
 // or non-JSON-sourced document) returns a wrapped encode error rather than
 // being silently rewritten with U+FFFD, matching the package's RFC 7493
@@ -1569,7 +1573,12 @@ func ParseSchemaValue(doc any) (*Schema, error) {
 		// upstream decode reads every data member as float64 and refuses a
 		// literal outside float64 range, so those members go through it with
 		// a placeholder and restoreExactValues re-copies the authored literal.
-		data, err := json.Marshal(placeholderOutOfRange(d))
+		safe, err := placeholderOutOfRange(d)
+		if err != nil {
+			return nil, err
+		}
+
+		data, err := json.Marshal(safe)
 		if err != nil {
 			return nil, fmt.Errorf("encode schema document: %w", err)
 		}
@@ -1648,47 +1657,119 @@ var subschemaForms = func() map[string][]schemafield.Shape {
 // restoreExactValues re-copies from the untouched doc, so the placeholder
 // never reaches the returned schema. The copy is on write, so a document
 // with no such literal comes back as the same map.
-func placeholderOutOfRange(doc map[string]any) map[string]any {
-	out, changed := rangeSafeSchema(doc)
-	if !changed {
-		return doc
+//
+// The walk judges the numeric-domain keywords on the way: a bound outside
+// float64 range and a count outside the int32 range the typed decode holds
+// are refused with [ErrKeywordOutOfRange], naming the keyword, and a count
+// spelled with an exponent or a decimal point (1E2, 1.0e2) is rewritten to
+// its plain integer spelling, since the typed decode reads the plain form
+// alone while the value is the integer the metaschema admits.
+func placeholderOutOfRange(doc map[string]any) (map[string]any, error) {
+	w := &rangeWalk{}
+
+	out, changed := w.schema(doc)
+	if w.err != nil {
+		return nil, w.err
 	}
 
-	return out
+	if !changed {
+		return doc, nil
+	}
+
+	return out, nil
 }
 
-// rangeSafeSchema applies placeholderOutOfRange's rule to one schema object,
+// rangeWalk is the placeholderOutOfRange walk, carrying the first
+// numeric-domain keyword it refuses.
+type rangeWalk struct {
+	err error
+}
+
+// schema applies placeholderOutOfRange's rule to one schema object,
 // reporting whether the returned map is a changed copy.
-func rangeSafeSchema(obj map[string]any) (map[string]any, bool) {
+func (w *rangeWalk) schema(obj map[string]any) (map[string]any, bool) {
 	return rangeSafeMap(obj, func(key string, member any) (any, bool) {
 		if kw := keywordmeta.ByName[key]; kw != nil && (kw.Bound || kw.Size) {
-			return member, false
+			return w.domainLiteral(key, kw.Size, member)
 		}
 
-		return rangeSafeMember(key, member)
+		return w.member(key, member)
 	})
 }
 
-// rangeSafeMember descends a member of a schema object: a sub-schema keyword
-// whose value takes one of its declared JSON forms recurses into the schemas
-// it holds, and any other member is data.
-func rangeSafeMember(key string, member any) (any, bool) {
+// domainLiteral judges the literal of a bound or count keyword, the
+// numeric-domain keywords the typed decode holds in float64 and int fields.
+// A count that is an integer within the int32 range comes back in its plain
+// integer spelling; a count outside that range and a bound outside float64
+// range record the refusal; a literal of any other shape (a fraction under a
+// count, a string) is left for the typed decode to report.
+func (w *rangeWalk) domainLiteral(key string, count bool, member any) (any, bool) {
+	var lit string
+
+	switch v := member.(type) {
+	case jsonv1.Number:
+		lit = v.String()
+	case float64:
+		lit = strconv.FormatFloat(v, 'g', -1, 64)
+	default:
+		return member, false
+	}
+
+	if !count {
+		f, err := strconv.ParseFloat(lit, 64)
+		if errors.Is(err, strconv.ErrRange) && math.IsInf(f, 0) {
+			w.refuse(key, lit, "a bound must be within float64 range")
+		}
+
+		return member, false
+	}
+
+	r, ok := new(big.Rat).SetString(lit)
+	if !ok || !r.IsInt() {
+		return member, false
+	}
+
+	if !r.Num().IsInt64() || r.Num().Int64() < math.MinInt32 || r.Num().Int64() > math.MaxInt32 {
+		w.refuse(key, lit, "a count must be an integer within the int32 range")
+
+		return member, false
+	}
+
+	plain := r.Num().String()
+	if plain == lit {
+		return member, false
+	}
+
+	return jsonv1.Number(plain), true
+}
+
+// refuse records the first refused keyword.
+func (w *rangeWalk) refuse(key, lit, reason string) {
+	if w.err == nil {
+		w.err = fmt.Errorf("%w: %s %s: %s", ErrKeywordOutOfRange, key, lit, reason)
+	}
+}
+
+// member descends a member of a schema object: a sub-schema keyword whose
+// value takes one of its declared JSON forms recurses into the schemas it
+// holds, and any other member is data.
+func (w *rangeWalk) member(key string, member any) (any, bool) {
 	for _, shape := range subschemaForms[key] {
 		switch shape {
 		case schemafield.Map:
 			if m, ok := member.(map[string]any); ok {
-				return rangeSafeMap(m, func(_ string, v any) (any, bool) { return rangeSafeNode(v) })
+				return rangeSafeMap(m, func(_ string, v any) (any, bool) { return w.node(v) })
 			}
 
 		case schemafield.Slice:
 			if list, ok := member.([]any); ok {
-				return rangeSafeSlice(list, rangeSafeNode)
+				return rangeSafeSlice(list, w.node)
 			}
 
 		case schemafield.Single:
 			switch m := member.(type) {
 			case map[string]any:
-				return rangeSafeSchema(m)
+				return w.schema(m)
 			case bool:
 				return member, false
 			}
@@ -1700,12 +1781,12 @@ func rangeSafeMember(key string, member any) (any, bool) {
 	return rangeSafeData(member)
 }
 
-// rangeSafeNode applies the schema rule to a schema-position value: an object
-// is a schema, and anything else (a boolean schema, or a Draft-07 dependencies
+// node applies the schema rule to a schema-position value: an object is a
+// schema, and anything else (a boolean schema, or a Draft-07 dependencies
 // string list) holds no number.
-func rangeSafeNode(v any) (any, bool) {
+func (w *rangeWalk) node(v any) (any, bool) {
 	if m, ok := v.(map[string]any); ok {
-		return rangeSafeSchema(m)
+		return w.schema(m)
 	}
 
 	return v, false
@@ -1949,7 +2030,9 @@ func copySourceMember(src map[string]any, key string) (any, bool) {
 // A top-level value that is not an object or boolean returns an error wrapping
 // [ErrInvalidSchemaDocument]; this includes JSON null, which unmarshaling into
 // a [Schema] directly silently coerces to the false schema. Malformed JSON
-// returns the wrapped decode error without the sentinel.
+// returns the wrapped decode error without the sentinel. A bound or count
+// keyword the Schema cannot hold returns an error wrapping
+// [ErrKeywordOutOfRange] (see [ParseSchemaValue]).
 func ParseSchema(data []byte) (*Schema, error) {
 	doc, err := jsonvalue.Decode(data)
 	if err != nil {
@@ -1966,7 +2049,8 @@ func ParseSchema(data []byte) (*Schema, error) {
 // or boolean returns an error wrapping [ErrInvalidSchemaDocument]; this
 // includes JSON null, which unmarshaling into a [Schema] directly silently
 // coerces to the false schema. Malformed JSON returns the wrapped decode error
-// without the sentinel.
+// without the sentinel, and a bound or count keyword the Schema cannot hold
+// returns an error wrapping [ErrKeywordOutOfRange] (see [ParseSchemaValue]).
 //
 // The context is passed to the [RefResolver] for refs resolved during
 // compilation (see [Compile]).
