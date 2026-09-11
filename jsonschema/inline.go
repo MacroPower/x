@@ -133,10 +133,11 @@ func (f inlineOptionFunc) applyInline(in *inliner) { f(in) }
 // WithRetrievalBase makes refs resolve against each document's
 // retrieval URI, treating $id as an inert annotation: $id neither
 // establishes a base URI nor registers a resolution target, in any
-// document. Anchors still resolve within their document, and $id keywords
-// pass through to the output verbatim. An inert $id addresses nothing, so the
-// structural vet skips its domain check, in the root, in each substitute, and
-// in every fetched document.
+// document. Anchors still resolve within their document, and an $id in a
+// position the output keeps, the returned root's above all, passes through
+// unchanged; a spliced copy loses its $id as every spliced copy does. An
+// inert $id addresses nothing, so the structural vet skips its domain
+// check, in the root, in each substitute, and in every fetched document.
 //
 // Real-world schemas commonly declare a published remote $id while
 // shipping the files their refs name alongside the schema; under the

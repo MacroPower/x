@@ -2018,8 +2018,10 @@
 //     in any document, including the Draft 7 fragment-only $id form that
 //     otherwise acts as an anchor.
 //   - $anchor and $dynamicAnchor still resolve within their document.
-//   - $id keywords pass through to the output verbatim. An inert $id
-//     addresses nothing, so Inline skips its domain check.
+//   - An $id in a position the output keeps, the returned root's above all,
+//     passes through unchanged, and the option never rewrites one. A
+//     spliced copy loses its $id as every spliced copy does (see below). An
+//     inert $id addresses nothing, so Inline skips its domain check.
 //   - The root document's refs absolutize against the base from
 //     [WithBaseURI], and each fetched document's refs against the URI it was
 //     fetched from.
