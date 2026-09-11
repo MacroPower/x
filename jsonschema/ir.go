@@ -260,10 +260,6 @@ type defEntry struct {
 	// token never spells another entry's key and a hook that copies one into
 	// a literal of its own is rewritten to the final key by finalizeRefs.
 	token string
-	// Container is the body's nilable container kind, recorded when the body
-	// is defined so every reference reads the fact off the entry rather than
-	// the body's decision. It is containerNone for a hook-declared body.
-	container containerKind
 	// Nullability is the type's declared null-admission stance, recorded once at
 	// definition time and combined with each reference's pointer-ness in
 	// nullableDecision. The stance is a per-type property, so recording it on the
@@ -464,7 +460,6 @@ func (g *run) defineType(t reflect.Type, body *node, stance Nullability, pointer
 
 	if e.body == nil {
 		e.body = body
-		e.container = body.occ.container
 		body.isBody = true
 	}
 
@@ -621,10 +616,13 @@ func (g *run) factsOf(n *node, bodyOf *defEntry) nullFacts {
 
 	if n.kind == kindRef {
 		f.ref = true
-		f.container = n.def.container
 		f.defStance = n.def.nullability
 
+		// The container kind is the body's own occurrence fact, never its
+		// decision; an unfilled body (a cycle placeholder mid-build) is no
+		// container.
 		if body := n.def.body; body != nil {
+			f.container = body.occ.container
 			f.targetNull = schemashape.DeclaresType(body.payload, typename.Null) ||
 				unrestrictedLeaf(body)
 		}

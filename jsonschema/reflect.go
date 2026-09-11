@@ -1594,7 +1594,7 @@ func (n *node) inlineBody(draft Draft) {
 	*n = *e.body.cloneTree(draft)
 
 	n.isField = isField
-	n.occ = occurrence{pointer: pointer, container: e.container}
+	n.occ.pointer = pointer
 	n.stance = stance
 }
 
