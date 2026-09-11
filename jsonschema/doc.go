@@ -765,6 +765,10 @@
 //     an embedded struct type does not run for the embed: promotion gives
 //     the type no schema of its own to extend, and its fields are emitted as
 //     the parent's. A field of the type elsewhere is extended as usual.
+//   - Generation ignores the jsonschema tag and every tag interpreter's tag
+//     on the embedding field itself, promoted or composed, since the field
+//     emits no property of its own for them to describe. The promoted
+//     fields' own tags apply.
 //   - A provider schema used for such an embed, registered or on-type, must
 //     leave the object open: no additionalProperties, unevaluatedProperties,
 //     patternProperties, or propertyNames, whether false or a value schema.
