@@ -1442,9 +1442,13 @@
 // shortest-decimal interpretation, the value the schema renders and the
 // validator enforces, equals the authored value. 2^60, which renders as
 // 1152921504606847000, fails; 2^54, which renders as itself, passes. Generation
-// caps a bound parsed at an integer-kind field at 2^53 outright. A literal
-// past the width of the field's own kind fails with the same sentinel,
-// whether it is a bound or a scalar: 200 on an int8, or 1e300 on a float32.
+// caps a bound parsed at an integer-kind field at 2^53 outright. A scalar
+// past the width of the field's own kind (const=200 on an int8) fails with
+// the same sentinel, as does a bound past int64, uint64, or the float
+// kind's range (1e300 on a float32). An integer bound inside 2^53 but past
+// a narrower field's width is not refused: it intersects with the type's
+// own bound under the intersect-only rule, and a floor above the type's
+// ceiling renders as the unsatisfiable interval it is.
 //
 // A validation run reads a float64 in a pre-parsed instance (JSON decoding
 // always yields [encoding/json.Number]) at its shortest decimal value across
