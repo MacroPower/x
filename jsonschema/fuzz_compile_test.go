@@ -18,10 +18,9 @@ import (
 	"go.jacobcolvin.com/x/jsonschema/internal/fuzzfill"
 )
 
-// suiteDocument is one schema from the vendored suite, with the draft its
-// file targets.
+// suiteDocument is one schema from the vendored suite, with the $schema
+// URI its file injects when the schema carries none.
 type suiteDocument struct {
-	draft     jsonschema.Draft
 	schemaURI string
 	raw       jsontext.Value
 }
@@ -34,13 +33,6 @@ type metaschemaTolerance struct {
 }
 
 var (
-	// SuiteDraftOf maps a suite directory name to the draft its schemas
-	// target.
-	suiteDraftOf = map[string]jsonschema.Draft{
-		"draft7":       jsonschema.Draft7,
-		"draft2020-12": jsonschema.Draft2020,
-	}
-
 	// SubschemaKeywords are the keywords whose value is a subschema in both
 	// drafts. A null in one of them unmarshals as an absent keyword, which
 	// is the one shape Compile cannot see and the metaschema rejects.
@@ -136,7 +128,6 @@ func suiteDocuments(tb testing.TB) []suiteDocument {
 			}
 
 			docs = append(docs, suiteDocument{
-				draft:     suiteDraftOf[file.draft],
 				schemaURI: file.schemaURI,
 				raw:       group.Schema,
 			})
@@ -242,7 +233,7 @@ func FuzzCompileAgreesWithMetaschema(f *testing.F) {
 		data, err := json.Marshal(value)
 		require.NoError(t, err, "marshal the mutated document")
 
-		metaErr := metas[doc.draft].ValidateJSON(ctx, data)
+		metaErr := metas[effectiveDraft(value)].ValidateJSON(ctx, data)
 		compileErr := compileDocument(ctx, data)
 
 		switch {
@@ -265,6 +256,26 @@ func FuzzCompileAgreesWithMetaschema(f *testing.F) {
 			t.Fatalf("Compile refuses a document the metaschema accepts\ndocument: %s\ncompile: %v", data, compileErr)
 		}
 	})
+}
+
+// effectiveDraft names the draft Compile reads a mutated document under,
+// which is the metaschema that judges it: the draft whose $schema URI the
+// document carries, and the [jsonschema.Draft2020] default when a mutation
+// dropped or retyped the member or spelled a URI no draft owns. The suite
+// file's own draft says nothing once the member is gone.
+func effectiveDraft(doc map[string]any) jsonschema.Draft {
+	uri, ok := doc["$schema"].(string)
+	if !ok {
+		return jsonschema.Draft2020
+	}
+
+	for draft, id := range metaSchemaIDs {
+		if uri == id {
+			return draft
+		}
+	}
+
+	return jsonschema.Draft2020
 }
 
 // TestMetaschemaTablesAreReasoned pins that every tolerance and every vet
