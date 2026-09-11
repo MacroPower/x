@@ -2679,6 +2679,56 @@ func TestGenerateFor_HookAuthoredRefKeepsDefAlive(t *testing.T) {
 	require.NoError(t, err, "the aliased $ref must resolve in the emitted schema")
 }
 
+// TestGenerateFor_RefAliasToRecursiveTarget pins that a TypeSchema.Ref alias
+// whose target holds a field of the alias type is ordinary recursion, not an
+// alias cycle. The cycle guard used to keep the alias marked while the target
+// built its body, so reaching the alias through the target's own field
+// reported a cycle whenever the alias was resolved before the target.
+func TestGenerateFor_RefAliasToRecursiveTarget(t *testing.T) {
+	t.Parallel()
+
+	type link struct{}
+
+	type node struct {
+		Children []link `json:"children"`
+	}
+
+	type holder struct {
+		L link `json:"l"`
+	}
+
+	opt := jsonschema.WithTypeSchemaFor[link](jsonschema.TypeSchema{Ref: reflect.TypeFor[node]()})
+
+	for name, generate := range map[string]func() (*jsonschema.Schema, error){
+		"target first": func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[node](t.Context(), opt) },
+		"alias first":  func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[link](t.Context(), opt) },
+		"alias field":  func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[holder](t.Context(), opt) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			s, err := generate()
+			require.NoError(t, err)
+
+			_, err = jsonschema.Compile(t.Context(), s)
+			require.NoError(t, err, "the aliased $ref must resolve in the emitted schema")
+		})
+	}
+
+	// A chain of aliases closing on itself builds no body between hops, so
+	// it is still the cycle the guard refuses.
+	type cycleA struct{}
+
+	type cycleB struct{}
+
+	_, err := jsonschema.GenerateFor[cycleA](t.Context(),
+		jsonschema.WithTypeSchemaFor[cycleA](jsonschema.TypeSchema{Ref: reflect.TypeFor[cycleB]()}),
+		jsonschema.WithTypeSchemaFor[cycleB](jsonschema.TypeSchema{Ref: reflect.TypeFor[cycleA]()}),
+	)
+	require.ErrorIs(t, err, jsonschema.ErrConflictingTypeSchema)
+	require.ErrorContains(t, err, "alias cycle")
+}
+
 func TestGenerateFor_ConflictingTypeSchemaRejected(t *testing.T) {
 	t.Parallel()
 

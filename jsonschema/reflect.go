@@ -411,8 +411,16 @@ func (g *run) schemaForType(t reflect.Type, pointer bool) (*node, error) {
 	// 7. Kind-based reflection. The node records the occurrence's
 	// pointer-ness as a fact; a node that becomes a $defs body is shared by
 	// every reference, and the null pass ignores the fact there, so nothing
-	// is withheld from the build.
+	// is withheld from the build. A body build ends any chain of alias hops
+	// that led here, so the alias marks rest while the body is built and an
+	// alias reached again inside it is ordinary recursion.
+	aliasing := g.refAliasing
+	g.refAliasing = nil
+
 	n, err := g.schemaForKind(t, pointer)
+
+	g.refAliasing = aliasing
+
 	if guarded {
 		delete(g.visiting, t)
 	}
@@ -666,9 +674,16 @@ func (g *run) refTypeOverride(t reflect.Type, ts TypeSchema, pointer bool) (*nod
 	// chain again for the target; a Ref naming its own type, directly or through
 	// a chain of aliases, would recurse forever. Re-entering a type whose alias
 	// is already being resolved is that cycle, reported as a malformed
-	// TypeSchema rather than crashing the stack.
+	// TypeSchema rather than crashing the stack. The marks cover consecutive
+	// alias hops alone: schemaForType clears them while it builds a body, so
+	// a field of the alias type inside the target's own body is the ordinary
+	// recursion the target's cycle guard handles, not an alias cycle.
 	if g.refAliasing[t] {
 		return nil, fmt.Errorf("%w: type %s Ref %s forms an alias cycle", ErrConflictingTypeSchema, t, ts.Ref)
+	}
+
+	if g.refAliasing == nil {
+		g.refAliasing = map[reflect.Type]bool{}
 	}
 
 	g.refAliasing[t] = true
