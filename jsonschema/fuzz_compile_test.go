@@ -86,6 +86,10 @@ var (
 			jsonschema.ErrKeywordOutOfRange,
 		},
 		{
+			"a keyword value the Schema's typed field cannot hold under a draft that does not define the keyword (deprecated, prefixItems, or the contains counts under Draft-07, or propertyOrder under either), where the metaschema reads it as an unknown keyword and judges nothing",
+			jsonschema.ErrKeywordType,
+		},
+		{
 			"a pattern or patternProperties key outside the ECMA-262 grammar, which the metaschema's regex format judges only when formats are asserted",
 			jsonschema.ErrInvalidPattern,
 		},
