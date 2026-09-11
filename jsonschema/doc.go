@@ -414,7 +414,11 @@
 // beside what it derives for the position, such as its null admission and its
 // struct-tag facts. A property or element whose type-derived keywords the
 // extender changed or replaced is emitted as written, and generation derives
-// nothing further for it. A $ref the view shows for a $defs-extracted type is
+// nothing further for it. The view is taken before the field-level hooks
+// run, so such a property carries none of the facts its fields' jsonschema
+// tags or tag interpreters would have added, and under [WithDefinitions]
+// enabled the view shows a named struct's property as a $ref, which such an
+// edit does not reach. A $ref the view shows for a $defs-extracted type is
 // a provisional name, since the extender runs before generation settles the
 // $defs keys; an extender may test, clear, or copy it, and a copy placed in
 // a $ref position anywhere in the value (a branch of its own, say, or a
