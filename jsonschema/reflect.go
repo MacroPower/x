@@ -531,14 +531,13 @@ func (g *run) handleOverrideType(t reflect.Type, ts TypeSchema, pointer bool) (*
 //   - Ref: a whole-type alias to another Go type, resolved to that type's node
 //     edge so its definition stays reachable.
 //
-// The Value/Verbatim source is copied with the upstream shallow CloneSchemas,
-// not the deep schemaclone.Clone used for remote refs, because the generation half
-// needs only sub-schema copies plus the header unaliasing below. CloneSchemas
-// only deep-copies sub-schema fields, leaving the Enum, Const, Default, and
-// Extra headers aliased to the caller's schema; CloneOverrideExtras copies
-// those too, so a tag interpreter or JSONSchemaExtender that mutates them in
-// place (appending to Enum, reassigning Const, writing into Extra) cannot reach
-// back into an override or provider schema reused across Generate calls.
+// The Value/Verbatim source is copied with the deep schemaclone.Clone, the
+// copy remote refs take too, so nothing the run writes reaches back into an
+// override or provider schema reused across Generate calls: not a tag
+// interpreter or JSONSchemaExtender appending to Enum, reassigning Const,
+// or writing into Extra, and not finalizeRefs rewriting a "$ref" member a
+// hook spelled inside a nested Extra value, which the upstream shallow
+// CloneSchemas plus a one-level header copy left shared with the caller.
 func (g *run) finishTypeOverride(t reflect.Type, ts TypeSchema, pointer bool) (*node, error) {
 	err := checkTypeSchemaExclusive(t, ts)
 	if err != nil {
@@ -547,8 +546,7 @@ func (g *run) finishTypeOverride(t reflect.Type, ts TypeSchema, pointer bool) (*
 
 	// Verbatim: emitted exactly as authored, no null encoding, never extracted.
 	if ts.Verbatim != nil {
-		v := ts.Verbatim.CloneSchemas()
-		schemashape.CloneOverrideExtras(v)
+		v := schemaclone.Clone(ts.Verbatim)
 
 		return &node{kind: kindValue, payload: v, verbatim: true, occ: occurrence{pointer: pointer}}, nil
 	}
@@ -564,8 +562,7 @@ func (g *run) finishTypeOverride(t reflect.Type, ts TypeSchema, pointer bool) (*
 		value = &Schema{} // unrestricted
 	}
 
-	s := value.CloneSchemas()
-	schemashape.CloneOverrideExtras(s)
+	s := schemaclone.Clone(value)
 
 	err = checkFiniteBounds(t, s)
 	if err != nil {

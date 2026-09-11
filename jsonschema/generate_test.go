@@ -5693,6 +5693,59 @@ func isAliasingContainerType(t reflect.Type) bool {
 // through the generated schema cannot reach the registered override. When
 // upstream adds a new field of one of these types and the override copy does
 // not cover it, the test fails rather than silently aliasing.
+// TestTypeSchemaOverrideNestedExtraUnaliased pins that a "$ref" a hook spells
+// inside a nested Extra value is rewritten on the run's own copy. The override
+// used to be copied one container level deep, so finalizeRefs escalating the
+// ref to a collision-disambiguated key wrote into the caller's map, and a
+// later run reusing the option emitted the escalated key against a root
+// where the plain one was the emitted definition, a dangling ref.
+func TestTypeSchemaOverrideNestedExtraUnaliased(t *testing.T) {
+	t.Parallel()
+
+	type holder struct{}
+
+	type colliding struct {
+		A alpha.Widget `json:"a"`
+		B beta.Widget  `json:"b"`
+		H holder       `json:"h"`
+	}
+
+	type plain struct {
+		A alpha.Widget `json:"a"`
+		H holder       `json:"h"`
+	}
+
+	nested := map[string]any{"$ref": "#/$defs/Widget"}
+	value := &jsonschema.Schema{Type: "object", Extra: map[string]any{"x-link": nested}}
+	opt := jsonschema.WithTypeSchemaFor[holder](jsonschema.TypeSchema{Value: value})
+
+	link := func(s *jsonschema.Schema) string {
+		t.Helper()
+
+		require.Contains(t, s.Defs, "holder")
+
+		m, ok := s.Defs["holder"].Extra["x-link"].(map[string]any)
+		require.True(t, ok)
+
+		ref, ok := m["$ref"].(string)
+		require.True(t, ok)
+
+		return ref
+	}
+
+	first, err := jsonschema.GenerateFor[colliding](t.Context(), opt)
+	require.NoError(t, err)
+	assert.Equal(t, "#/$defs/alpha_Widget", link(first), "the collision escalates the hand-spelled ref")
+	assert.Equal(t, "#/$defs/Widget", nested["$ref"], "the caller's map is untouched")
+
+	second, err := jsonschema.GenerateFor[plain](t.Context(), opt)
+	require.NoError(t, err)
+	assert.Equal(t, "#/$defs/Widget", link(second), "a reused option names the key this run emits")
+
+	_, err = jsonschema.Compile(t.Context(), second)
+	require.NoError(t, err)
+}
+
 func TestTypeSchemaOverrideContainersUnaliased(t *testing.T) {
 	t.Parallel()
 
