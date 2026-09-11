@@ -1337,7 +1337,12 @@
 // deprecated, a fraction under maxLength) returns an error wrapping
 // [ErrKeywordType], under every draft: the fields are typed whether or not
 // the document's draft defines the keyword, where a draft that does not
-// reads it as an unknown keyword and judges nothing.
+// reads it as an unknown keyword and judges nothing. A null under a
+// sub-schema keyword returns an error wrapping [ErrNilSubschema], since
+// unmarshaling into a [Schema] directly reads a null under items, not, or
+// contains as the false schema. A null under any other keyword but const
+// and default reads as the keyword's absence, as unmarshaling reads it,
+// where the metaschema types the keyword and refuses the null.
 //
 // All three also return an error wrapping [ErrInvalidType] for a "type": ""
 // and [ErrInvalidAnchor] for an empty $anchor or $dynamicAnchor in any

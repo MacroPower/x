@@ -1549,7 +1549,11 @@ func MustCompile(schema *Schema, opts ...ValidateOption) *Validator {
 // Values produced by [Normalize] ([jsonv1.Number] leaves) convert correctly.
 // An empty string under $ref, type, $anchor, or $dynamicAnchor, which
 // unmarshaling into a [Schema] directly reads as the absent keyword, returns
-// an error wrapping [ErrEmptyRef], [ErrInvalidType], or [ErrInvalidAnchor].
+// an error wrapping [ErrEmptyRef], [ErrInvalidType], or [ErrInvalidAnchor],
+// and a null under a keyword holding one sub-schema (items, not, contains),
+// which unmarshaling reads as the false schema, one wrapping
+// [ErrNilSubschema]. A null under any other keyword but const and default
+// reads as the keyword's absence.
 // A bound keyword outside float64 range or a count keyword outside the int32
 // range returns an error wrapping [ErrKeywordOutOfRange], and a count
 // spelled with an exponent or a decimal point (1E2, 1.0e2) converts to the
@@ -1613,16 +1617,21 @@ func ParseSchemaValue(doc any) (*Schema, error) {
 	}
 }
 
-// refuseEmptyKeywords refuses an empty string under a keyword whose empty
-// value the upstream decode reads as the absent keyword, in any sub-schema
-// position of the decoded document: a "$ref": "" is RFC 3986's reference to
-// the current document and would silently become the empty schema, a
-// "type": "" names no type and would silently constrain nothing, and an
-// empty $anchor or $dynamicAnchor is outside the plain-name grammar and
-// would silently register nothing. Each typed node's [Location] segments
-// resolve its source object, the pairing restoreExactValues uses; a boolean
-// source has no members and is skipped. The error names the pointer of the
-// offending node, in the form the compile-time vet reports for the keyword.
+// refuseEmptyKeywords refuses a value the upstream decode silently reads
+// as something the author did not write, in any sub-schema position of the
+// decoded document. An empty string under a keyword whose empty value reads
+// as the absent keyword: a "$ref": "" is RFC 3986's reference to the current
+// document and would silently become the empty schema, a "type": "" names
+// no type and would silently constrain nothing, and an empty $anchor or
+// $dynamicAnchor is outside the plain-name grammar and would silently
+// register nothing. A null under a keyword holding one sub-schema (items,
+// not, contains, additionalProperties), which reads as the false schema and
+// would silently reject what the keyword reaches, where a null element of
+// a sub-schema list or map is refused by the vet. Each typed node's
+// [Location] segments resolve its source object, the pairing
+// restoreExactValues uses; a boolean source has no members and is skipped.
+// The error names the pointer of the offending node, in the form the
+// compile-time vet reports for the keyword.
 func refuseEmptyKeywords(s *Schema, doc map[string]any) error {
 	return Walk(s, func(loc Location, node *Schema) error {
 		src, ok := resolveDocValue(doc, loc.Segments).(map[string]any)
@@ -1632,6 +1641,12 @@ func refuseEmptyKeywords(s *Schema, doc map[string]any) error {
 
 		if ref, present := src[KeywordRef]; present && ref == "" {
 			return fmt.Errorf("#%s: %w", loc.Pointer, ErrEmptyRef)
+		}
+
+		for key, shapes := range subschemaForms {
+			if sub, present := src[key]; present && sub == nil && slices.Contains(shapes, schemafield.Single) {
+				return fmt.Errorf("%w at %s/%s", ErrNilSubschema, loc.Pointer, key)
+			}
 		}
 
 		if typ, present := src[KeywordType]; present && typ == "" {

@@ -143,7 +143,11 @@ var (
 	// []*Schema{nil}). A nil element has no JSON form, and the walk skips it
 	// silently, so the branch the author listed would assert nothing. Only
 	// container elements are checked: a nil direct field such as Not or Items
-	// is an absent keyword.
+	// is an absent keyword. [ParseSchemaValue], [ParseSchema], and
+	// [CompileJSON] return it for a JSON null under any sub-schema keyword,
+	// a null element of a list or map included: unmarshaling into a [Schema]
+	// directly reads a null under items, not, or contains as the false
+	// schema, which would silently reject what the keyword reaches.
 	//
 	// It is re-exported from internal/schemavet, the shared structural-vetting
 	// core, so [errors.Is] matches the sentinel identically whether a failure

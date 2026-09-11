@@ -1317,6 +1317,75 @@ func TestParseSchemaOutOfRangeNumberLiteral(t *testing.T) {
 	}
 }
 
+// TestParseSchemaNullKeywordReadsAsAbsent pins that a null under any keyword
+// but const, default, and the sub-schema keywords reads as the keyword's
+// absence, as unmarshaling into a Schema reads it, where the metaschema
+// types the keyword and refuses the null; const and default hold the null
+// as the value it is, and a null under a sub-schema keyword is refused,
+// since unmarshaling once read it as the false schema under items and
+// silently rejected every element.
+func TestParseSchemaNullKeywordReadsAsAbsent(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		schema  string
+		valid   string
+		invalid string
+		err     error
+	}{
+		"$schema": {
+			schema:  `{"$schema": null, "type": "boolean"}`,
+			valid:   `true`,
+			invalid: `1`,
+		},
+		"minLength": {
+			schema:  `{"minLength": null, "type": "string"}`,
+			valid:   `""`,
+			invalid: `1`,
+		},
+		"enum": {
+			schema:  `{"enum": null, "type": "integer"}`,
+			valid:   `7`,
+			invalid: `"s"`,
+		},
+		"items": {
+			schema: `{"items": null, "type": "array"}`,
+			err:    jsonschema.ErrNilSubschema,
+		},
+		"contains inside a property": {
+			schema: `{"properties": {"a": {"contains": null}}}`,
+			err:    jsonschema.ErrNilSubschema,
+		},
+		"property member": {
+			schema: `{"properties": {"a": null}, "required": ["a"]}`,
+			err:    jsonschema.ErrNilSubschema,
+		},
+		"const holds the null": {
+			schema:  `{"const": null}`,
+			valid:   `null`,
+			invalid: `1`,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			v, err := jsonschema.CompileJSON(t.Context(), []byte(tc.schema))
+			if tc.err != nil {
+				require.ErrorIs(t, err, tc.err)
+
+				return
+			}
+
+			require.NoError(t, err, "a null keyword compiles")
+
+			require.NoError(t, v.ValidateJSON(t.Context(), []byte(tc.valid)))
+			require.Error(t, v.ValidateJSON(t.Context(), []byte(tc.invalid)))
+		})
+	}
+}
+
 // assertParseValueMatchesRemarshal pins ParseSchemaValue's direct exact copy
 // of value members to the marshal round trip it replaced: parsing doc
 // directly must produce the same schema as marshaling doc and parsing the
