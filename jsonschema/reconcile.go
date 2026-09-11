@@ -59,15 +59,17 @@ func (g *run) reconcileField(n *node) *Schema {
 		return &merged
 	}
 
-	// A nilable container with no const/enum encodes as a ["null", base] type
-	// list carrying its authored keywords inline; its bare payload has no type
-	// yet, so the empty-schema dedup (which treats a typeless payload as
-	// null-admitting) must not run first. An allOf (a subschema the canvas
-	// forbids) cannot ride the list either: inline beside "null" it judges
-	// the null, and a forbidden subschema naming no type rejects it, so the
-	// field takes the anyOf form with the allOf on the value branch.
-	hasValueOnly := merged.Const != nil || merged.Enum != nil || len(merged.AllOf) > 0
-	if n.typeListEncoded() && !hasValueOnly {
+	// A nilable container whose keywords are all vacuous on null encodes as
+	// a ["null", base] type list carrying them inline; its bare payload has
+	// no type yet, so the empty-schema dedup (which treats a typeless
+	// payload as null-admitting) must not run first. A keyword that judges
+	// the null itself cannot ride the list where the anyOf form would spare
+	// the null: a const or enum compares it, and an applicator the type
+	// does not gate (the allOf a forbidden subschema lands in, a hook's
+	// oneOf or not) descends into it and rejects it, so the field takes the
+	// anyOf form with those on the value branch. The rows are
+	// [keywordmeta.NullJudging].
+	if n.typeListEncoded() && !judgesNull(&merged, base) {
 		nullTypeList(&merged, n.containerType())
 
 		return &merged
@@ -312,4 +314,28 @@ func splitFieldKeywords(value, base *Schema) *Schema {
 	}
 
 	return wrapper
+}
+
+// judgesNull reports whether the merged schema carries a keyword whose
+// assertion would reach a null instance on a ["null", base] type list and
+// not under the anyOf split, the [keywordmeta.NullJudging] rows. A
+// wrapper-scoped row (not) is read off the pristine payload alone: the
+// split moves the canvas's copy onto the wrapper, where it judges the null
+// in both forms, while a type-level hook's copy stays on the value branch.
+func judgesNull(merged, base *Schema) bool {
+	for _, kw := range keywordmeta.NullJudging {
+		if kw.Scope == keywordmeta.ScopeWrapper {
+			if kw.Present(base) {
+				return true
+			}
+
+			continue
+		}
+
+		if kw.Present(merged) {
+			return true
+		}
+	}
+
+	return false
 }

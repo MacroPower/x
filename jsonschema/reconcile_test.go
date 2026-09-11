@@ -6,6 +6,7 @@ import (
 	"maps"
 	"reflect"
 	"slices"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -424,6 +425,92 @@ func TestReconcileSplitCoversAuthored(t *testing.T) {
 
 	assert.Equal(t, authored, partition,
 		"the covered and skipped keywords must partition keywordmeta.Authored exactly")
+}
+
+// hookOneOfLevels is a named container whose extender adds a oneOf, an
+// applicator the instance type does not gate.
+type hookOneOfLevels []any
+
+func (hookOneOfLevels) JSONSchemaExtend(_ context.Context, _ jsonschema.TypeContext, ts *jsonschema.TypeSchema) error {
+	ts.Value.OneOf = []*jsonschema.Schema{
+		{Items: &jsonschema.Schema{Type: "string"}},
+		{Items: &jsonschema.Schema{Type: "integer"}},
+	}
+
+	return nil
+}
+
+// hookNotLevels is a named container whose extender adds a not.
+type hookNotLevels []any
+
+func (hookNotLevels) JSONSchemaExtend(_ context.Context, _ jsonschema.TypeContext, ts *jsonschema.TypeSchema) error {
+	ts.Value.Not = &jsonschema.Schema{Items: &jsonschema.Schema{Type: "boolean"}}
+
+	return nil
+}
+
+// TestReconcileHookApplicatorSparesNull pins that a nullable container whose
+// type-level hook added an applicator the instance type does not gate takes
+// the anyOf form in both definition modes, so the null the occurrence
+// admits is accepted. The type-list decision used to look for const, enum,
+// and allOf alone, so a hook's oneOf or not rode the ["null", "array"] list
+// inline under WithDefinitions(false), judged the null, and rejected it,
+// while the extracted form accepted it.
+func TestReconcileHookApplicatorSparesNull(t *testing.T) {
+	t.Parallel()
+
+	type oneOfDoc struct {
+		M *hookOneOfLevels `json:"m"`
+	}
+
+	type notDoc struct {
+		M *hookNotLevels `json:"m"`
+	}
+
+	cases := map[string]struct {
+		generate func(defs bool) (*jsonschema.Schema, error)
+		valid    []string
+		invalid  []string
+	}{
+		"oneOf": {
+			generate: func(defs bool) (*jsonschema.Schema, error) {
+				return jsonschema.GenerateFor[oneOfDoc](t.Context(), jsonschema.WithDefinitions(defs))
+			},
+			valid:   []string{`{"m":null}`, `{"m":["a"]}`, `{"m":[1]}`},
+			invalid: []string{`{"m":[true]}`},
+		},
+		"not": {
+			generate: func(defs bool) (*jsonschema.Schema, error) {
+				return jsonschema.GenerateFor[notDoc](t.Context(), jsonschema.WithDefinitions(defs))
+			},
+			valid:   []string{`{"m":null}`, `{"m":["a"]}`},
+			invalid: []string{`{"m":[true]}`},
+		},
+	}
+
+	for name, tc := range cases {
+		for _, defs := range []bool{false, true} {
+			t.Run(name+" definitions="+strconv.FormatBool(defs), func(t *testing.T) {
+				t.Parallel()
+
+				s, err := tc.generate(defs)
+				require.NoError(t, err)
+
+				v, err := jsonschema.Compile(t.Context(), s)
+				require.NoError(t, err)
+
+				for _, instance := range tc.valid {
+					err := v.ValidateJSON(t.Context(), []byte(instance))
+					require.NoError(t, err, "instance %s", instance)
+				}
+
+				for _, instance := range tc.invalid {
+					err := v.ValidateJSON(t.Context(), []byte(instance))
+					require.Error(t, err, "instance %s", instance)
+				}
+			})
+		}
+	}
 }
 
 // hookTypedLevels is a named container whose extender declares the type

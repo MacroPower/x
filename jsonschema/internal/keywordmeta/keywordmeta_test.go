@@ -177,6 +177,14 @@ func TestKeywordMetaColumnsConsistent(t *testing.T) {
 			assert.Equal(t, k.Merge == MergeNone, k.Scope == ScopeNone || !k.Asserted,
 				"Merge is None exactly for the structural keywords and the ones no dispatch row asserts")
 
+			if k.JudgesNull {
+				assert.True(
+					t,
+					k.Scope == ScopeValue || k.Applicator,
+					"a keyword judges null only as a value keyword or an applicator; the type gates every other assertion",
+				)
+			}
+
 			if k.VocabRefined {
 				assert.True(t, k.Asserted,
 					"VocabRefined only exempts a member of a dispatch row, so it is meaningless on an unasserted row")

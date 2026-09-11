@@ -1192,8 +1192,11 @@
 // Every consumer reads that one answer: the null branch the schema carries,
 // the null literal a tag or an interpreter may write, [FieldContext.Shape],
 // and a [WithDefaultsFrom] null. A null-admitting field renders as
-// anyOf[value, null], or as a ["null", base] type list for a container with
-// no const, enum, or forbidden subschema.
+// anyOf[value, null], or as a ["null", base] type list for a container
+// whose keywords are all vacuous on null: no const, enum, forbidden
+// subschema, or other applicator the type does not gate, such as a
+// type-level hook's oneOf or not, which inline beside "null" would judge
+// the null itself.
 //
 // Each keyword a field-level hook declares (the description provider, the
 // jsonschema tag, or a tag interpreter) lands on the value branch or the null

@@ -28,6 +28,7 @@ import (
 
 	"go.jacobcolvin.com/x/jsonschema/internal/jsonvalue"
 	"go.jacobcolvin.com/x/jsonschema/internal/keyword"
+	"go.jacobcolvin.com/x/jsonschema/internal/schemafield"
 )
 
 // Schema is the upstream schema type this package's closures read and write. It
@@ -251,6 +252,30 @@ type Keyword struct {
 	// the sub-schema shapes schemafield declares, with $ref and $dynamicRef
 	// the two applicators whose field is a string.
 	Applicator bool
+
+	// JudgesNull reports whether the keyword's assertion reaches a null
+	// instance: a value keyword compares null against its literals, and an
+	// applicator the instance type does not gate descends into it. A
+	// keyword the type gates (a bound, a length, a property or item
+	// applicator) is vacuous on null. The parent's null reconciliation reads
+	// this column to decide whether a nullable container's authored
+	// keywords can ride a ["null", base] type list inline, where every
+	// keyword sees the null, or need the anyOf split that keeps them on
+	// the value branch.
+	JudgesNull bool
+}
+
+// Present reports whether the keyword is set on s, by the zero predicates of
+// the fields it owns. Unlike [Keyword.Set] it needs no closures, so it
+// answers for a structural row too.
+func (k *Keyword) Present(s *Schema) bool {
+	for _, name := range k.Fields {
+		if !schemafield.ByName[name].IsZero(s) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // Set reports whether the keyword is set on s, by comparing s against an empty
@@ -357,6 +382,13 @@ func structural(name string, drafts DraftRange, vocab VocabGroup, fields ...stri
 func applicator(name string, drafts DraftRange, vocab VocabGroup, fields ...string) Keyword {
 	k := structural(name, drafts, vocab, fields...)
 	k.Applicator = true
+
+	return k
+}
+
+// nullJudging marks a row whose assertion reaches a null instance.
+func nullJudging(k Keyword) Keyword {
+	k.JudgesNull = true
 
 	return k
 }
@@ -483,6 +515,7 @@ var (
 			Vocab:      VocabApplicator,
 			Asserted:   true,
 			Applicator: true,
+			JudgesNull: true,
 		},
 			func(s *Schema) *Schema { return s.Not },
 			func(s, v *Schema) { s.Not = v }),
@@ -495,13 +528,14 @@ var (
 		// accept one), and comparing two uncomparable dynamic types compiles and
 		// then panics at run time.
 		valueKeyword(Keyword{
-			Fields:   []string{"Const"},
-			Name:     keyword.Const,
-			Drafts:   DraftsAll,
-			Merge:    MergeReplace,
-			Scope:    ScopeValue,
-			Vocab:    VocabValidation,
-			Asserted: true,
+			Fields:     []string{"Const"},
+			Name:       keyword.Const,
+			Drafts:     DraftsAll,
+			Merge:      MergeReplace,
+			Scope:      ScopeValue,
+			Vocab:      VocabValidation,
+			Asserted:   true,
+			JudgesNull: true,
 		},
 			func(s *Schema) *any { return s.Const },
 			func(s *Schema, v *any) { s.Const = v }),
@@ -510,15 +544,16 @@ var (
 			// null branch, so it stays value-scoped. Presence is nil-based, not
 			// length-based; the canvas scan refuses an empty enum before the
 			// overlay runs, so none reaches here.
-			Differs:  func(a, b *Schema) bool { return (a.Enum == nil) != (b.Enum == nil) },
-			Assign:   func(src, dst *Schema) { dst.Enum = src.Enum },
-			Fields:   []string{"Enum"},
-			Name:     keyword.Enum,
-			Drafts:   DraftsAll,
-			Merge:    MergeIntersect,
-			Scope:    ScopeValue,
-			Vocab:    VocabValidation,
-			Asserted: true,
+			Differs:    func(a, b *Schema) bool { return (a.Enum == nil) != (b.Enum == nil) },
+			Assign:     func(src, dst *Schema) { dst.Enum = src.Enum },
+			Fields:     []string{"Enum"},
+			Name:       keyword.Enum,
+			Drafts:     DraftsAll,
+			Merge:      MergeIntersect,
+			Scope:      ScopeValue,
+			Vocab:      VocabValidation,
+			Asserted:   true,
+			JudgesNull: true,
 		},
 		stringValueKeyword(keyword.Pattern, "Pattern", VocabValidation,
 			func(s *Schema) string { return s.Pattern },
@@ -562,8 +597,8 @@ var (
 		// carry no closures. The sub-schema-bearing ones are re-rendered from the
 		// value node instead of copied.
 		structural(keyword.Type, DraftsAll, VocabValidation, "Type", "Types"),
-		applicator(keyword.Ref, DraftsAll, VocabCore, "Ref"),
-		applicator(keyword.DynamicRef, Drafts2020Up, VocabCore, "DynamicRef"),
+		nullJudging(applicator(keyword.Ref, DraftsAll, VocabCore, "Ref")),
+		nullJudging(applicator(keyword.DynamicRef, Drafts2020Up, VocabCore, "DynamicRef")),
 		// The reusable-schema containers assert nothing themselves (their members
 		// are reached through $ref), so no dispatch row owns them.
 		{Name: keyword.Defs, Fields: []string{"Defs"}, Drafts: DraftsAll},
@@ -612,13 +647,17 @@ var (
 		applicator(keyword.PropertyNames, DraftsAll, VocabApplicator, "PropertyNames"),
 		applicator(keyword.UnevaluatedProperties, Drafts2020Up, VocabUnevaluated,
 			"UnevaluatedProperties"),
-		applicator(keyword.AllOf, DraftsAll, VocabApplicator, "AllOf"),
-		applicator(keyword.AnyOf, DraftsAll, VocabApplicator, "AnyOf"),
-		applicator(keyword.OneOf, DraftsAll, VocabApplicator, "OneOf"),
-		applicator(keyword.If, DraftsAll, VocabApplicator, "If"),
-		applicator(keyword.Then, DraftsAll, VocabApplicator, "Then"),
-		applicator(keyword.Else, DraftsAll, VocabApplicator, "Else"),
+		nullJudging(applicator(keyword.AllOf, DraftsAll, VocabApplicator, "AllOf")),
+		nullJudging(applicator(keyword.AnyOf, DraftsAll, VocabApplicator, "AnyOf")),
+		nullJudging(applicator(keyword.OneOf, DraftsAll, VocabApplicator, "OneOf")),
+		nullJudging(applicator(keyword.If, DraftsAll, VocabApplicator, "If")),
+		nullJudging(applicator(keyword.Then, DraftsAll, VocabApplicator, "Then")),
+		nullJudging(applicator(keyword.Else, DraftsAll, VocabApplicator, "Else")),
 	}
+
+	// NullJudging is every keyword whose assertion reaches a null instance,
+	// the rows the ["null", base] type list encoding cannot carry inline.
+	NullJudging = derive(func(k *Keyword) bool { return k.JudgesNull })
 
 	// Movable is the wrapper-scoped, authorable subset: the keywords the nullable
 	// split moves onto the anyOf wrapper, restoring the value branch's
