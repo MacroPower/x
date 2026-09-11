@@ -267,7 +267,7 @@ func (s *applyState) apply(d Directive) error {
 	}
 
 	if key == keyword.Type {
-		s.overridden = tagmodel.ShapeForTypeName(value)
+		s.overridden = tagmodel.ShapeForTypeNameOver(value, s.fieldType)
 		s.overriddenType = value
 	}
 

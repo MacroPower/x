@@ -2,6 +2,7 @@ package jsonschema_test
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
@@ -1438,15 +1439,20 @@ func TestTagHookDeclaredShapeClassifiesAsDeclared(t *testing.T) {
 
 	type arrayOverStruct struct{ X, Y int }
 
+	type arrayOverInt int
+
+	type objectOverString string
+
 	type doc struct {
 		D time.Duration    `json:"d" jsonschema:"default=15m"`
 		S stringOverStruct `json:"s" jsonschema:"const=b"`
 		P objectOverSlice  `json:"p" jsonschema:"minProperties=1"`
 		A arrayOverStruct  `json:"a" jsonschema:"minItems=1"`
+		I arrayOverInt     `json:"i" jsonschema:"maxItems=3"`
+		O objectOverString `json:"o" jsonschema:"maxProperties=2"`
 	}
 
-	s, err := jsonschema.GenerateFor[doc](
-		t.Context(),
+	opts := []jsonschema.GenerateOption{
 		jsonschema.WithTypeSchemaFor[time.Duration](jsonschema.TypeSchema{Value: &jsonschema.Schema{Type: "string"}}),
 		jsonschema.WithTypeSchemaFor[stringOverStruct](
 			jsonschema.TypeSchema{Value: &jsonschema.Schema{Type: "string"}},
@@ -1455,7 +1461,15 @@ func TestTagHookDeclaredShapeClassifiesAsDeclared(t *testing.T) {
 		jsonschema.WithTypeSchemaFor[arrayOverStruct](jsonschema.TypeSchema{
 			Value: &jsonschema.Schema{Type: "array", Items: &jsonschema.Schema{Type: "integer"}},
 		}),
-	)
+		jsonschema.WithTypeSchemaFor[arrayOverInt](jsonschema.TypeSchema{
+			Value: &jsonschema.Schema{Type: "array", Items: &jsonschema.Schema{Type: "integer"}},
+		}),
+		jsonschema.WithTypeSchemaFor[objectOverString](
+			jsonschema.TypeSchema{Value: &jsonschema.Schema{Type: "object"}},
+		),
+	}
+
+	s, err := jsonschema.GenerateFor[doc](t.Context(), opts...)
 	require.NoError(t, err)
 
 	// A named type with an override may be extracted, so the tag's keyword
@@ -1478,9 +1492,65 @@ func TestTagHookDeclaredShapeClassifiesAsDeclared(t *testing.T) {
 	assert.Equal(t, "b", property("s")["const"], "a hook's string over a plain struct takes a const")
 	assert.InDelta(t, 1.0, property("p")["minProperties"], 0, "a hook's object over a slice takes a property count")
 	assert.InDelta(t, 1.0, property("a")["minItems"], 0, "a hook's array over a struct takes an item count")
+	assert.InDelta(t, 3.0, property("i")["maxItems"], 0, "a hook's array over an integer kind takes an item count")
+	assert.InDelta(t, 2.0, property("o")["maxProperties"], 0,
+		"a hook's object over a string kind takes a property count")
 
 	_, err = jsonschema.Compile(t.Context(), s)
 	require.NoError(t, err)
+
+	// The declared shape outranks the scalar kind in the other direction
+	// too: the kind's own keywords are refused, since the instance is not a
+	// number or a string.
+	refused := map[string]any{
+		"a bound on a declared array over an integer": struct {
+			I arrayOverInt `json:"i" jsonschema:"minimum=1"`
+		}{},
+		"a length on a declared object over a string": struct {
+			O objectOverString `json:"o" jsonschema:"minLength=1"`
+		}{},
+	}
+
+	for name, typ := range refused {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := jsonschema.Generate(t.Context(), reflect.TypeOf(typ), opts...)
+			require.ErrorIs(t, err, jsonschema.ErrConstraintUnsupported)
+		})
+	}
+}
+
+// TestTagByteSliceWithMarshalerIsText pins that a byte slice type carrying
+// a text marshaler of its own classifies as the text-marshaled string every
+// other such type is: a length keyword measures the text it writes and a
+// literal is refused, since the tag cannot spell what the method emits. The
+// classifier used to read it as a base64 string and decode the literal.
+func TestTagByteSliceWithMarshalerIsText(t *testing.T) {
+	t.Parallel()
+
+	s, err := jsonschema.GenerateFor[struct {
+		H hexBytes `json:"h" jsonschema:"minLength=2"`
+	}](t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, "string", s.Properties["h"].Type)
+	require.NotNil(t, s.Properties["h"].MinLength)
+	assert.Equal(t, 2, *s.Properties["h"].MinLength)
+	assert.Empty(t, s.Properties["h"].ContentEncoding, "the text is not base64")
+
+	_, err = jsonschema.GenerateFor[struct {
+		H hexBytes `json:"h" jsonschema:"const=ff"`
+	}](t.Context())
+	require.ErrorIs(t, err, jsonschema.ErrConstraintUnsupported)
+}
+
+// hexBytes is a byte slice marshaling itself as hex digits, so its instance
+// is text the base64 rules do not describe.
+type hexBytes []byte
+
+// MarshalText implements [encoding.TextMarshaler].
+func (h hexBytes) MarshalText() ([]byte, error) {
+	return []byte(hex.EncodeToString(h)), nil
 }
 
 // TestTagTypeOverrideReplacedSubtreeStillHooked pins that a type= pair

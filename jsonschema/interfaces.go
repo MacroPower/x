@@ -854,9 +854,11 @@ func (fc FieldContext) Shape() Shape {
 	// type=string override apart from a json:",string" coercion, since both
 	// present a string-typed base over a numeric kind. Kind stays the Go
 	// kind: a dialect's kind rules describe what its validator runs over,
-	// and that is the Go value whatever the schema says.
+	// and that is the Go value whatever the schema says. The same Go kind
+	// splits a declared object: over a map it is the map form, and over any
+	// other kind the declared-object form, as a hook's object is.
 	if fc.node.overrode != nil {
-		named := tagmodel.ShapeForTypeName(fc.node.payload.Type)
+		named := tagmodel.ShapeForTypeNameOver(fc.node.payload.Type, fc.Type)
 		shape.Form, shape.Parse = named.Form, named.Parse
 	}
 

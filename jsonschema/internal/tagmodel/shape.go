@@ -238,6 +238,27 @@ func ShapeForTypeName(name string) Shape {
 	return Shape{Kind: kind, Parse: kind, Form: FormForTypeName(name)}
 }
 
+// ShapeForTypeNameOver is [ShapeForTypeName] for a pair installed on a field
+// of Go type t: a declared object over any kind but a map is the
+// declared-object form, the one a hook's object schema over the same kind
+// takes, so a dialect's rule-shaped bound has no entry count to land on
+// where go-playground defines none. A nil t reads as [ShapeForTypeName].
+func ShapeForTypeNameOver(name string, t reflect.Type) Shape {
+	sh := ShapeForTypeName(name)
+
+	if sh.Form == FormObject && t != nil {
+		for t.Kind() == reflect.Pointer {
+			t = t.Elem()
+		}
+
+		if t.Kind() != reflect.Map {
+			sh.Form = FormDeclaredObject
+		}
+	}
+
+	return sh
+}
+
 // ShapeOf classifies a field or element from its Go type and the type-derived
 // base schema. It is the single home of the string-coercion test, the
 // schema-permits-a-string test, the byte-slice test, and every kind predicate
@@ -324,32 +345,57 @@ func classifyForm(t reflect.Type, base *jsonschema.Schema, quoted bool, def func
 
 	str := schemaPermitsString(base)
 
-	// A byte slice never has per-element schemas: it is one base64 string when
-	// its schema says so, and otherwise a raw JSON value. A marshaler-bearing
-	// uint8 element is exempt (the predicate mirrors encoding/json): such a
-	// slice marshals as a real JSON array with per-element schemas, so it
-	// classifies as any other slice below.
-	if reflectkind.IsBase64ByteSlice(t) {
-		if str {
-			return FormByteString
-		}
-
-		return FormRawBytes
-	}
-
-	// A byte array is the same base64 string with a pinned length; the
-	// generator never renders it as a raw JSON value, so only the string
-	// form applies.
-	if reflectkind.IsBase64ByteArray(t) && str {
-		return FormByteString
-	}
-
 	// The two scalar kinds that can be coerced decide on the base's
 	// string-ness and the coercion's source, the json:",string" option or a
 	// marshal method of the type's own, whose output the coerced round-trip
 	// reproduces; nothing else about the base can override what the Go
 	// value is.
 	coerced := quoted || reflectkind.ImplementsAnyMarshaler(t)
+
+	// A byte slice never has per-element schemas: it is one base64 string when
+	// its schema says so, and otherwise a raw JSON value. A marshaler-bearing
+	// uint8 element is exempt (the predicate mirrors encoding/json): such a
+	// slice marshals as a real JSON array with per-element schemas, so it
+	// classifies as any other slice below. A byte slice type carrying a
+	// marshaler of its own under a string schema writes that marshaler's
+	// text, not base64, so it classifies as the text-marshaled string every
+	// other such type is.
+	if reflectkind.IsBase64ByteSlice(t) {
+		switch {
+		case !str:
+			return FormRawBytes
+		case reflectkind.ImplementsAnyMarshaler(t):
+			return FormTextString
+		default:
+			return FormByteString
+		}
+	}
+
+	// A byte array is the same base64 string with a pinned length; the
+	// generator never renders it as a raw JSON value, so only the string
+	// form applies, and a marshaler of its own writes text as above.
+	if reflectkind.IsBase64ByteArray(t) && str {
+		if reflectkind.ImplementsAnyMarshaler(t) {
+			return FormTextString
+		}
+
+		return FormByteString
+	}
+
+	// A declared object or array outranks the Go kind: a hook that declares
+	// one describes the instance the type marshals as, over a scalar kind
+	// as over a composite one. A declared array is an array whose elements
+	// the target supplies, none for a scalar, so a value rule reports there.
+	declared := declaredForm(base)
+
+	if scalarKind(t.Kind()) {
+		switch declared { //nolint:exhaustive // The other forms fall through to the kind.
+		case FormArray:
+			return FormArray
+		case FormObject:
+			return FormDeclaredObject
+		}
+	}
 
 	switch {
 	case numkind.IsInteger(t.Kind()) || numkind.IsFloat(t.Kind()):
@@ -372,10 +418,6 @@ func classifyForm(t reflect.Type, base *jsonschema.Schema, quoted bool, def func
 
 		return FormBool
 	}
-
-	// A declared object or array outranks the Go kind below: a hook that
-	// declares one describes the instance the type marshals as.
-	declared := declaredForm(base)
 
 	switch t.Kind() {
 	case reflect.String:
@@ -447,6 +489,12 @@ func classifyForm(t reflect.Type, base *jsonschema.Schema, quoted bool, def func
 			return FormOpaque
 		}
 	}
+}
+
+// scalarKind reports whether k is a kind a tag can spell a scalar for: an
+// integer, a float, a bool, or a string.
+func scalarKind(k reflect.Kind) bool {
+	return numkind.IsInteger(k) || numkind.IsFloat(k) || k == reflect.Bool || k == reflect.String
 }
 
 // textString classifies a string-typed schema over a non-scalar Go kind: a
