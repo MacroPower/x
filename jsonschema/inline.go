@@ -1154,14 +1154,18 @@ func (in *inliner) inlineCopy(target *Schema, path string, memoize bool) (*Schem
 	return cp, nil
 }
 
-// stripIdentifiers clears $schema, $id, $anchor, and $dynamicAnchor from
-// every node of a spliced copy's subtree. The dialect declaration belongs to
-// the target's original document and the names identify the target at its
-// original position; a copy spliced elsewhere must not re-declare them (see
-// [inliner.inlineCopy]). A copy is cloned from a frozen tree and is a tree
-// itself, so the walk reaches each node once with no visited set.
+// stripIdentifiers clears $schema, $vocabulary, $id, $anchor, and
+// $dynamicAnchor from every node of a spliced copy's subtree. The dialect
+// declaration and the vocabulary set belong to the target's original
+// document, where the spec allows $vocabulary at a resource root alone, and
+// the names identify the target at its original position; a copy spliced
+// elsewhere must not re-declare them (see [inliner.inlineCopy]). $comment is
+// an identifier by schemafield's classification and survives, since it
+// scopes nothing. A copy is cloned from a frozen tree and is a tree itself,
+// so the walk reaches each node once with no visited set.
 func stripIdentifiers(s *Schema) {
 	s.Schema = ""
+	s.Vocabulary = nil
 	s.ID = ""
 	s.Anchor = ""
 	s.DynamicAnchor = ""

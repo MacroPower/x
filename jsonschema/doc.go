@@ -2023,8 +2023,8 @@
 //   - When $ref is the schema's only keyword, the target copy alone replaces
 //     it under either draft.
 //
-// A spliced copy never carries a $schema keyword, and the returned root keeps
-// the input's $schema. A spliced copy also carries no $id, $anchor, or
+// A spliced copy never carries a $schema or $vocabulary keyword, and the
+// returned root keeps the input's. A spliced copy also carries no $id, $anchor, or
 // $dynamicAnchor in any typed sub-schema position of its subtree. The names
 // identify the target at its original position, and duplicating them at each
 // splice would declare the same identifier several times in one document.

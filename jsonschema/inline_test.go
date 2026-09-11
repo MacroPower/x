@@ -2898,3 +2898,43 @@ func TestInlineFallbackTreeRecordsItsOwnLocation(t *testing.T) {
 			"the failure is located within the document, not by the reaching ref's text")
 	}
 }
+
+// TestInlineStripsVocabularyFromASplicedRoot pins that a resource root's
+// $vocabulary does not travel with the copy Inline splices in its place.
+// The strip used to clear $schema, $id, and the anchors alone, so the copy
+// carried $vocabulary at a non-root position with an emptied $schema, which
+// the spec forbids and a Draft-07 Compile of the output refuses.
+func TestInlineStripsVocabularyFromASplicedRoot(t *testing.T) {
+	t.Parallel()
+
+	root := &jsonschema.Schema{
+		ID:     "https://example.com/root",
+		Schema: "https://json-schema.org/draft/2020-12/schema",
+		Properties: map[string]*jsonschema.Schema{
+			"a": {Ref: "https://example.com/meta"},
+		},
+		Defs: map[string]*jsonschema.Schema{
+			"meta": {
+				ID:     "https://example.com/meta",
+				Schema: "https://json-schema.org/draft/2020-12/schema",
+				Vocabulary: map[string]bool{
+					"https://json-schema.org/draft/2020-12/vocab/core": true,
+				},
+				Type: "object",
+			},
+		},
+	}
+
+	out, err := jsonschema.Inline(t.Context(), root)
+	require.NoError(t, err)
+
+	spliced := out.Properties["a"]
+	require.NotNil(t, spliced)
+	assert.Equal(t, "object", spliced.Type)
+	assert.Empty(t, spliced.Vocabulary, "the vocabulary set belongs to the original resource root")
+	assert.Empty(t, spliced.ID)
+	assert.Empty(t, spliced.Schema)
+
+	_, err = jsonschema.Compile(t.Context(), out)
+	require.NoError(t, err)
+}
