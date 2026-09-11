@@ -14,6 +14,7 @@ import (
 	"go.jacobcolvin.com/x/jsonschema/internal/jsonvalue"
 	"go.jacobcolvin.com/x/jsonschema/internal/numkind"
 	"go.jacobcolvin.com/x/jsonschema/internal/tagmodel"
+	"go.jacobcolvin.com/x/jsonschema/internal/typename"
 )
 
 // ErrConflictingConstraints reports two tag rules on one field that can never
@@ -380,13 +381,13 @@ func keyContext(key reflect.Type) jsonschema.FieldContext {
 
 	switch kind := numkind.DerefType(key).Kind(); {
 	case kind == reflect.String:
-		base.Type = "string"
+		base.Type = typename.String
 	case numkind.IsInteger(kind):
-		base.Type = "integer"
+		base.Type = typename.Integer
 	case numkind.IsFloat(kind):
-		base.Type = "number"
+		base.Type = typename.Number
 	case kind == reflect.Bool:
-		base.Type = "boolean"
+		base.Type = typename.Boolean
 	}
 
 	return jsonschema.FieldContext{Type: key, Canvas: &jsonschema.Schema{}, Base: base}
