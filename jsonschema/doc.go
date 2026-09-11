@@ -418,7 +418,9 @@
 // definition the same way, and is emitted with the disambiguated key when
 // the name collides; where two definitions share the name, it names the one
 // generation registered first. A field-level hook runs after the keys are
-// settled and reads the final $ref in its Base. Generation
+// settled and reads the final $ref in its Base, and a $ref it spells by
+// hand from the namer's answer is emitted with the disambiguated key the
+// same way. Generation
 // copies the value the extender leaves, so a schema the extender assigned to
 // Value or spliced into it stays as the extender left it and a second run
 // with the same extender emits the same output.

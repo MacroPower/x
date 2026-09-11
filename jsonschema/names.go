@@ -216,18 +216,75 @@ func (g *run) assignDefNames(emitted map[*defEntry]bool, deferred *defEntry) {
 // value. A ref a hook spelled by hand as a base name is rewritten the same
 // way, to the final key of the entry [run.payloadRefTargets] resolves it
 // to, so a name the collision pass escalated does not leave the hand-spelled
-// ref dangling. The walk covers the root graph, every def body whether
-// or not the root reaches it, and the node a type= override replaced, whose
-// view the jsonschema tag reads later. Every entry holds a real key by
-// then, an orphan included, so a field inside an orphaned body whose type
-// is another orphaned entry reads that key in its Base, and a field inside
-// the root reads the root's key in its Parent whether or not the root is
-// inlined later. Payload subtrees are scanned once each
-// through the scanned set, so a subtree a hook aliased into two slots is
-// rewritten once.
+// ref dangling. The walk covers the graph [run.visitGraph] visits. Every
+// entry holds a real key by then, an orphan included, so a field inside an
+// orphaned body whose type is another orphaned entry reads that key in its
+// Base, and a field inside the root reads the root's key in its Parent
+// whether or not the root is inlined later. The canvases the field hooks
+// write afterward take the same rewrite in [run.finalizeCanvasRefs].
 func (g *run) finalizeRefs(root *node) {
-	prefix := g.profile.refPrefix()
+	r := g.newRefRewriter()
 
+	g.visitGraph(root, func(n *node) {
+		r.rewrite(n.payload)
+	})
+}
+
+// finalizeCanvasRefs rewrites every $ref a field-level hook spelled by hand
+// onto a canvas, from the namer's answer for a type, to the final key of
+// the entry [run.payloadRefTargets] resolves it to, as [run.finalizeRefs]
+// rewrites the payloads. The field hooks run after the keys are settled, so
+// their canvases hold no token, but a base name the collision pass
+// escalated spells no key, and the reachability scan follows it to an
+// entry the emitted document names otherwise. It runs after the field
+// hooks, over the same graph.
+func (g *run) finalizeCanvasRefs(root *node) {
+	r := g.newRefRewriter()
+
+	g.visitGraph(root, func(n *node) {
+		r.rewrite(n.authored)
+	})
+}
+
+// visitGraph calls visit on every node of the run: the root graph, every
+// def body whether or not the root reaches it, and the node a type=
+// override replaced, whose view the jsonschema tag reads later.
+func (g *run) visitGraph(root *node, visit func(n *node)) {
+	seen := map[*defEntry]bool{}
+
+	var visitOverrode func(n *node)
+
+	visitOverrode = func(n *node) {
+		visit(n)
+
+		if n.overrode != nil {
+			walkNodes(n.overrode, seen, visitOverrode)
+		}
+	}
+
+	walkNodes(root, seen, visitOverrode)
+
+	for _, e := range g.defs {
+		if !seen[e] {
+			seen[e] = true
+			walkNodes(e.body, seen, visitOverrode)
+		}
+	}
+}
+
+// refRewriter rewrites every $ref string in a schema tree that names a def
+// entry, by its token, its final key, or its hand-spelled base name, to
+// the entry's final key. Schema subtrees are rewritten once each through
+// the scanned set, so a subtree a hook aliased into two slots is rewritten
+// once.
+type refRewriter struct {
+	final   map[string]string
+	scanned map[*Schema]bool
+}
+
+// newRefRewriter builds a rewriter over the keys assignDefNames settled.
+func (g *run) newRefRewriter() *refRewriter {
+	prefix := g.profile.refPrefix()
 	targets := g.payloadRefTargets()
 
 	final := make(map[string]string, len(targets))
@@ -235,54 +292,33 @@ func (g *run) finalizeRefs(root *node) {
 		final[ref] = prefix + e.name
 	}
 
-	scanned := map[*Schema]bool{}
+	return &refRewriter{final: final, scanned: map[*Schema]bool{}}
+}
 
-	var rewrite func(s *Schema)
-
-	rewrite = func(s *Schema) {
-		if s == nil || scanned[s] {
-			return
-		}
-
-		scanned[s] = true
-
-		if name, ok := final[s.Ref]; ok {
-			s.Ref = name
-		}
-
-		for _, child := range schemafield.Children(s) {
-			rewrite(child)
-		}
-
-		extraRefs(s.Extra, func(ref string) string {
-			if name, ok := final[ref]; ok {
-				return name
-			}
-
-			return ref
-		}, rewrite)
+// rewrite rewrites the $ref strings of s and every sub-schema beneath it,
+// the "$ref" members of its extension keywords included.
+func (r *refRewriter) rewrite(s *Schema) {
+	if s == nil || r.scanned[s] {
+		return
 	}
 
-	seen := map[*defEntry]bool{}
+	r.scanned[s] = true
 
-	var visit func(n *node)
-
-	visit = func(n *node) {
-		rewrite(n.payload)
-
-		if n.overrode != nil {
-			walkNodes(n.overrode, seen, visit)
-		}
+	if name, ok := r.final[s.Ref]; ok {
+		s.Ref = name
 	}
 
-	walkNodes(root, seen, visit)
-
-	for _, e := range g.defs {
-		if !seen[e] {
-			seen[e] = true
-			walkNodes(e.body, seen, visit)
-		}
+	for _, child := range schemafield.Children(s) {
+		r.rewrite(child)
 	}
+
+	extraRefs(s.Extra, func(ref string) string {
+		if name, ok := r.final[ref]; ok {
+			return name
+		}
+
+		return ref
+	}, r.rewrite)
 }
 
 // extraRefs visits every "$ref" string the extension keywords in extra hold,

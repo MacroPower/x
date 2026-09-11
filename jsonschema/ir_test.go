@@ -645,7 +645,10 @@ func TestHookCanvasRefRevivesAnOrphanedDefinition(t *testing.T) {
 // pass escalated the name the same string resolved to nothing at render, so
 // the output carried a $ref no definition spelled. The scan resolves the
 // base name to one entry before and after naming, and finalizeRefs rewrites
-// the hand-spelled ref to that entry's final key.
+// the hand-spelled ref to that entry's final key. A field hook's canvas
+// takes the same rewrite: the hooks run after the payload rewrite, so a
+// base name an interpreter spelled onto a canvas once stayed verbatim while
+// the same string in an extender's value was rewritten.
 func TestGenerateFor_HandSpelledRefSurvivesNameEscalation(t *testing.T) {
 	t.Parallel()
 
@@ -655,12 +658,20 @@ func TestGenerateFor_HandSpelledRefSurvivesNameEscalation(t *testing.T) {
 		A alpha.Widget `json:"a"`
 		B beta.Widget  `json:"b"`
 		C refHolder    `json:"c"`
+		D int          `canvasref:"#/$defs/Widget" json:"d"`
 	}
+
+	interp := jsonschema.TagInterpreterFunc(
+		func(_ context.Context, fc jsonschema.FieldContext, tag jsonschema.Tag) error {
+			return fc.Constraints().ForbidSchema(&jsonschema.Schema{Ref: tag.Value})
+		},
+	)
 
 	s, err := jsonschema.GenerateFor[root](t.Context(),
 		jsonschema.WithTypeSchemaFor[refHolder](jsonschema.TypeSchema{
 			Verbatim: &jsonschema.Schema{Ref: "#/$defs/Widget"},
 		}),
+		jsonschema.WithTagInterpreter("canvasref", interp),
 	)
 	require.NoError(t, err)
 
@@ -668,6 +679,8 @@ func TestGenerateFor_HandSpelledRefSurvivesNameEscalation(t *testing.T) {
 	require.Contains(t, s.Defs, "beta_Widget")
 	assert.Equal(t, "#/$defs/alpha_Widget", s.Properties["c"].Ref,
 		"a hand-spelled base name follows the first-registered entry to its escalated key")
+	assert.Equal(t, "#/$defs/alpha_Widget", s.Properties["d"].AllOf[0].Not.Ref,
+		"a canvas $ref follows the same entry")
 
 	_, err = jsonschema.Compile(t.Context(), s)
 	require.NoError(t, err, "every $ref the output carries must resolve")

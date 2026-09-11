@@ -226,11 +226,15 @@ func (g *run) generate(t reflect.Type) (*Schema, error) {
 	g.assignDefNames(g.emittedDefs(root))
 	g.finalizeRefs(root)
 
-	// Phase 4: the field-level hooks, which read the final decision.
+	// Phase 4: the field-level hooks, which read the final decision, and
+	// the rewrite of a $ref a hook spelled by hand onto a canvas to the
+	// final key it names.
 	err = g.applyFieldHooks(root)
 	if err != nil {
 		return nil, err
 	}
+
+	g.finalizeCanvasRefs(root)
 
 	// Phase 5: inline a root $ref whose def is reached from nowhere else; a
 	// self- or mutually recursive root keeps its $ref so those references
