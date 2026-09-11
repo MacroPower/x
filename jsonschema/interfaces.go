@@ -734,7 +734,9 @@ func (fc FieldContext) ElementContexts() []FieldContext {
 		return nil
 	}
 
-	elemType := elementType(fc.Type)
+	// The declared type names the elements, unless a definition's body was
+	// taken inline for an alias, which names them on the node.
+	elemType := cmp.Or(fc.node.elemType, elementType(fc.Type))
 
 	build := func(child *node) FieldContext {
 		canvas := child.authored

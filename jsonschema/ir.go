@@ -68,8 +68,13 @@ type node struct {
 	payload *Schema   // bare type-derived payload; child slots are node-backed, not stored here
 	def     *defEntry // non-nil iff kindRef
 	// Typ is the struct type an object node reflects, for the field hooks.
-	typ   reflect.Type
-	items *node // slice element / map value / object fallback value
+	typ reflect.Type
+	// ElemType is the Go type of the elements a node holds when a
+	// definition's body was taken inline for an occurrence whose declared
+	// type does not name them: a TypeSchema.Ref alias to a sequence or map
+	// type. Nil everywhere else, where the declared type names them.
+	elemType reflect.Type
+	items    *node // slice element / map value / object fallback value
 	// The authored canvas carries the field-level facts that field and element
 	// hooks (the jsonschema tag, the comment provider, tag interpreters) declare:
 	// annotations, value-scoped const/enum, and numeric/string/array bounds. It is
@@ -362,8 +367,13 @@ func assignFieldOrigins(n *node, origin *fieldOrigin) {
 		return
 	}
 
+	et := n.elemType
+	if et == nil {
+		et = elementType(origin.typ)
+	}
+
 	elem := origin
-	if et := elementType(origin.typ); et != nil || !origin.element {
+	if et != nil || !origin.element {
 		elem = &fieldOrigin{parent: origin.parent, field: origin.field, element: true}
 		if et != nil {
 			elem.typ = numkind.DerefType(et)
@@ -870,6 +880,7 @@ func (n *node) overrideType(typeName string) {
 
 	n.kind = kindValue
 	n.typ = nil
+	n.elemType = nil
 	n.items = nil
 	n.prefix = nil
 	n.props = nil

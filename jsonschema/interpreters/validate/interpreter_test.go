@@ -4102,6 +4102,43 @@ func (extendedLabels) JSONSchemaExtend(context.Context, jsonschema.TypeContext, 
 	return nil
 }
 
+// TestValidateInterpreter_ElementRulesReachAnAliasedSequence pins that an
+// element rule on a field whose type is a TypeSchema.Ref alias to an
+// extracted sequence reaches the sequence's elements with their own Go
+// type. The element contexts used to take the element type off the alias,
+// a struct with none, so every element rule was refused as opaque.
+func TestValidateInterpreter_ElementRulesReachAnAliasedSequence(t *testing.T) {
+	t.Parallel()
+
+	type doc struct {
+		A tagsAlias `json:"a" validate:"dive,min=1"`
+	}
+
+	for _, definitions := range []bool{true, false} {
+		t.Run("definitions "+strconv.FormatBool(definitions), func(t *testing.T) {
+			t.Parallel()
+
+			s, err := jsonschema.GenerateFor[doc](t.Context(), validateInterp(),
+				jsonschema.WithDefinitions(definitions))
+			require.NoError(t, err)
+
+			items := s.Properties["a"].Items
+			require.NotNil(t, items)
+			require.NotNil(t, items.MinLength)
+			assert.Equal(t, 1, *items.MinLength)
+		})
+	}
+}
+
+// tagsAlias is a struct whose provider aliases it to extendedTags, so a
+// field of it holds the sequence's elements under a type that names none.
+type tagsAlias struct{}
+
+// JSONSchema implements [jsonschema.JSONSchemaProvider].
+func (tagsAlias) JSONSchema(context.Context, jsonschema.TypeContext) (jsonschema.TypeSchema, error) {
+	return jsonschema.TypeSchema{Ref: reflect.TypeFor[extendedTags]()}, nil
+}
+
 // suffixedText is a string kind whose marshaled text is not the Go string.
 type suffixedText string
 

@@ -712,6 +712,12 @@ func (g *run) refTypeOverride(t reflect.Type, ts TypeSchema, pointer bool) (*nod
 		)
 	}
 
+	// An inline target names the alias's elements, which the alias's own
+	// type does not, so the node records them for the element contexts.
+	if ref.kind != kindRef && ref.elemType == nil {
+		ref.elemType = elementType(numkind.DerefType(ts.Ref))
+	}
+
 	// The precedence is target stance, then alias stance, then pointer-ness:
 	// a Ref alias inherits the target type's stance, and its own Nullability
 	// applies only when the target is NullFromReflection (the common case,
@@ -1603,6 +1609,7 @@ func (n *node) inlineBody(draft Draft) {
 	n.isField = isField
 	n.occ.pointer = pointer
 	n.stance = stance
+	n.elemType = elementType(e.typ)
 }
 
 // tagOverridesType reports whether the tag's directives carry a type= pair

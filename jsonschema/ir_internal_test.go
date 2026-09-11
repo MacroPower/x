@@ -55,6 +55,9 @@ var overrideEffects = map[string]overrideEffect{
 	"composed": effectKept,
 	"hooked":   effectKept,
 	"isField":  effectKept,
+	// The elements an alias's node names go with the element slot they
+	// describe.
+	"elemType": effectByKind,
 }
 
 // nodeFields reads every field of a node by name, so the tests compare
@@ -83,6 +86,7 @@ func nodeFields(n *node) map[string]any {
 		"verbatim": n.verbatim,
 		"hooked":   n.hooked,
 		"isField":  n.isField,
+		"elemType": n.elemType,
 	}
 }
 
