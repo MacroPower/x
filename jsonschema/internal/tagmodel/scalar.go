@@ -50,7 +50,7 @@ var ErrNullNotAdmitted = errors.New("cannot assign null to non-nullable type")
 func (sh Shape) ParseScalar(lit string, pol Policy) (any, error) {
 	if pol.AllowNullScalar && lit == typename.Null {
 		if !sh.Nullable {
-			return nil, fmt.Errorf("%w %s", ErrNullNotAdmitted, sh.Kind)
+			return nil, fmt.Errorf("%w %s", ErrNullNotAdmitted, sh.Parse)
 		}
 
 		return nil, nil //nolint:nilnil // Intentional: nil represents JSON null.
@@ -73,7 +73,7 @@ func (sh Shape) ParseScalar(lit string, pol Policy) (any, error) {
 		return sh.byteText(lit)
 
 	default:
-		return nil, fmt.Errorf("cannot assign scalar value %q to type %s", lit, sh.Kind)
+		return nil, fmt.Errorf("cannot assign scalar value %q to type %s", lit, sh.Parse)
 	}
 }
 
@@ -116,9 +116,9 @@ func (sh Shape) ParseScalars(lits []string, pol Policy) ([]any, error) {
 // tested first because [numkind.IsInteger] reports true for it too.
 func (sh Shape) parseNumber(lit string) (any, error) {
 	switch {
-	case numkind.IsUnsigned(sh.Kind):
+	case numkind.IsUnsigned(sh.Parse):
 		// Return uint64: neither int nor float64 holds every uint64 exactly.
-		n, err := constraint.ParseUnsignedLiteral(lit, numkind.UintBitSize(sh.Kind))
+		n, err := constraint.ParseUnsignedLiteral(lit, numkind.UintBitSize(sh.Parse))
 		if err != nil {
 			//nolint:wrapcheck // The shared policy owns the spelling and its message.
 			return nil, err
@@ -126,10 +126,10 @@ func (sh Shape) parseNumber(lit string) (any, error) {
 
 		return n, nil
 
-	case numkind.IsInteger(sh.Kind):
+	case numkind.IsInteger(sh.Parse):
 		// Return int64, not a platform int, so a value above 2^31-1 survives on
 		// a 32-bit build.
-		n, err := constraint.ParseSignedLiteral(lit, numkind.IntBitSize(sh.Kind))
+		n, err := constraint.ParseSignedLiteral(lit, numkind.IntBitSize(sh.Parse))
 		if err != nil {
 			//nolint:wrapcheck // The shared policy owns the spelling and its message.
 			return nil, err
@@ -138,7 +138,7 @@ func (sh Shape) parseNumber(lit string) (any, error) {
 		return n, nil
 	}
 
-	return parseFloatLiteral(lit, sh.Kind)
+	return parseFloatLiteral(lit, sh.Parse)
 }
 
 // parseFloatLiteral parses a float field value: the shared decimal spelling
@@ -255,7 +255,7 @@ func (sh Shape) zeroLiterals() []string {
 		return []string{boolFalse}
 	case sh.Form == FormCoercedString:
 		return []string{""}
-	case sh.Form == FormCoercedNumber && numkind.IsFloat(sh.Kind):
+	case sh.Form == FormCoercedNumber && numkind.IsFloat(sh.Parse):
 		return []string{"0", "-0"}
 	default:
 		return []string{"0"}

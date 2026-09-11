@@ -158,8 +158,8 @@ func applyBound(t Target, r Rule, pol Policy) error {
 // values cannot land on excludes a value the schema then admits.
 func applyNumericBound(t Target, r Rule, pol Policy) error {
 	kind := pol.BoundKind
-	if kind == reflect.Invalid && t.Shape.Form == FormNumber && numkind.IsFloat(t.Shape.Kind) {
-		kind = t.Shape.Kind
+	if kind == reflect.Invalid && t.Shape.Form == FormNumber && numkind.IsFloat(t.Shape.Parse) {
+		kind = t.Shape.Parse
 	}
 
 	end, err := constraint.ParseNumericBound(r.Params.One(), kind)
@@ -556,7 +556,7 @@ func nonZeroForbidNumber(t Target, _ Rule, _ Policy) error {
 		return nil
 	}
 
-	if numkind.IsInteger(t.Shape.Kind) {
+	if numkind.IsInteger(t.Shape.Parse) {
 		Forbid(t.Canvas, 0)
 	} else {
 		Forbid(t.Canvas, 0.0)

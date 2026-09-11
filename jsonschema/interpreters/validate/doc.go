@@ -179,9 +179,10 @@
 // the Go value by kind rather than against the text the field marshals, so
 // number and numeric accept every numeric field and the other string
 // validators reject every one, whatever the text says. A keyword over that
-// text would agree with neither verdict. The refusal keys on the Go kind, so
-// a quoted [encoding/json.Number], a string kind whose text go-playground
-// does read, keeps its string validators. A non-string kind that marshals
+// text would agree with neither verdict. The refusal keys on the Go kind,
+// under a jsonschema type= pair as much as without one, so a quoted
+// [encoding/json.Number], a string kind whose text go-playground does read,
+// keeps its string validators. A non-string kind that marshals
 // itself as text, such as [time.Time], takes the same refusal, since
 // go-playground runs the validators over reflect's description of the value
 // and panics on json. So does a []byte field for the format and pattern tags

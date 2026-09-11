@@ -274,7 +274,7 @@ func (s *applyState) apply(d Directive) error {
 // against. A type= override to array, object, or null leaves the shape with no
 // scalar kind, and that is the gate rejecting a scalar key that follows one.
 func (s *applyState) scalarOK() bool {
-	return s.overriddenType == "" || s.overridden.Kind != reflect.Invalid
+	return s.overriddenType == "" || s.overridden.Parse != reflect.Invalid
 }
 
 // pinnedValueConflict names the value key, const or enum, holding a value on

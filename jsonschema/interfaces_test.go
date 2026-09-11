@@ -389,7 +389,8 @@ func TestFieldContextShapeReadsATypeOverride(t *testing.T) {
 			require.NoError(t, err)
 
 			assert.Equal(t, tc.form, got.Form)
-			assert.Equal(t, tc.kind, got.Kind, "the overridden JSON type decides the kind a scalar parses at")
+			assert.Equal(t, tc.kind, got.Parse, "the overridden JSON type decides the kind a scalar parses at")
+			assert.Equal(t, got.Elem.Kind(), got.Kind, "the Go kind stays on the shape under an override")
 			assert.Equal(t, tc.nullable, got.Nullable, "an overridden field admits no null")
 			assert.NotNil(t, got.Type, "the declared Go type stays on the shape")
 		})

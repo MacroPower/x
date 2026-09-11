@@ -3885,3 +3885,77 @@ func taggedField(tb testing.TB, value any, tag string) reflect.Type {
 
 	return reflect.StructOf([]reflect.StructField{field})
 }
+
+// TestValidateInterpreter_KindRulesReadTheGoKindUnderTypeOverride pins that a
+// jsonschema type= pair changes the kind a literal parses at and nothing
+// else. The go-playground kind rules keep reading the Go kind, because
+// go-playground runs over the Go value whatever the schema says: a string
+// validator on an int refuses every value there, and its unsigned parser
+// panics on a minus sign, while oneof on a string kind runs fine. The
+// facade used to overwrite the Go kind with the override's parse kind, so
+// the first two generated a clean schema and the third was refused.
+func TestValidateInterpreter_KindRulesReadTheGoKindUnderTypeOverride(t *testing.T) {
+	t.Parallel()
+
+	type stringRule struct {
+		D int `json:"d" jsonschema:"type=string" validate:"email"`
+	}
+
+	type unsignedLiteral struct {
+		U uint `json:"u" jsonschema:"type=string" validate:"eq=-1"`
+	}
+
+	type oneOfOnString struct {
+		S string `json:"s" jsonschema:"type=number" validate:"oneof=1 2"`
+	}
+
+	cases := map[string]struct {
+		gen  func() (*jsonschema.Schema, error)
+		err  error
+		want string
+	}{
+		"string validator on an int": {
+			gen: func() (*jsonschema.Schema, error) {
+				return jsonschema.GenerateFor[stringRule](t.Context(), validateInterp())
+			},
+			err: validate.ErrStringRuleKind,
+		},
+		"minus sign on a uint": {
+			gen: func() (*jsonschema.Schema, error) {
+				return jsonschema.GenerateFor[unsignedLiteral](t.Context(), validateInterp())
+			},
+			err: validate.ErrUnsignedLiteral,
+		},
+		"oneof on a string parses at the overridden kind": {
+			gen: func() (*jsonschema.Schema, error) {
+				return jsonschema.GenerateFor[oneOfOnString](t.Context(), validateInterp())
+			},
+			want: `{"type":"number","enum":[1,2]}`,
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			s, err := tc.gen()
+			if tc.err != nil {
+				require.ErrorIs(t, err, tc.err)
+
+				return
+			}
+
+			require.NoError(t, err)
+
+			var prop *jsonschema.Schema
+
+			for _, p := range s.Properties {
+				prop = p
+			}
+
+			got, err := jsonv1.Marshal(prop)
+			require.NoError(t, err)
+			assert.JSONEq(t, tc.want, string(got))
+		})
+	}
+}

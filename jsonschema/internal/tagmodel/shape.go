@@ -133,8 +133,13 @@ type Shape struct {
 	// Elem is Type with its pointer chain followed: the type a scalar converts
 	// back to when a coerced shape re-serializes.
 	Elem reflect.Type
-	// Kind is Elem's kind, the width a scalar parses at.
+	// Kind is Elem's kind: the Go kind a dialect's own kind rules read,
+	// since go-playground runs over the Go value whatever the schema says.
 	Kind reflect.Kind
+	// Parse is the kind a scalar literal parses at. It is Kind, except under
+	// a type= override, where the named JSON type displaces the Go type for
+	// the literal alone and Parse is that type's stand-in kind.
+	Parse reflect.Kind
 	// Form is the JSON shape of the instance.
 	Form Form
 	// Nullable reports whether the occurrence admits null. [ShapeOf] reads the
@@ -207,7 +212,7 @@ func FormForTypeName(name string) Form {
 // ShapeForTypeName returns the shape an instance of the named JSON type takes.
 // It is what a dialect installs when its tag restates the type outright: the
 // named type displaces the Go type entirely, so the shape carries the named
-// type's own form and the kind its scalar literals parse at, and it never
+// type's own form and its stand-in kind as both Kind and Parse, and it never
 // admits null -- an overridden occurrence is the named type itself, so a null
 // literal has nothing to assign to.
 //
@@ -230,7 +235,7 @@ func ShapeForTypeName(name string) Shape {
 		kind = reflect.Bool
 	}
 
-	return Shape{Kind: kind, Form: FormForTypeName(name)}
+	return Shape{Kind: kind, Parse: kind, Form: FormForTypeName(name)}
 }
 
 // ShapeOf classifies a field or element from its Go type and the type-derived
@@ -277,6 +282,7 @@ func ShapeOfQuoted(t reflect.Type, base *jsonschema.Schema, quoted bool, def fun
 		Type:     t,
 		Elem:     elem,
 		Kind:     elem.Kind(),
+		Parse:    elem.Kind(),
 		Form:     classifyForm(elem, base, quoted, def),
 		Nullable: t.Kind() == reflect.Pointer,
 	}

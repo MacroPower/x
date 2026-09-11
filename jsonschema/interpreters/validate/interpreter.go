@@ -517,13 +517,6 @@ func applyValidator(
 	return nil
 }
 
-// isCoercedForm reports whether a form is a numeric or bool value whose
-// instance is a string: a json:",string" field or a type marshaling itself
-// as text.
-func isCoercedForm(form tagmodel.Form) bool {
-	return form == tagmodel.FormCoercedNumber || form == tagmodel.FormCoercedBool
-}
-
 // readsGoKindAsText reports whether go-playground judges a string validator on
 // the kind without the text the field marshals: every integer, float, and
 // bool kind. Its isNumber and isNumeric return true on a numeric kind before
@@ -536,13 +529,15 @@ func readsGoKindAsText(kind reflect.Kind) bool {
 
 // readsGoValueNotText reports whether go-playground judges the string
 // validator op on a field of this shape against the Go value rather than the
-// text the field marshals: a coerced numeric or bool kind, a non-string kind
-// that marshals itself as text, or a byte slice, whose base64 text no
-// validator there reads. The json validator is the one exception on a byte
-// slice, since go-playground reads the raw bytes there as contentMediaType
-// reads the decoded content. A string kind that marshals itself as text
-// keeps its validators: go-playground reads the Go string, which is the
-// text in every case the rig has found.
+// text the field marshals: a numeric or bool kind under a string form, which
+// a json:",string" coercion or a jsonschema type= override presents, a
+// non-string kind that marshals itself as text, or a byte slice, whose
+// base64 text no validator there reads. The json validator is the one
+// exception on a byte slice, since go-playground reads the raw bytes there
+// as contentMediaType reads the decoded content. A string kind that
+// marshals itself as text keeps its validators: go-playground reads the Go
+// string, which is the text in every case the rig has found. The question
+// is asked of the Go kind alone, since go-playground never sees the schema.
 func readsGoValueNotText(shape tagmodel.Shape, op tagmodel.Op) bool {
 	switch shape.Form {
 	case tagmodel.FormByteString:
@@ -550,7 +545,7 @@ func readsGoValueNotText(shape tagmodel.Shape, op tagmodel.Op) bool {
 	case tagmodel.FormTextString:
 		return shape.Kind != reflect.String
 	default:
-		return isCoercedForm(shape.Form) && readsGoKindAsText(shape.Kind)
+		return readsGoKindAsText(shape.Kind)
 	}
 }
 
