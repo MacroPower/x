@@ -761,6 +761,10 @@
 //     allOf instead of promoting its fields. An embed reached through a
 //     pointer composes as anyOf[schema, {}], since a nil pointer contributes
 //     nothing to the marshaled object.
+//   - A [JSONSchemaExtender] method or a registered [TypeSchemaExtender] for
+//     an embedded struct type does not run for the embed: promotion gives
+//     the type no schema of its own to extend, and its fields are emitted as
+//     the parent's. A field of the type elsewhere is extended as usual.
 //   - A provider schema used for such an embed, registered or on-type, must
 //     leave the object open: no additionalProperties, unevaluatedProperties,
 //     patternProperties, or propertyNames, whether false or a value schema.

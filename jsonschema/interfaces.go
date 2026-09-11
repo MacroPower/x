@@ -40,7 +40,10 @@ type JSONSchemaProvider interface {
 
 // JSONSchemaExtender allows a type to modify its auto-generated schema.
 // The method is called after the schema has been generated via reflection,
-// allowing the type to add, remove, or modify any fields. It receives a
+// allowing the type to add, remove, or modify any fields. It does not run
+// for a struct type embedded with its fields promoted, which has no schema
+// of its own (see the Struct Fields section of the package documentation).
+// It receives a
 // [TypeSchema] whose [TypeSchema.Value] is the reflection-generated schema to
 // mutate in place; an extender may also set [TypeSchema.Nullability] to declare a
 // nullability stance rather than hand-shaping a null wrapper. Only Value and
@@ -185,7 +188,9 @@ func (f TypeSchemaProviderFunc) SchemaForType(ctx context.Context, tc TypeContex
 // ExtendSchemaForType is called for each type whose schema kind-based
 // reflection or a built-in override produced, at the point JSONSchemaExtend
 // runs (after comment extraction, before $defs extraction) and after the
-// type's own JSONSchemaExtend. A $defs-extracted type is extended once, on
+// type's own JSONSchemaExtend; like it, the method does not run for a
+// struct type embedded with its fields promoted. A $defs-extracted type is
+// extended once, on
 // its shared entry; a type that stays inline (an unnamed composite such as
 // []string, or a named non-struct that is not extracted) is extended once
 // per occurrence, so an extender may run several times for the same type
