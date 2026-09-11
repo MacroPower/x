@@ -416,9 +416,13 @@
 // extender changed or replaced is emitted as written, and generation derives
 // nothing further for it. A $ref the view shows for a $defs-extracted type is
 // a provisional name, since the extender runs before generation settles the
-// $defs keys; an extender may test, clear, or copy it, and a copy placed
-// anywhere in the value (a branch of its own, say) is emitted with the final
-// key and keeps that definition in the output. A $ref a hook spells by hand
+// $defs keys; an extender may test, clear, or copy it, and a copy placed in
+// a $ref position anywhere in the value (a branch of its own, say, or a
+// "$ref" member of an extension keyword's value) is emitted with the final
+// key and keeps that definition in the output. A copy placed in any other
+// slot (a description, a const or enum value, an extension string under
+// another name) is emitted as the provisional name, which resolves to
+// nothing. A $ref a hook spells by hand
 // from the namer's answer for a type ("#/$defs/Widget") names that type's
 // definition the same way, and is emitted with the disambiguated key when
 // the name collides; where two definitions share the name, it names the one
