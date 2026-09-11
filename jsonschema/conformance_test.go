@@ -140,13 +140,12 @@ func TestGeneratedSchemaConformsToMetaschema(t *testing.T) {
 
 	metas, opts := loadMetaSchemas(t)
 
-	drafts := []struct {
-		name    string
+	drafts := map[string]struct {
 		opt     jsonschema.GenerateOption
 		metaURI string
 	}{
-		{"draft2020-12", jsonschema.WithDraft(jsonschema.Draft2020), "https://json-schema.org/draft/2020-12/schema"},
-		{"draft7", jsonschema.WithDraft(jsonschema.Draft7), "http://json-schema.org/draft-07/schema#"},
+		"draft2020-12": {jsonschema.WithDraft(jsonschema.Draft2020), "https://json-schema.org/draft/2020-12/schema"},
+		"draft7":       {jsonschema.WithDraft(jsonschema.Draft7), "http://json-schema.org/draft-07/schema#"},
 	}
 
 	types := map[string]reflect.Type{
@@ -171,8 +170,8 @@ func TestGeneratedSchemaConformsToMetaschema(t *testing.T) {
 		"metadata":  reflect.TypeFor[conformanceMetadata](),
 	}
 
-	for _, draft := range drafts {
-		t.Run(draft.name, func(t *testing.T) {
+	for draftName, draft := range drafts {
+		t.Run(draftName, func(t *testing.T) {
 			t.Parallel()
 
 			meta := metas[draft.metaURI]
@@ -211,7 +210,7 @@ func TestGeneratedSchemaConformsToMetaschema(t *testing.T) {
 
 					require.NoError(t, json.Unmarshal(raw, &doc))
 
-					if draft.name == "draft7" {
+					if draftName == "draft7" {
 						assert.NotContains(t, doc, "$defs", "Draft-07 output must use definitions, not $defs")
 					} else {
 						assert.NotContains(t, doc, "definitions", "2020-12 output must use $defs, not definitions")
