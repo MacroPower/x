@@ -187,16 +187,14 @@ func ParseDecNumber(s string) (DecNumber, bool) {
 	return d, true
 }
 
-// DecCanonicalExp returns the exact base-10 exponent of s in its canonical
-// 0.sig x 10^exp form, as an unclamped [big.Int]: parsedExp + len(intDigits) -
-// lead, where lead is the count of leading zeros across the integer and fraction
-// digits. The exponent ParseDecNumber stores is clamped so arithmetic on it
-// stays bounded, which is correct when comparing a huge number against an
-// in-range value but collapses two distinct huge magnitudes onto one DecNumber.
-// This exact form is used on the rare path where two such literals share a
-// clamped DecNumber, so distinct values stay distinct. The argument s must
-// already be a valid decimal literal (ParseDecNumber returned true).
-func DecCanonicalExp(s string) *big.Int {
+// scanMantissa reads the sign, integer digits, and fraction of a valid
+// decimal literal, returning the offset of what follows the mantissa (the
+// exponent marker or the end), the count of integer digits, and the count of
+// leading zeros across the integer and fraction digits (0.05 has two, across
+// "005"). It is the one reading of the mantissa the three exponent
+// derivations share. The argument must already be a valid decimal literal
+// (ParseDecNumber returned true).
+func scanMantissa(s string) (int, int, int) {
 	i := 0
 	if i < len(s) && (s[i] == '+' || s[i] == '-') {
 		i++
@@ -218,7 +216,7 @@ func DecCanonicalExp(s string) *big.Int {
 		i++
 
 		// All integer digits were zero, so leading zeros continue into the
-		// fraction (e.g. 0.05 has two leading zeros across "005").
+		// fraction.
 		if lead == intLen {
 			for i < len(s) && s[i] == '0' {
 				lead++
@@ -230,6 +228,21 @@ func DecCanonicalExp(s string) *big.Int {
 			i++
 		}
 	}
+
+	return i, intLen, lead
+}
+
+// DecCanonicalExp returns the exact base-10 exponent of s in its canonical
+// 0.sig x 10^exp form, as an unclamped [big.Int]: parsedExp + len(intDigits) -
+// lead, where lead is the count of leading zeros across the integer and fraction
+// digits. The exponent ParseDecNumber stores is clamped so arithmetic on it
+// stays bounded, which is correct when comparing a huge number against an
+// in-range value but collapses two distinct huge magnitudes onto one DecNumber.
+// This exact form is used on the rare path where two such literals share a
+// clamped DecNumber, so distinct values stay distinct. The argument s must
+// already be a valid decimal literal (ParseDecNumber returned true).
+func DecCanonicalExp(s string) *big.Int {
+	i, intLen, lead := scanMantissa(s)
 
 	exp := new(big.Int)
 	if i < len(s) && (s[i] == 'e' || s[i] == 'E') {
@@ -324,39 +337,7 @@ func DecCanonicalExpEqual(a, b string) bool {
 // zeros across the integer and fraction digits). All O(len), with no
 // [big.Int] built.
 func decExpParts(s string) (string, bool, int64) {
-	i := 0
-	if i < len(s) && (s[i] == '+' || s[i] == '-') {
-		i++
-	}
-
-	intStart := i
-	for i < len(s) && s[i] >= '0' && s[i] <= '9' {
-		i++
-	}
-
-	intLen := i - intStart
-
-	lead := 0
-	for j := intStart; j < i && s[j] == '0'; j++ {
-		lead++
-	}
-
-	if i < len(s) && s[i] == '.' {
-		i++
-
-		// All integer digits were zero, so leading zeros continue into the
-		// fraction (e.g. 0.05 has two leading zeros across "005").
-		if lead == intLen {
-			for i < len(s) && s[i] == '0' {
-				lead++
-				i++
-			}
-		}
-
-		for i < len(s) && s[i] >= '0' && s[i] <= '9' {
-			i++
-		}
-	}
+	i, intLen, lead := scanMantissa(s)
 
 	var (
 		digits string
@@ -688,39 +669,7 @@ const integerShiftSat = int64(1) << 50
 func integerShift(literal string, sigLen int) (int64, bool) {
 	s := literal
 
-	i := 0
-	if i < len(s) && (s[i] == '+' || s[i] == '-') {
-		i++
-	}
-
-	intStart := i
-	for i < len(s) && s[i] >= '0' && s[i] <= '9' {
-		i++
-	}
-
-	intLen := i - intStart
-
-	lead := 0
-	for j := intStart; j < i && s[j] == '0'; j++ {
-		lead++
-	}
-
-	if i < len(s) && s[i] == '.' {
-		i++
-
-		// All integer digits were zero, so leading zeros continue into the
-		// fraction (e.g. 0.05 has two leading zeros across "005").
-		if lead == intLen {
-			for i < len(s) && s[i] == '0' {
-				lead++
-				i++
-			}
-		}
-
-		for i < len(s) && s[i] >= '0' && s[i] <= '9' {
-			i++
-		}
-	}
+	i, intLen, lead := scanMantissa(s)
 
 	var exp int64
 
