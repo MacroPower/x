@@ -234,7 +234,9 @@
 //   - A slice []T produces an array with an items schema. A nil slice
 //     marshals as [] under [encoding/json/v2]'s defaults, so it admits no
 //     null. Under [WithJSONOptions] with FormatNilSliceAsNull every slice
-//     occurrence admits null. []byte produces a base64-encoded string
+//     occurrence admits null, except one whose type carries its own JSON
+//     marshaler, since [encoding/json/v2] writes the method's output for the
+//     nil slice. []byte produces a base64-encoded string
 //     instead, and a nil []byte marshals as "" under the defaults and follows
 //     the slice option. Only the unnamed byte element type takes the base64
 //     form. A []T whose element is a named uint8 type marshals as a number
@@ -245,7 +247,8 @@
 //   - A map map[K]V produces an object with additionalProperties. A nil map
 //     marshals as {} under the defaults, so it admits no null. Under
 //     [WithJSONOptions] with FormatNilMapAsNull every map occurrence admits
-//     null. K must be a string, integer, or float kind, or carry a marshaler
+//     null, except one whose type carries its own JSON marshaler, as for a
+//     slice. K must be a string, integer, or float kind, or carry a marshaler
 //     method (through its pointer method set included), or be a pointer to
 //     such a kind; a nil pointer key is a marshal-time fault the probe's
 //     filled value never holds, so the type generates. A key v2 cannot name

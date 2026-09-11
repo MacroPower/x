@@ -776,13 +776,34 @@ func (g *run) handleBuiltinType(t reflect.Type, s *Schema, pointer bool) (*node,
 // container over a bare payload ({contentEncoding: base64}); an occurrence
 // that admits null renders it as the ["null", "string"] type list. A []byte
 // carries no const/enum, so the type-list encoding never has to flip to the
-// anyOf form.
-func (g *run) byteSliceNode(pointer bool) *node {
+// anyOf form. The container is the one [containerOf] names, so a named
+// byte slice with its own marshaler is no container, as it is when a hook
+// describes it.
+func (g *run) byteSliceNode(t reflect.Type, pointer bool) *node {
+	payload, container := containerPayload(t, typename.String)
+	payload.ContentEncoding = content.Base64
+
 	return &node{
 		kind:    kindValue,
-		payload: &Schema{ContentEncoding: content.Base64},
-		occ:     occurrence{pointer: pointer, container: containerBytes},
+		payload: payload,
+		occ:     occurrence{pointer: pointer, container: container},
 	}
+}
+
+// containerPayload returns the bare payload of a kind-reflected slice or
+// map over the container kind [containerOf] names. The null pass renders a
+// container's type, so the payload of one stays bare; a type that is no
+// container, one with its own marshaler, carries the type itself, as a
+// hook-described one does.
+func containerPayload(t reflect.Type, base string) (*Schema, containerKind) {
+	container := containerOf(t)
+	payload := &Schema{}
+
+	if container == containerNone {
+		payload.Type = base
+	}
+
+	return payload, container
 }
 
 // builtinOverride returns a schema for well-known types, if applicable. A byte
@@ -946,14 +967,15 @@ const (
 // [] under encoding/json/v2's defaults (not null), so a bare slice occurrence
 // admits no null; a pointer occurrence does, and so does every occurrence
 // under [jsonv2.FormatNilSliceAsNull], whose marshal writes null for the nil
-// slice. The node records the container kind and the null pass reads the
-// flag.
+// slice. The node records the container kind [containerOf] names and the
+// null pass reads the flag; a slice type with its own marshaler is no
+// container, since v2 writes the method's output for the nil slice.
 func (g *run) schemaForSlice(t reflect.Type, pointer bool) (*node, error) {
 	// An exact []byte marshals to a base64 string in encoding/json/v2. Only
 	// the unnamed builtin element gets that encoding: a named byte element
 	// makes the slice a JSON array of numbers.
 	if reflectkind.IsBase64ByteSlice(t) {
-		return g.byteSliceNode(pointer), nil
+		return g.byteSliceNode(t, pointer), nil
 	}
 
 	items, err := g.schemaForType(t.Elem(), false)
@@ -961,11 +983,13 @@ func (g *run) schemaForSlice(t reflect.Type, pointer bool) (*node, error) {
 		return nil, fmt.Errorf("element type: %w", err)
 	}
 
+	payload, container := containerPayload(t, typename.Array)
+
 	return &node{
 		kind:    kindList,
-		payload: &Schema{},
+		payload: payload,
 		items:   items,
-		occ:     occurrence{pointer: pointer, container: containerSlice},
+		occ:     occurrence{pointer: pointer, container: container},
 	}, nil
 }
 
@@ -1020,18 +1044,22 @@ func (g *run) schemaForArray(t reflect.Type, pointer bool) (*node, error) {
 // encoding/json/v2's defaults (not null), so a bare map occurrence admits no
 // null; a pointer occurrence does, and so does every occurrence under
 // [jsonv2.FormatNilMapAsNull], whose marshal writes null for the nil map. The
-// node records the container kind and the null pass reads the flag.
+// node records the container kind [containerOf] names and the null pass
+// reads the flag; a map type with its own marshaler is no container, since
+// v2 writes the method's output for the nil map.
 func (g *run) schemaForMap(t reflect.Type, pointer bool) (*node, error) {
 	val, err := g.schemaForType(t.Elem(), false)
 	if err != nil {
 		return nil, fmt.Errorf("map value type: %w", err)
 	}
 
+	payload, container := containerPayload(t, typename.Object)
+
 	return &node{
 		kind:    kindMap,
-		payload: &Schema{},
+		payload: payload,
 		items:   val,
-		occ:     occurrence{pointer: pointer, container: containerMap},
+		occ:     occurrence{pointer: pointer, container: container},
 	}, nil
 }
 

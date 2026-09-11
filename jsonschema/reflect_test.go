@@ -1405,6 +1405,79 @@ func TestGenerateFor_HookDeclaredContainerFollowsFormatNull(t *testing.T) {
 	}
 }
 
+// TestGenerateFor_MarshalerContainerIgnoresFormatNull pins that a slice or
+// map type with its own JSON marshaler admits no null under
+// FormatNilSliceAsNull and FormatNilMapAsNull, on the reflected path as on
+// the hook-described one: encoding/json/v2 writes the method's output for
+// the nil value, never the null the flags name. The reflected path once
+// recorded the container kind unconditionally, so the same type admitted
+// null when reflected and refused it when a hook described it. A pointer
+// occurrence still admits null through its own nil.
+func TestGenerateFor_MarshalerContainerIgnoresFormatNull(t *testing.T) {
+	t.Parallel()
+
+	type doc struct {
+		Tags    marshalerTags    `json:"tags"`
+		Table   marshalerTable   `json:"table"`
+		Bytes   marshalerBytes   `json:"bytes"`
+		Pointer *marshalerTags   `json:"pointer"`
+		Plain   []string         `json:"plain"`
+		Hooked  hookedMarshalerT `json:"hooked"`
+	}
+
+	opts := []jsonschema.GenerateOption{
+		jsonschema.WithJSONOptions(json.FormatNilSliceAsNull(true), json.FormatNilMapAsNull(true)),
+		jsonschema.WithTypeSchemaFor[hookedMarshalerT](jsonschema.TypeSchema{
+			Value: &jsonschema.Schema{Type: "array", Items: &jsonschema.Schema{Type: "string"}},
+		}),
+	}
+
+	s, err := jsonschema.GenerateFor[doc](t.Context(), opts...)
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"array"}, typeList(s.Properties["tags"]), "the marshaling slice")
+	assert.Equal(t, []string{"object"}, typeList(s.Properties["table"]), "the marshaling map")
+	assert.Equal(t, []string{"string"}, typeList(s.Properties["bytes"]), "the marshaling byte slice")
+	assert.Equal(t, []string{"array"}, typeList(s.Properties["hooked"]), "the hook-described slice")
+	assert.Equal(t, []string{"null", "array"}, typeList(s.Properties["plain"]), "the plain slice")
+	require.Len(t, s.Properties["pointer"].AnyOf, 2, "the pointer occurrence wraps its own null")
+
+	data, err := json.Marshal(doc{}, json.FormatNilSliceAsNull(true), json.FormatNilMapAsNull(true))
+	require.NoError(t, err)
+	require.NoError(t, validateJSON(t.Context(), s, data),
+		"generated schema rejected the struct's own serialization: %s", data)
+
+	err = validateJSON(t.Context(), s,
+		[]byte(`{"tags":null,"table":{},"bytes":"","pointer":null,"plain":[],"hooked":[]}`))
+	require.Error(t, err, "null on the marshaling slice")
+}
+
+// marshalerTags is a slice type whose marshaler writes a constant array,
+// so a nil value never marshals as null.
+type marshalerTags []string
+
+// MarshalJSON implements [encoding/json.Marshaler].
+func (marshalerTags) MarshalJSON() ([]byte, error) { return []byte(`["m"]`), nil }
+
+// marshalerTable is a map type whose marshaler writes a constant object.
+type marshalerTable map[string]string
+
+// MarshalJSON implements [encoding/json.Marshaler].
+func (marshalerTable) MarshalJSON() ([]byte, error) { return []byte(`{"k":"v"}`), nil }
+
+// marshalerBytes is a byte slice type whose marshaler writes a constant
+// string.
+type marshalerBytes []byte
+
+// MarshalJSON implements [encoding/json.Marshaler].
+func (marshalerBytes) MarshalJSON() ([]byte, error) { return []byte(`"bQ=="`), nil }
+
+// hookedMarshalerT is a marshaling slice type a hook describes.
+type hookedMarshalerT []string
+
+// MarshalJSON implements [encoding/json.Marshaler].
+func (hookedMarshalerT) MarshalJSON() ([]byte, error) { return []byte(`["h"]`), nil }
+
 // typeList reads a schema's type as a list, whichever slot holds it.
 func typeList(s *jsonschema.Schema) []string {
 	if s.Types != nil {
