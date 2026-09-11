@@ -101,8 +101,9 @@ func (g *run) emittedDefs(root *node) (map[*defEntry]bool, *defEntry) {
 // A field hook can still name it in a canvas $ref, which the reachability
 // scan at render follows, so every such entry takes a key of its own after
 // the emitted names are settled: its base name where no emitted key spells
-// it and a suffixed one otherwise, placed after every emitted name so it
-// prefixes none of them. A hand-spelled ref to the base name then resolves
+// it and no collision group was escalated from it, and a suffixed one
+// otherwise, placed after every emitted name so it prefixes none of them.
+// A hand-spelled ref to the base name then resolves
 // to whichever entry holds that key, so an orphan a canvas $ref revives is
 // emitted under the key the ref names, and the root's own entry (deferred,
 // when nothing else refers to it yet) is inlined or kept in agreement with
@@ -195,6 +196,14 @@ func (g *run) assignDefNames(emitted map[*defEntry]bool, deferred *defEntry) {
 			e.name = finalName
 			used[finalName] = true
 		}
+	}
+
+	// An escalated group leaves its base name unspelled by any emitted key,
+	// and a hand-spelled ref to it resolves to the group's first-registered
+	// entry, so the name stays reserved: an orphan or the deferred root
+	// taking it would capture the ref instead.
+	for _, base := range collisionBases {
+		used[base] = true
 	}
 
 	if deferred != nil {

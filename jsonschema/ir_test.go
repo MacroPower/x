@@ -686,6 +686,44 @@ func TestGenerateFor_HandSpelledRefSurvivesNameEscalation(t *testing.T) {
 	require.NoError(t, err, "every $ref the output carries must resolve")
 }
 
+// TestGenerateFor_HandSpelledRefOutranksAnOrphanOnAnEscalatedName pins
+// that an orphaned definition never takes the base name a collision group
+// was escalated from. The naming pass reserved final names alone, so the
+// orphan took the contested base name and a hand-spelled ref to it
+// resolved to the orphan, revived into $defs, rather than to the
+// first-registered emitted entry the reachability scan had counted.
+func TestGenerateFor_HandSpelledRefOutranksAnOrphanOnAnEscalatedName(t *testing.T) {
+	t.Parallel()
+
+	type Widget struct {
+		Q int `json:"q"`
+	}
+
+	type refHolder struct{ Z int }
+
+	type root struct {
+		A       alpha.Widget `json:"a"`
+		B       beta.Widget  `json:"b"`
+		Dropped Widget       `json:"dropped" jsonschema:"type=string"`
+		C       refHolder    `json:"c"`
+	}
+
+	s, err := jsonschema.GenerateFor[root](t.Context(),
+		jsonschema.WithTypeSchemaFor[refHolder](jsonschema.TypeSchema{
+			Verbatim: &jsonschema.Schema{Ref: "#/$defs/Widget"},
+		}),
+	)
+	require.NoError(t, err)
+
+	assert.Equal(t, "#/$defs/alpha_Widget", s.Properties["c"].Ref,
+		"the hand-spelled base name follows the first-registered emitted entry")
+	assert.NotContains(t, s.Defs, "Widget", "the orphan stays dropped")
+	assert.Equal(t, "string", s.Properties["dropped"].Type)
+
+	_, err = jsonschema.Compile(t.Context(), s)
+	require.NoError(t, err, "every $ref the output carries must resolve")
+}
+
 // canvasRefCode is a provider-implementing named string, so it is extracted
 // to $defs and declares a format there a field tag can replace.
 type canvasRefCode string
