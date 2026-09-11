@@ -1477,19 +1477,20 @@ func applyTypeOverrideDirective(fieldNode *node, directives []tagparse.Directive
 // pass sees an entry no occurrence refers to as the orphan it is. A
 // verbatim body is emitted as authored, so it stays referenced.
 func (g *run) inlineTaggedRef(n *node, directives []tagparse.Directive, interpreted bool) {
-	elements := tagHasEnum(directives) || interpreted
+	enum := tagHasEnum(directives)
 
 	if body := refBody(n); body != nil {
 		switch {
 		case tagOverridesType(directives) && body.kind != kindObject,
 			body.kind == kindValue && tagReplacesKeyword(directives, body.payload),
-			elements && sequenceKind(body.kind):
+			enum && sequenceKind(body.kind),
+			interpreted && elementKind(body.kind, true):
 			n.inlineBody(g.draft)
 		}
 	}
 
-	if elements {
-		g.inlineSequenceElements(n, map[*defEntry]bool{})
+	if enum || interpreted {
+		g.inlineSequenceElements(n, map[*defEntry]bool{}, interpreted)
 	}
 }
 
@@ -1509,10 +1510,12 @@ func (g *run) fieldInterpreted(fi fieldset.Field) bool {
 // inlineSequenceElements copies a sequence body into every reference the
 // tag's element rules reach beneath n: a list's element and a tuple's
 // positions, at every depth, so a nested enum descends to the innermost
-// element schema as it does through inline sequences. An entry already
-// copied on the path stays a reference, so a self-referential sequence
-// terminates and the tag reports the recursion.
-func (g *run) inlineSequenceElements(n *node, onPath map[*defEntry]bool) {
+// element schema as it does through inline sequences. An interpreter's
+// element rules reach a map's values too, so under maps a map body is
+// copied and descended the same way. An entry already copied on the path
+// stays a reference, so a self-referential sequence terminates and the tag
+// reports the recursion.
+func (g *run) inlineSequenceElements(n *node, onPath map[*defEntry]bool, maps bool) {
 	var children []*node
 
 	switch n.kind {
@@ -1521,25 +1524,36 @@ func (g *run) inlineSequenceElements(n *node, onPath map[*defEntry]bool) {
 			children = []*node{n.items}
 		}
 
+	case kindMap:
+		if maps && n.items != nil {
+			children = []*node{n.items}
+		}
+
 	case kindTuple:
 		children = n.prefix
-	case kindValue, kindObject, kindMap, kindRef:
+	case kindValue, kindObject, kindRef:
 		return
 	}
 
 	for _, c := range children {
 		e := c.def
 
-		if body := refBody(c); body == nil || !sequenceKind(body.kind) || onPath[e] {
+		if body := refBody(c); body == nil || !elementKind(body.kind, maps) || onPath[e] {
 			continue
 		}
 
 		c.inlineBody(g.draft)
 
 		onPath[e] = true
-		g.inlineSequenceElements(c, onPath)
+		g.inlineSequenceElements(c, onPath, maps)
 		delete(onPath, e)
 	}
+}
+
+// elementKind reports whether a node kind carries element nodes an
+// interpreter's element rules reach: a sequence, and under maps a map.
+func elementKind(k nodeKind, maps bool) bool {
+	return sequenceKind(k) || (maps && k == kindMap)
 }
 
 // refBody returns the body a reference node can take inline: the entry's

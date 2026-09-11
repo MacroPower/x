@@ -4050,6 +4050,58 @@ func TestValidateInterpreter_ElementRulesReachAnExtractedSequence(t *testing.T) 
 	})
 }
 
+// TestValidateInterpreter_ElementRulesReachAnExtractedMap pins that an
+// element rule reaches the values of a $defs-extracted named map, and the
+// elements of a map of extracted sequences, under both definitions
+// settings: the map body is copied inline for the interpreted field as a
+// sequence body is. The copy used to cover sequences alone, so a dive into
+// an extracted map was refused under WithDefinitions(true) and applied
+// under WithDefinitions(false).
+func TestValidateInterpreter_ElementRulesReachAnExtractedMap(t *testing.T) {
+	t.Parallel()
+
+	type mapDoc struct {
+		M extendedLabels `json:"m" validate:"dive,min=1"`
+	}
+
+	type nestedDoc struct {
+		N map[string]extendedTags `json:"n" validate:"dive,dive,min=1"`
+	}
+
+	for _, definitions := range []bool{true, false} {
+		t.Run("definitions "+strconv.FormatBool(definitions), func(t *testing.T) {
+			t.Parallel()
+
+			s, err := jsonschema.GenerateFor[mapDoc](t.Context(), validateInterp(),
+				jsonschema.WithDefinitions(definitions))
+			require.NoError(t, err)
+
+			values := s.Properties["m"].AdditionalProperties
+			require.NotNil(t, values, "the map body is copied for the rule to reach")
+			require.NotNil(t, values.Minimum)
+			assert.InDelta(t, 1.0, *values.Minimum, 0)
+
+			s, err = jsonschema.GenerateFor[nestedDoc](t.Context(), validateInterp(),
+				jsonschema.WithDefinitions(definitions))
+			require.NoError(t, err)
+
+			items := s.Properties["n"].AdditionalProperties.Items
+			require.NotNil(t, items, "the sequence body under the map is copied too")
+			require.NotNil(t, items.MinLength)
+			assert.Equal(t, 1, *items.MinLength)
+		})
+	}
+}
+
+// extendedLabels is a named map with an extender, so it is extracted to
+// $defs and an element rule on a field of it must reach the copied body.
+type extendedLabels map[string]int
+
+// JSONSchemaExtend implements [jsonschema.JSONSchemaExtender].
+func (extendedLabels) JSONSchemaExtend(context.Context, jsonschema.TypeContext, *jsonschema.TypeSchema) error {
+	return nil
+}
+
 // suffixedText is a string kind whose marshaled text is not the Go string.
 type suffixedText string
 

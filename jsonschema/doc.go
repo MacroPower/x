@@ -1037,7 +1037,7 @@
 //   - A validate dive or sequence-wide oneof reaches the same element
 //     schemas, so the two dialects agree about what an element is. A field
 //     carrying a registered interpreter's tag has an extracted sequence
-//     definition copied inline for it, as an enum has.
+//     or map definition copied inline for it, as an enum has a sequence.
 //
 // A keyword the field's shape cannot carry is an error rather than an inert
 // keyword nothing enforces: minItems=3 on a string, or any numeric bound on a
