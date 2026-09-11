@@ -440,6 +440,27 @@ func (g *run) schemaForType(t reflect.Type, pointer bool) (*node, error) {
 		return n, nil
 	}
 
+	return g.finishReflected(t, n, pointer)
+}
+
+// finishReflected applies the type-level post-processing a reflected or
+// built-in value node takes, the tail the kind path and the built-in
+// override path share: a named type's description, the type's extender,
+// and its definition where a cycle left a placeholder entry or the
+// extraction policy names the type.
+//
+// The extender refines the type's value schema, so it is directed at the
+// bare value payload. A non-pointer field of the same type presents the
+// same bare payload, so a pointer and a value field stay consistent; render
+// applies the null wrapper afterward, where a type-level keyword cannot
+// reject the permitted null. An extender may also declare a nullability
+// stance, which the null pass folds into the node's decision. A cycle
+// detected while building the type's element or value schema left a
+// placeholder def entry (created by a guarded re-entry), which defineType
+// fills with the now complete body, mirroring the struct path; a built-in
+// type never recurses and so never leaves one. A type extracted to $defs
+// takes the same route into a fresh entry.
+func (g *run) finishReflected(t reflect.Type, n *node, pointer bool) (*node, error) {
 	if t.Name() != "" {
 		err := g.applyTypeDescription(t, n.payload)
 		if err != nil {
@@ -447,21 +468,11 @@ func (g *run) schemaForType(t reflect.Type, pointer bool) (*node, error) {
 		}
 	}
 
-	// The type's extender refines its value schema, so direct it at the bare
-	// value payload. A non-pointer field of the same type presents the same
-	// bare payload, so a pointer and a value field stay consistent; render
-	// applies the null wrapper afterward, where a type-level keyword cannot
-	// reject the permitted null. An extender may also declare a nullability
-	// stance, which the null pass folds into the node's decision.
 	stance, err := g.extendTypeSchema(t, n)
 	if err != nil {
 		return nil, err
 	}
 
-	// A cycle detected while building this type's element/value schema left a
-	// placeholder def entry (created by a guarded re-entry), which defineType
-	// fills with the now complete body, mirroring the struct path. A type
-	// extracted to $defs takes the same route into a fresh entry.
 	if _, cyclic := g.typeToDef[t]; cyclic || g.shouldExtract(t) {
 		return g.defineType(t, n, stance, pointer), nil
 	}
@@ -736,34 +747,16 @@ func (g *run) handleProviderType(t reflect.Type, pointer bool) (*node, error) {
 }
 
 // handleBuiltinType processes a type with a built-in override, applying
-// type-level post-processing (comments, extender, $defs extraction) per
-// the processing order. The node records the occurrence's pointer-ness and
-// the extender's stance for the null pass.
+// the type-level post-processing of [run.finishReflected] (comments,
+// extender, $defs extraction) per the processing order. The node records
+// the occurrence's pointer-ness and the extender's stance for the null
+// pass. The extender runs for unnamed builtin-produced schemas too (a
+// registered extender for []byte is just as applicable as one for a named
+// type).
 func (g *run) handleBuiltinType(t reflect.Type, s *Schema, pointer bool) (*node, error) {
 	value := &node{kind: kindValue, payload: s, occ: occurrence{pointer: pointer}}
 
-	// Comment lookup is keyed by named type; the extender runs for unnamed
-	// builtin-produced schemas too (a registered extender for []byte is just
-	// as applicable as one for a named type).
-	if t.Name() != "" {
-		err := g.applyTypeDescription(t, s)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	stance, err := g.extendTypeSchema(t, value)
-	if err != nil {
-		return nil, err
-	}
-
-	if g.shouldExtract(t) {
-		return g.defineType(t, value, stance, pointer), nil
-	}
-
-	value.stance = stance
-
-	return value, nil
+	return g.finishReflected(t, value, pointer)
 }
 
 // byteSliceNode returns the IR node for a []byte, which encoding/json/v2
