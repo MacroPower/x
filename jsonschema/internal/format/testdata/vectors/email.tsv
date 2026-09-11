@@ -28,3 +28,16 @@
 #
 "\"\"@example.com"	true	the empty quoted local part (e9372c3, then 16d9020)
 "\"@example.com"	false	an unterminated quoted local part stays malformed
+#
+# The RFC 5321 §4.1.3 address literal. An IPv4 literal is four Snum of
+# 1*3DIGIT bounded by value alone, so leading zeros pass here where the ipv4
+# format refuses them; no Standardized-tag other than IPv6 is registered.
+#
+"a@[127.0.0.1]"	true	an IPv4-address-literal
+"a@[010.000.000.001]"	true	Snum admits leading zeros, unlike the ipv4 format
+"a@[256.0.0.1]"	false	an Snum past 255
+"a@[1.2.3]"	false	three Snum, not four
+"a@[1.2.3.4.5]"	false	five Snum
+"a@[1234.0.0.1]"	false	an Snum of four digits
+"a@[Foo:bar]"	false	a General-address-literal with no registered tag
+"a@[IPv6:::1]"	true	the IPv6 tag introduces an IPv6 literal

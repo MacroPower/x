@@ -1635,8 +1635,13 @@
 //     break the 253-octet limit already breaks the total; only idn-email
 //     reaches the domain limit, counting the domain in its longer A-label
 //     form. The checkers reject the RFC 5322 comment, folding-whitespace, and
-//     obsolete productions that Draft-07's cited §3.4.1 would permit.
-//     Deliverability is never consulted.
+//     obsolete productions that Draft-07's cited §3.4.1 would permit. A
+//     bracketed domain is the §4.1.3 address literal: an IPv4 literal is
+//     four numbers of one to three digits each, 0 through 255, so leading
+//     zeros pass here where the ipv4 format refuses them, and "IPv6:"
+//     introduces an IPv6 literal; no other tag is registered, so a
+//     General-address-literal is refused. Deliverability is never
+//     consulted.
 //   - uri and uri-reference accept an IPvFuture authority ("http://[v7.x]/"),
 //     which RFC 3986 §3.2.2 defines and Go's net/url cannot parse, and a
 //     reg-name host carrying a percent-encoded ASCII octet ("ex%41mple.com"),

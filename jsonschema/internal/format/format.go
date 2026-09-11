@@ -523,7 +523,7 @@ func validateEmailDomain(d string) error {
 			return validateIPv6(lit[len("IPv6:"):])
 		}
 
-		return validateIPv4(lit)
+		return validateIPv4AddressLiteral(lit)
 	}
 
 	// Email domains follow the RFC 5321 sub-domain grammar
@@ -532,6 +532,33 @@ func validateEmailDomain(d string) error {
 	// The grammar also has no trailing-dot production, so the FQDN root-dot
 	// allowance from the hostname format must not apply either.
 	return validateHostnameLabels(d, false, false)
+}
+
+// validateIPv4AddressLiteral checks an RFC 5321 §4.1.3 IPv4-address-literal:
+// four Snum, each 1*3DIGIT of value 0 through 255, joined by dots. The
+// grammar admits leading zeros ("010.000.000.001"), which the ipv4 format's
+// dotted-quad rule refuses, so the literal takes its own reader rather than
+// that validator. A General-address-literal (a registered Standardized-tag
+// before a colon) is refused too, since no tag other than IPv6 is
+// registered.
+func validateIPv4AddressLiteral(lit string) error {
+	parts := strings.Split(lit, ".")
+	if len(parts) != 4 {
+		return errInvalidIPv4
+	}
+
+	for _, part := range parts {
+		if part == "" || len(part) > 3 || !isAllDigits(part) {
+			return errInvalidIPv4
+		}
+
+		n, err := strconv.Atoi(part)
+		if err != nil || n > 255 {
+			return errInvalidIPv4
+		}
+	}
+
+	return nil
 }
 
 func validateHostname(s string) error {
