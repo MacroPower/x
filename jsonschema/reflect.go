@@ -727,9 +727,15 @@ func (g *run) refTypeOverride(t reflect.Type, ts TypeSchema, pointer bool) (*nod
 	// target declared none. Along a chain of aliases the node is shared, and
 	// each alias writes its stance on the way out only when it declares one,
 	// so the outermost declared stance wins and an alias declaring nothing
-	// keeps the inner alias's.
-	if ts.Nullability != NullFromReflection && (ref.kind == kindRef || ref.stance == NullFromReflection) {
+	// keeps the inner alias's. The node remembers that an alias wrote its
+	// stance, so an outer alias overwrites an inner alias's stance while
+	// still deferring to one the target declared, as it does on a reference,
+	// where each hop is a fresh node and the target's stance sits on the
+	// entry.
+	if ts.Nullability != NullFromReflection &&
+		(ref.kind == kindRef || ref.stance == NullFromReflection || ref.aliasStance) {
 		ref.stance = ts.Nullability
+		ref.aliasStance = true
 	}
 
 	return ref, nil

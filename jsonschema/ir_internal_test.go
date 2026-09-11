@@ -56,8 +56,9 @@ var overrideEffects = map[string]overrideEffect{
 	"hooked":   effectKept,
 	"isField":  effectKept,
 	// The elements an alias's node names go with the element slot they
-	// describe.
-	"elemType": effectByKind,
+	// describe; a stance an alias wrote resets with the stance.
+	"elemType":    effectByKind,
+	"aliasStance": effectReset,
 }
 
 // nodeFields reads every field of a node by name, so the tests compare
@@ -65,28 +66,29 @@ var overrideEffects = map[string]overrideEffect{
 // The classification guard holds it total as well.
 func nodeFields(n *node) map[string]any {
 	return map[string]any{
-		"payload":  n.payload,
-		"def":      n.def,
-		"typ":      n.typ,
-		"items":    n.items,
-		"authored": n.authored,
-		"origin":   n.origin,
-		"overrode": n.overrode,
-		"props":    n.props,
-		"prefix":   n.prefix,
-		"embeds":   n.embeds,
-		"ghostWon": n.ghostWon,
-		"occ":      n.occ,
-		"stance":   n.stance,
-		"null":     n.null,
-		"kind":     n.kind,
-		"fallback": n.fallback,
-		"isBody":   n.isBody,
-		"composed": n.composed,
-		"verbatim": n.verbatim,
-		"hooked":   n.hooked,
-		"isField":  n.isField,
-		"elemType": n.elemType,
+		"payload":     n.payload,
+		"def":         n.def,
+		"typ":         n.typ,
+		"items":       n.items,
+		"authored":    n.authored,
+		"origin":      n.origin,
+		"overrode":    n.overrode,
+		"props":       n.props,
+		"prefix":      n.prefix,
+		"embeds":      n.embeds,
+		"ghostWon":    n.ghostWon,
+		"occ":         n.occ,
+		"stance":      n.stance,
+		"null":        n.null,
+		"kind":        n.kind,
+		"fallback":    n.fallback,
+		"isBody":      n.isBody,
+		"composed":    n.composed,
+		"verbatim":    n.verbatim,
+		"hooked":      n.hooked,
+		"isField":     n.isField,
+		"elemType":    n.elemType,
+		"aliasStance": n.aliasStance,
 	}
 }
 

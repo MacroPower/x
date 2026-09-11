@@ -136,6 +136,10 @@ type node struct {
 	// inlined copy) is hooked once.
 	hooked  bool
 	isField bool // marks a struct-field node, so reconcile applies the field const/enum bound subsumption
+	// AliasStance marks a stance a TypeSchema.Ref alias wrote onto an inline
+	// node, as against one the target type declared, so an outer alias in
+	// a chain overwrites the former and defers to the latter.
+	aliasStance bool
 }
 
 // containerKind names the nilable container an occurrence is, if any. A
@@ -867,6 +871,7 @@ func (n *node) overrideType(typeName string) {
 	n.def = nil
 	n.occ = occurrence{}
 	n.stance = NullFromReflection
+	n.aliasStance = false
 	n.null = nullDecision{}
 	n.verbatim = false
 

@@ -2955,9 +2955,12 @@ type (
 )
 
 // TestGenerateFor_TypeSchemaRefChainStance pins which alias's stance a Ref
-// chain applies: the outermost alias that declares one. The outer alias once
-// wrote its stance unconditionally on the way out, so an outer alias
-// declaring nothing erased the inner alias's NullAllowed.
+// chain applies: the outermost alias that declares one, under both
+// definitions settings. The outer alias once wrote its stance
+// unconditionally on the way out, so an outer alias declaring nothing
+// erased the inner alias's NullAllowed; and on the inline node the settings
+// share, an inner alias's stance once blocked the outer's, so the innermost
+// won under WithDefinitions(false) alone.
 func TestGenerateFor_TypeSchemaRefChainStance(t *testing.T) {
 	t.Parallel()
 
@@ -2969,10 +2972,12 @@ func TestGenerateFor_TypeSchemaRefChainStance(t *testing.T) {
 		outer jsonschema.Nullability
 		inner jsonschema.Nullability
 		want  string
+		null  bool
 	}{
 		"outer declares nothing, inner allows": {
 			inner: jsonschema.NullAllowed,
 			want:  `{"anyOf":[{"$ref":"#/$defs/chainTarget"},{"type":"null"}]}`,
+			null:  true,
 		},
 		"outer forbids, inner allows": {
 			outer: jsonschema.NullForbidden,
@@ -2983,6 +2988,7 @@ func TestGenerateFor_TypeSchemaRefChainStance(t *testing.T) {
 			outer: jsonschema.NullAllowed,
 			inner: jsonschema.NullForbidden,
 			want:  `{"anyOf":[{"$ref":"#/$defs/chainTarget"},{"type":"null"}]}`,
+			null:  true,
 		},
 		"neither declares": {
 			want: `{"$ref":"#/$defs/chainTarget"}`,
@@ -2993,19 +2999,30 @@ func TestGenerateFor_TypeSchemaRefChainStance(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			s, err := jsonschema.GenerateFor[doc](t.Context(),
+			opts := []jsonschema.GenerateOption{
 				jsonschema.WithTypeSchemaFor[chainOuter](jsonschema.TypeSchema{
 					Ref: reflect.TypeFor[chainInner](), Nullability: tc.outer,
 				}),
 				jsonschema.WithTypeSchemaFor[chainInner](jsonschema.TypeSchema{
 					Ref: reflect.TypeFor[chainTarget](), Nullability: tc.inner,
 				}),
-			)
+			}
+
+			s, err := jsonschema.GenerateFor[doc](t.Context(), opts...)
 			require.NoError(t, err)
 
 			got, err := json.Marshal(s.Properties["a"])
 			require.NoError(t, err)
 			assert.JSONEq(t, tc.want, string(got))
+
+			for _, definitions := range []bool{true, false} {
+				s, err := jsonschema.GenerateFor[doc](t.Context(),
+					append(opts, jsonschema.WithDefinitions(definitions))...)
+				require.NoError(t, err)
+
+				err = jsonschema.Validate(t.Context(), s, map[string]any{"a": nil})
+				assert.Equal(t, tc.null, err == nil, "null admitted under WithDefinitions(%v)", definitions)
+			}
 		})
 	}
 }
