@@ -4083,6 +4083,75 @@ func TestValidateInterpreter_StringRulesRefusedOnTextMarshalingString(t *testing
 	require.ErrorIs(t, err, validate.ErrStringRuleKind)
 }
 
+// TestValidateInterpreter_StringRulesRefusedUnderTypeString pins that the
+// string-rule refusal keys on the Go kind under a jsonschema type= pair as
+// without one: a byte slice or a text-marshaling struct under type=string
+// is still a value go-playground judges by reflect's description, so a
+// string validator there is refused, while a string kind under the pair is
+// admitted. The refusal used to read the form, which the pair replaces.
+func TestValidateInterpreter_StringRulesRefusedUnderTypeString(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		value any
+		want  error
+	}{
+		"byte slice": {value: struct {
+			V []byte `jsonschema:"type=string"`
+		}{}, want: validate.ErrStringRuleKind},
+		"text marshaling struct": {value: struct {
+			V time.Time `jsonschema:"type=string"`
+		}{}, want: validate.ErrStringRuleKind},
+		"integer": {value: struct {
+			V int `jsonschema:"type=string"`
+		}{}, want: validate.ErrStringRuleKind},
+		"string": {value: struct {
+			V string `jsonschema:"type=string"`
+		}{}},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			typ := taggedField(t, tc.value, "alpha")
+
+			_, err := jsonschema.Generate(t.Context(), typ, validateInterp())
+			if tc.want != nil {
+				require.ErrorIs(t, err, tc.want)
+
+				return
+			}
+
+			require.NoError(t, err)
+		})
+	}
+}
+
+// TestValidateInterpreter_TypeObjectOnStructIsDeclaredObject pins that a
+// type=object pair on a struct field classifies as a declared object, as a
+// hook's object schema over the same kind does, so a rule-shaped bound has
+// no entry count to land on and is refused where go-playground defines
+// none, while the same pair on a map keeps the map form and its count. The
+// pair used to install the map form on every kind.
+func TestValidateInterpreter_TypeObjectOnStructIsDeclaredObject(t *testing.T) {
+	t.Parallel()
+
+	type inner struct{ X int }
+
+	_, err := jsonschema.Generate(t.Context(), taggedField(t, struct {
+		V inner `jsonschema:"type=object"`
+	}{}, "min=1"), validateInterp())
+	require.ErrorIs(t, err, jsonschema.ErrConstraintUnsupported)
+
+	s, err := jsonschema.Generate(t.Context(), taggedField(t, struct {
+		V map[string]int `jsonschema:"type=object"`
+	}{}, "min=1"), validateInterp())
+	require.NoError(t, err)
+	require.NotNil(t, s.Properties["v"].MinProperties)
+	assert.Equal(t, 1, *s.Properties["v"].MinProperties)
+}
+
 // TestValidateInterpreter_UnsignedMinusLiteral pins a minus sign on an
 // unsigned kind to go-playground's parser, which reads every numeric
 // parameter there through strconv.ParseUint and refuses the sign. The shared

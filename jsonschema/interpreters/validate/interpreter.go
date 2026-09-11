@@ -13,6 +13,7 @@ import (
 	"go.jacobcolvin.com/x/jsonschema"
 	"go.jacobcolvin.com/x/jsonschema/internal/jsonvalue"
 	"go.jacobcolvin.com/x/jsonschema/internal/numkind"
+	"go.jacobcolvin.com/x/jsonschema/internal/reflectkind"
 	"go.jacobcolvin.com/x/jsonschema/internal/tagmodel"
 	"go.jacobcolvin.com/x/jsonschema/internal/typename"
 )
@@ -538,19 +539,43 @@ func readsGoKindAsText(kind reflect.Kind) bool {
 // reads the decoded content. A string kind that marshals itself as text is
 // refused too: go-playground reads the Go string, and the text MarshalText
 // writes for it is what the schema judges, the mismatch the length rule
-// already refuses on that shape. The question is asked of the Go kind and
-// the marshal alone, since go-playground never sees the schema.
+// already refuses on that shape. The question is asked of the Go type and
+// the marshal alone, never of the form, since go-playground never sees the
+// schema and a jsonschema type= pair replaces the form while the Go value
+// its validators run over stays.
 func readsGoValueNotText(shape tagmodel.Shape, op tagmodel.Op) bool {
-	switch shape.Form {
-	case tagmodel.FormByteString:
+	// A raw JSON value carries no text a string validator could judge and
+	// no schema for one to land on; the content keys are ignored there and
+	// every other string validator reports through the model.
+	if shape.Form == tagmodel.FormRawBytes {
+		return false
+	}
+
+	t := shape.Elem
+	if t == nil {
+		return readsGoKindAsText(shape.Kind)
+	}
+
+	switch {
+	case reflectkind.IsBase64ByteSlice(t) && !reflectkind.ImplementsAnyMarshaler(t),
+		reflectkind.IsBase64ByteArray(t) && !reflectkind.ImplementsAnyMarshaler(t):
 		// The json exception is a byte slice's alone: go-playground's isJSON
 		// switches on the string and slice kinds and panics on a byte array,
 		// which takes the same base64 form here.
-		return op != tagmodel.OpContentMediaType || shape.Kind != reflect.Slice
-	case tagmodel.FormTextString, tagmodel.FormCoercedString:
+		return op != tagmodel.OpContentMediaType || t.Kind() != reflect.Slice
+
+	case t.Kind() == reflect.String:
+		// A string kind writes its text marshaler's output, unless a JSON
+		// marshaler outranks it, as reflection's text step reads them.
+		return reflectkind.ImplementsAnyTextMarshaler(t) && !reflectkind.ImplementsAnyJSONMarshaler(t)
+
+	case readsGoKindAsText(t.Kind()):
 		return true
+
 	default:
-		return readsGoKindAsText(shape.Kind)
+		// A composite kind marshaling itself as text: the schema judges the
+		// text, go-playground the Go value.
+		return reflectkind.ImplementsAnyMarshaler(t)
 	}
 }
 
