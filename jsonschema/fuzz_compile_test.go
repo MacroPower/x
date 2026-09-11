@@ -46,14 +46,6 @@ var (
 		return m
 	}()
 
-	// SubschemaKeywords are the keywords whose value is a subschema in both
-	// drafts. A null in one of them unmarshals as an absent keyword, which
-	// is the one shape Compile cannot see and the metaschema rejects.
-	subschemaKeywords = []string{
-		"items", "additionalItems", "additionalProperties", "propertyNames", "contains",
-		"if", "then", "else", "not", "unevaluatedItems", "unevaluatedProperties", "contentSchema",
-	}
-
 	// SetKeywords are the keywords whose list the metaschema holds unique
 	// and Compile reads as the set it names, so a duplicate member changes
 	// nothing. Enum is unique under Draft-07 alone; the other two hold
@@ -64,10 +56,6 @@ var (
 	// EmptyApplicatorKeywords are the schema-array keywords whose empty
 	// array the metaschema refuses and Compile reads as the absent keyword.
 	emptyApplicatorKeywords = []string{"allOf", "anyOf", "oneOf", "prefixItems", "items"}
-
-	// MemberKeywords are the keywords whose value is a map of subschemas. A
-	// null member unmarshals as an absent one, as a null subschema does.
-	memberKeywords = []string{"properties", "patternProperties", "$defs", "definitions", "dependentSchemas"}
 
 	// VetBeyondMetaschema names the refusals Compile reports on a document
 	// the metaschema accepts, each a check the metaschema cannot express,
@@ -229,29 +217,12 @@ func metaschemaTolerances() []metaschemaTolerance {
 			},
 		},
 		{
-			reason: "a null in a subschema-valued keyword unmarshals as the keyword's absence, so Compile never sees it",
+			reason: "a null under any keyword but const, default, and the sub-schema keywords unmarshals as the keyword's absence, as TestParseSchemaNullKeywordReadsAsAbsent pins, so Compile never sees it where the metaschema types the keyword",
 			catches: func(doc map[string]any) bool {
 				return anyValue(doc, func(key string, val any) bool {
-					return val == nil && slices.Contains(subschemaKeywords, key)
-				})
-			},
-		},
-		{
-			reason: "a null-valued member of a subschema map unmarshals as an absent member",
-			catches: func(doc map[string]any) bool {
-				return anyValue(doc, func(key string, val any) bool {
-					members, ok := val.(map[string]any)
-					if !ok || !slices.Contains(memberKeywords, key) {
-						return false
-					}
+					_, subschema := subschemaShapes[key]
 
-					for _, member := range members {
-						if member == nil {
-							return true
-						}
-					}
-
-					return false
+					return val == nil && key != "const" && key != "default" && !subschema
 				})
 			},
 		},
