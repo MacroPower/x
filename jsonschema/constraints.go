@@ -170,11 +170,13 @@ const (
 // pass [FieldContext.Base]. A nil base classifies from the Go type alone, and
 // a nil type classifies as [FormOpaque], the form every rule reports on. Two
 // inputs the type and base cannot express reach only [FieldContext.Shape]:
-// a json:",string" flag on an [encoding/json.Number] field (string Go kind,
-// numeric instance), and the definition a bare $ref base names, which this
-// function cannot read and so classifies as [FormUnresolvedRef], the other
-// form every rule reports on. Prefer the context's method when one is
-// available.
+// a json:",string" flag on a numeric or [encoding/json.Number] field (the
+// coerced base is a string schema a hook may declare over the same kind, so
+// this function reads the field as a plain string and yields string rules
+// where the context's shape refuses a bound), and the definition a bare
+// $ref base names, which this function cannot read and so classifies as
+// [FormUnresolvedRef], the other form every rule reports on. Prefer the
+// context's method when one is available.
 func ShapeOf(t reflect.Type, base *Schema) Shape {
 	return tagmodel.ShapeOf(t, base)
 }

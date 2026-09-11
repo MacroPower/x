@@ -589,9 +589,11 @@
 // reading the field's Go type against its type-derived [FieldContext.Base].
 // The context supplies two facts [ShapeOf] cannot:
 //
-//   - The json:",string" flag on an [encoding/json.Number] field. The type is
-//     a string kind and the coerced base is a string schema, so only the flag
-//     says the instance is a quoted number.
+//   - The json:",string" flag on a numeric or [encoding/json.Number] field.
+//     The coerced base is a string schema, which a hook may declare over the
+//     same kind, so only the flag says the instance is a quoted number;
+//     [ShapeOf] on such a field yields plain-string rules, which admit the
+//     bounds the context's shape refuses.
 //   - Whether a pointer or interface occurrence admits null. That is the
 //     generator's decision rather than the Go type's (a [Nullability] stance,
 //     a [WithJSONOptions] format flag), so [ShapeOf] reports only the pointer

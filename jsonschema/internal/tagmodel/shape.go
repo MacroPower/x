@@ -264,10 +264,12 @@ func ShapeForTypeNameOver(name string, t reflect.Type) Shape {
 // schema-permits-a-string test, the byte-slice test, and every kind predicate
 // the dialects used to each keep their own copy of.
 //
-// Type and base alone cannot see a json:",string" flag on
-// [encoding/json.Number] (the numeric coercion otherwise surfaces as a
-// string-typed base over a non-string kind, but Number's kind is string); a
-// caller that knows the flag classifies through [ShapeOfQuoted] instead. Nor
+// Type and base alone cannot see a json:",string" flag on any scalar kind,
+// numeric or [encoding/json.Number]: the coerced base is a string schema a
+// hook may declare over the same kind as well, so the pair reads as a plain
+// string field and yields plain-string rules, which admit the bounds the
+// coerced form refuses; a caller that knows the flag classifies through
+// [ShapeOfQuoted] instead. Nor
 // can they read the definition a bare $ref base names, so such a base
 // classifies as [FormUnresolvedRef] here; a caller that can read it
 // supplies the resolver to [ShapeOfQuoted].

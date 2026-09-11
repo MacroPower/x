@@ -798,9 +798,9 @@ func (fc FieldContext) Constraints() *Constraints {
 // The first is the json:",string" flag, taken from the generator's own tag
 // parse for a generated context and read from [FieldContext.StructField] for
 // a caller-built one. A quoted string field double-encodes (its instance is
-// the JSON-quoted text),
-// which only the flag distinguishes from a plain string field, while every
-// other coercion is already visible in [FieldContext.Base]. The second is
+// the JSON-quoted text), and a quoted numeric field's coerced base is a
+// string schema a hook may declare over the same kind, so in both cases
+// only the flag distinguishes the field from a plain string one. The second is
 // whether the occurrence admits null. A Go type states only its pointer-ness.
 // The generator gives a nil-able slice, map, byte slice, or interface a null
 // branch too, and the field's node carries that decision, so this method reads
