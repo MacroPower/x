@@ -565,52 +565,44 @@ func TestConstraintsInterpreterOrderIndependent(t *testing.T) {
 
 // pinnedDefStruct is a named struct (always $defs-extracted) carrying a
 // type-pinned const through WithTypeSchemaFor in
-// TestConstraintsSetConstExtractedTypeComposes.
+// TestConstraintsSetConstExtractedTypeReadsTheDefinition.
 type pinnedDefStruct struct{}
 
-// TestConstraintsSetConstExtractedTypeComposes pins the documented
-// $defs-extracted behavior of the SetConst backstop: the referenced
-// definition's const lives in the def, not on the field's provisional {$ref}
-// base, so SetConst reports no conflict; the canvas const rides beside the
-// $ref and both apply conjunctively, composing disagreeing values to a
-// faithfully unsatisfiable schema instead of aborting generation.
-func TestConstraintsSetConstExtractedTypeComposes(t *testing.T) {
+// TestConstraintsSetConstExtractedTypeReadsTheDefinition pins that the
+// SetConst backstop reads the referenced definition's const through the
+// $ref, so a disagreeing value is the same conflict it is on the inline
+// schema, and an agreeing one rides beside the $ref. The extracted form
+// used to see only the bare {$ref} payload and compose a disagreeing const
+// into an unsatisfiable schema the inline form refused.
+func TestConstraintsSetConstExtractedTypeReadsTheDefinition(t *testing.T) {
 	t.Parallel()
 
-	type doc struct {
-		F pinnedDefStruct `json:"f" pin:"b"`
-	}
-
-	var setErr error
-
-	interp := boundInterp(func(c *jsonschema.Constraints) error {
-		setErr = c.SetConst("b")
-
-		return nil
+	pinned := any("a")
+	override := jsonschema.WithTypeSchemaFor[pinnedDefStruct](jsonschema.TypeSchema{
+		Value: &jsonschema.Schema{Type: "string", Const: &pinned},
 	})
 
-	pinned := any("a")
+	pin := func(value string) jsonschema.GenerateOption {
+		return jsonschema.WithTagInterpreter("pin", boundInterp(func(c *jsonschema.Constraints) error {
+			return c.SetConst(value)
+		}))
+	}
 
-	s, err := jsonschema.GenerateFor[doc](t.Context(),
-		jsonschema.WithTagInterpreter("pin", interp),
-		jsonschema.WithTypeSchemaFor[pinnedDefStruct](jsonschema.TypeSchema{
-			Value: &jsonschema.Schema{Type: "string", Const: &pinned},
-		}),
-	)
+	type doc struct {
+		F pinnedDefStruct `json:"f" pin:"x"`
+	}
+
+	_, err := jsonschema.GenerateFor[doc](t.Context(), pin("b"), override)
+	require.ErrorIs(t, err, jsonschema.ErrConstraintConflict, "a const disagreeing with the definition's")
+
+	s, err := jsonschema.GenerateFor[doc](t.Context(), pin("a"), override)
 	require.NoError(t, err)
-	require.NoError(t, setErr,
-		"a def-pinned const is not visible on the {$ref} base, so no conflict is reported")
 
 	field := s.Properties["f"]
 	require.NotNil(t, field)
 	assert.NotEmpty(t, field.Ref, "the extracted type stays referenced")
 	require.NotNil(t, field.Const)
-	assert.Equal(t, "b", *field.Const, "the canvas const rides beside the $ref")
-
-	for _, instance := range []map[string]any{{"f": "a"}, {"f": "b"}} {
-		require.Error(t, jsonschema.Validate(t.Context(), s, instance),
-			"instance %v must fail: the def const and the sibling const conjoin", instance)
-	}
+	assert.Equal(t, "a", *field.Const, "the agreeing const rides beside the $ref")
 }
 
 // reservedNotString carries a type-level not through WithTypeSchemaFor in

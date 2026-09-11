@@ -290,16 +290,14 @@ func (c *Constraints) Enum() ([]any, bool) {
 // whether a previous rule pinned it on the canvas or the field's type supplies
 // it on an inline base, where reconcile overlays the canvas const and a
 // disagreeing type-pinned value would otherwise be silently overwritten. A
-// value outside an enum in force, or outside a numeric bound the inline base
-// declares, is the same conflict, since generation drops the base's bounds
+// value outside an enum in force, or outside a numeric bound the type
+// declares, is the same conflict, since generation drops the type's bounds
 // under a const and the value must satisfy them for that to be safe. For a
-// $defs-extracted type the base is the field's provisional {$ref} payload, so a
-// const the referenced definition pins is not visible here and no conflict is
-// reported; nothing is overwritten either -- the canvas const rides beside the
-// $ref and both apply conjunctively, so disagreeing values compose to a
-// faithfully unsatisfiable schema rather than aborting generation. An
-// interpreter that needs its own conflict wording checks [Constraints.Const]
-// first; this call is the shared backstop for the overlay path.
+// $defs-extracted type the check reads the referenced definition, so the
+// answer is the one the inline schema gives; the canvas const then rides
+// beside the $ref. An interpreter that needs its own conflict wording checks
+// [Constraints.Const] first; this call is the shared backstop for the
+// overlay path.
 func (c *Constraints) SetConst(value any) error {
 	err := c.ready()
 	if err != nil {
@@ -311,16 +309,16 @@ func (c *Constraints) SetConst(value any) error {
 }
 
 // SetEnum sets the field's enum, intersecting with an enum already in force
-// -- on the canvas from a previous rule, or on an inline type-derived base,
-// which reconcile would otherwise overwrite with the canvas value -- so two
+// -- on the canvas from a previous rule, or on the type-derived base, which
+// reconcile would otherwise overwrite with the canvas value -- so two
 // enumerations compose conjunctively rather than one shadowing the other. A
-// numeric bound the inline base declares narrows the enum the same way, to
-// the members the bound admits, since generation drops the base's bounds
-// under an enum and every member must satisfy them for that to be safe. An
-// empty intersection is [ErrConstraintConflict]. For a $defs-extracted type
-// the definition's enum is not visible on the base (the provisional {$ref}
-// payload); the canvas enum rides beside the $ref and the conjunction
-// intersects the two sets there instead. An empty values is [ErrInvalidRule],
+// numeric bound the type declares narrows the enum the same way, to the
+// members the bound admits, since generation drops the type's bounds under
+// an enum and every member must satisfy them for that to be safe. An empty
+// intersection is [ErrConstraintConflict]. For a $defs-extracted type the
+// definition's enum and bounds are read through the reference, so the
+// narrowed set is the one the inline schema gives, and it rides beside the
+// $ref. An empty values is [ErrInvalidRule],
 // as it is through [Constraints.Apply] with [OpOneOf]: it would admit nothing,
 // and the JSON form omits an empty enum, so the generated schema could not
 // express it. An interpreter that needs its own wording checks

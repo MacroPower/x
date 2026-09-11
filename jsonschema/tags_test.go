@@ -11,6 +11,7 @@ import (
 	"math"
 	"math/big"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -5502,4 +5503,57 @@ func TestTagEnumOnHookDeclaredArrayOverStruct(t *testing.T) {
 			assert.ErrorContains(t, err, "no item or value sub-schema")
 		})
 	}
+}
+
+// TestTagValueAndBoundReadTheDefinition pins that a const, an enum, and a
+// bound on a field of a $defs-extracted type are judged against what the
+// definition declares, as they are against the inline schema: a const the
+// definition's bound excludes is a conflict, an enum narrows to the members
+// the bound admits, and a bound weaker than the definition's never lands on
+// the canvas. Under WithDefinitions(true) the checks used to read the bare
+// $ref payload alone, so the extracted form emitted an unsatisfiable const
+// and an unnarrowed enum the inlined form refused or narrowed.
+func TestTagValueAndBoundReadTheDefinition(t *testing.T) {
+	t.Parallel()
+
+	for _, definitions := range []bool{true, false} {
+		t.Run("definitions "+strconv.FormatBool(definitions), func(t *testing.T) {
+			t.Parallel()
+
+			opts := []jsonschema.GenerateOption{jsonschema.WithDefinitions(definitions)}
+
+			_, err := jsonschema.GenerateFor[struct {
+				A boundedProvider `json:"a" jsonschema:"const=50"`
+			}](t.Context(), opts...)
+			require.ErrorIs(t, err, jsonschema.ErrConstraintConflict, "a const the definition's bound excludes")
+
+			s, err := jsonschema.GenerateFor[struct {
+				E boundedProvider `json:"e" jsonschema:"enum=5|50"`
+				W boundedProvider `json:"w" jsonschema:"maximum=100"`
+				N boundedProvider `json:"n" jsonschema:"maximum=5"`
+			}](t.Context(), opts...)
+			require.NoError(t, err)
+
+			assert.Equal(t, []any{int64(5)}, s.Properties["e"].Enum, "the enum narrows to what the definition admits")
+
+			// The weaker bound never lands: the extracted form carries none
+			// beside the reference, and the inlined form carries the
+			// definition's own.
+			if weaker := s.Properties["w"].Maximum; weaker != nil {
+				assert.InDelta(t, 10.0, *weaker, 0, "a bound weaker than the definition's never lands")
+			}
+
+			require.NotNil(t, s.Properties["n"].Maximum)
+			assert.InDelta(t, 5.0, *s.Properties["n"].Maximum, 0, "a tighter bound lands")
+		})
+	}
+}
+
+// boundedProvider declares an integer schema with a ceiling, so a tag on a
+// field of it is judged against a bound the definition carries.
+type boundedProvider int
+
+// JSONSchema implements [jsonschema.JSONSchemaProvider].
+func (boundedProvider) JSONSchema(context.Context, jsonschema.TypeContext) (jsonschema.TypeSchema, error) {
+	return jsonschema.TypeSchema{Value: &jsonschema.Schema{Type: "integer", Maximum: new(10.0)}}, nil
 }

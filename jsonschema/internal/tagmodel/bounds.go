@@ -20,6 +20,18 @@ func baseOf(t Target) *jsonschema.Schema {
 	return &jsonschema.Schema{}
 }
 
+// typeValue returns the value the type declares for one slot: the base's
+// when it carries one, else the one the definition a bare $ref base names
+// carries, read through the target's refBase seam, so a $defs-extracted
+// type answers as the inline one does. Nil when neither declares one.
+func typeValue[T any](base, ref *T) *T {
+	if base != nil {
+		return base
+	}
+
+	return ref
+}
+
 // tighten writes n into *field unless it would loosen the effective bound: a
 // floor may only rise and a ceiling may only fall, so bounds intersect
 // regardless of the order the rules appeared in. The effective bound is the
@@ -79,16 +91,22 @@ func sizeRuleFor(op Op) constraint.SizeRule {
 }
 
 // sizeSlots returns the canvas floor and ceiling fields an axis writes, paired
-// with the type-derived values they tighten against.
+// with the type-derived values they tighten against, read through the
+// definition a $ref base names as [typeValue] reads them.
 func sizeSlots(t Target, axis Axis) (**int, **int, *int, *int) {
-	base := baseOf(t)
+	base, ref := baseOf(t), refBaseOf(t)
 
 	switch axis {
 	case AxisItems:
-		return &t.Canvas.MinItems, &t.Canvas.MaxItems, base.MinItems, base.MaxItems
+		return &t.Canvas.MinItems, &t.Canvas.MaxItems,
+			typeValue(base.MinItems, ref.MinItems), typeValue(base.MaxItems, ref.MaxItems)
+
 	case AxisProperties:
-		return &t.Canvas.MinProperties, &t.Canvas.MaxProperties, base.MinProperties, base.MaxProperties
+		return &t.Canvas.MinProperties, &t.Canvas.MaxProperties,
+			typeValue(base.MinProperties, ref.MinProperties), typeValue(base.MaxProperties, ref.MaxProperties)
+
 	default:
-		return &t.Canvas.MinLength, &t.Canvas.MaxLength, base.MinLength, base.MaxLength
+		return &t.Canvas.MinLength, &t.Canvas.MaxLength,
+			typeValue(base.MinLength, ref.MinLength), typeValue(base.MaxLength, ref.MaxLength)
 	}
 }

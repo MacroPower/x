@@ -169,17 +169,17 @@ func applyNumericBound(t Target, r Rule, pol Policy) error {
 	}
 
 	n := end.Val
-	base := baseOf(t)
+	base, ref := baseOf(t), refBaseOf(t)
 
 	switch r.Op {
 	case OpFloorIncl:
-		tighten(&t.Canvas.Minimum, base.Minimum, n, false)
+		tighten(&t.Canvas.Minimum, typeValue(base.Minimum, ref.Minimum), n, false)
 	case OpFloorExcl:
-		tighten(&t.Canvas.ExclusiveMinimum, base.ExclusiveMinimum, n, false)
+		tighten(&t.Canvas.ExclusiveMinimum, typeValue(base.ExclusiveMinimum, ref.ExclusiveMinimum), n, false)
 	case OpCeilIncl:
-		tighten(&t.Canvas.Maximum, base.Maximum, n, true)
+		tighten(&t.Canvas.Maximum, typeValue(base.Maximum, ref.Maximum), n, true)
 	case OpCeilExcl:
-		tighten(&t.Canvas.ExclusiveMaximum, base.ExclusiveMaximum, n, true)
+		tighten(&t.Canvas.ExclusiveMaximum, typeValue(base.ExclusiveMaximum, ref.ExclusiveMaximum), n, true)
 	default:
 		// The four endpoint operations are the only ones applyBound routes to
 		// the numeric axis; an exact size is a pin and was handled there.
@@ -612,27 +612,30 @@ func SetMultipleOf(t Target, value float64, pol Policy) error {
 // bounds under a const, since a pinned value makes them redundant, and that
 // drop is safe only because the value satisfies them: a const the bound
 // excludes would otherwise ship alone and admit a value the type forbids.
+// The type's own const, enum, and bounds are read off the base and off the
+// definition a $ref base names, so a $defs-extracted type judges as the
+// inline one does.
 func SetConst(t Target, v any) error {
 	if t.Canvas.Const != nil && !constraint.ValuesEqual(*t.Canvas.Const, v) {
 		return fmt.Errorf("%w: a different value is already pinned", ErrConflict)
-	}
-
-	base := baseOf(t)
-
-	if base.Const != nil && !constraint.ValuesEqual(*base.Const, v) {
-		return fmt.Errorf("%w: the type already pins a different value", ErrConflict)
 	}
 
 	if t.Canvas.Enum != nil && !constraint.ValuesContain(t.Canvas.Enum, v) {
 		return fmt.Errorf("%w: an enumeration already in force excludes the value", ErrConflict)
 	}
 
-	if base.Enum != nil && !constraint.ValuesContain(base.Enum, v) {
-		return fmt.Errorf("%w: the type's enumeration excludes the value", ErrConflict)
-	}
+	for _, typ := range []*jsonschema.Schema{baseOf(t), refBaseOf(t)} {
+		if typ.Const != nil && !constraint.ValuesEqual(*typ.Const, v) {
+			return fmt.Errorf("%w: the type already pins a different value", ErrConflict)
+		}
 
-	if !constraint.NumericInterval(base).Admits(v) {
-		return fmt.Errorf("%w: the type's numeric bounds exclude the value", ErrConflict)
+		if typ.Enum != nil && !constraint.ValuesContain(typ.Enum, v) {
+			return fmt.Errorf("%w: the type's enumeration excludes the value", ErrConflict)
+		}
+
+		if !constraint.NumericInterval(typ).Admits(v) {
+			return fmt.Errorf("%w: the type's numeric bounds exclude the value", ErrConflict)
+		}
 	}
 
 	value := v
@@ -662,20 +665,24 @@ func SetConst(t Target, v any) error {
 // the allowed set, and that drop is safe only because every member satisfies
 // them. A kind-derived bound admits every member already, because a member
 // parses at the field's kind and overflows there; a bound a type-level hook
-// declared has no such parse, so this is where it holds.
+// declared has no such parse, so this is where it holds. The type's own
+// const, enum, and bounds are read off the base and off the definition a
+// $ref base names, as [SetConst] reads them.
 func SetEnum(t Target, vals []any) error {
 	if len(vals) == 0 {
 		return fmt.Errorf("tagmodel: enumeration %w", ErrNoValues)
 	}
 
-	base := baseOf(t)
-
 	if c := t.Canvas.Const; c != nil && !constraint.ValuesContain(vals, *c) {
 		return fmt.Errorf("%w: the enumeration excludes a value already pinned", ErrConflict)
 	}
 
-	if c := base.Const; c != nil && !constraint.ValuesContain(vals, *c) {
-		return fmt.Errorf("%w: the enumeration excludes the value the type pins", ErrConflict)
+	types := []*jsonschema.Schema{baseOf(t), refBaseOf(t)}
+
+	for _, typ := range types {
+		if c := typ.Const; c != nil && !constraint.ValuesContain(vals, *c) {
+			return fmt.Errorf("%w: the enumeration excludes the value the type pins", ErrConflict)
+		}
 	}
 
 	// A fresh slice rather than an alias: this is public through the
@@ -690,16 +697,18 @@ func SetEnum(t Target, vals []any) error {
 		}
 	}
 
-	if inForce := base.Enum; inForce != nil {
-		enum = intersectValues(inForce, enum)
-		if len(enum) == 0 {
-			return fmt.Errorf("%w: the enumeration shares no value with the type's own", ErrConflict)
+	for _, typ := range types {
+		if inForce := typ.Enum; inForce != nil {
+			enum = intersectValues(inForce, enum)
+			if len(enum) == 0 {
+				return fmt.Errorf("%w: the enumeration shares no value with the type's own", ErrConflict)
+			}
 		}
-	}
 
-	enum = admittedValues(constraint.NumericInterval(base), enum)
-	if len(enum) == 0 {
-		return fmt.Errorf("%w: the type's numeric bounds admit none of the values", ErrConflict)
+		enum = admittedValues(constraint.NumericInterval(typ), enum)
+		if len(enum) == 0 {
+			return fmt.Errorf("%w: the type's numeric bounds admit none of the values", ErrConflict)
+		}
 	}
 
 	t.Canvas.Enum = enum

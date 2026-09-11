@@ -1225,17 +1225,12 @@
 // keeps the stronger side.
 //
 // A const or enum an interpreter declares can disagree with one the type
-// already carries:
-//
-//   - Against an inline override or provider value, an enum intersects
-//     with the type's, and a disagreeing const, or an intersection with
-//     nothing in it, is the conflict above. A numeric bound the value
-//     declares narrows an enum to the members it admits and makes a const
-//     outside it the same conflict.
-//   - Against a $defs-extracted type, the declared value rides beside the
-//     $ref and the two compose conjunctively. An enum intersects and only
-//     tightens, and a disagreeing const composes to a faithfully
-//     unsatisfiable schema rather than aborting generation.
+// already carries. An enum intersects with the type's, and a disagreeing
+// const, or an intersection with nothing in it, is the conflict above. A
+// numeric bound the type declares narrows an enum to the members it admits
+// and makes a const outside it the same conflict. A $defs-extracted type
+// answers through its definition, so the verdict is the one the inline
+// schema gives, and the declared value then rides beside the $ref.
 //
 // # Validation
 //
