@@ -58,3 +58,10 @@
 # spelling a symbol is refused as its U-label would be under idn-hostname.
 #
 "xn--ls8h"	false	an A-label decoding to U+1F4A9, a symbol RFC 5892 DISALLOWS
+#
+# An A-label decoding to a right-to-left label makes the whole name a Bidi
+# domain name, so the RFC 5893 rule holds the LTR labels beside it too, as
+# idn-hostname holds the U-label spelling.
+#
+"xn--kgbechtv.host"	true	an Arabic A-label beside an LTR label that opens on a letter
+"xn--kgbechtv.1host"	false	an LTR label opening on a digit beside an RTL label breaks Bidi condition 1

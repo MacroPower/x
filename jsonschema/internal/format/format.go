@@ -574,6 +574,8 @@ func validateHostnameLabels(s string, banNumericTLD, allowTrailingDot bool) erro
 	}
 
 	labels := strings.Split(s, ".")
+	decodedLabels := make([]string, 0, len(labels))
+
 	for _, label := range labels {
 		if !isLDHLabel(label) {
 			return errInvalidHostname
@@ -585,6 +587,8 @@ func validateHostnameLabels(s string, banNumericTLD, allowTrailingDot bool) erro
 		// contain interior hyphens, including consecutive ones at positions 3-4
 		// (e.g. "ab--cd"), so the IDNA check must not apply to it; the hostname
 		// format is RFC 1123-based and permits such labels.
+		decoded := label
+
 		if hasACEPrefix(label) {
 			u, err := idna.Lookup.ToUnicode(label)
 			if err != nil {
@@ -595,7 +599,20 @@ func validateHostnameLabels(s string, banNumericTLD, allowTrailingDot bool) erro
 			if err != nil {
 				return err
 			}
+
+			decoded = u
 		}
+
+		decodedLabels = append(decodedLabels, decoded)
+	}
+
+	// An A-label decoding to an RTL label makes the whole name a Bidi domain
+	// name, whose LTR labels the RFC 5893 rule holds too; idna.Lookup sees
+	// one label at a time, so the cross-label half is checked here as
+	// idn-hostname checks it.
+	err := checkBidiRule(decodedLabels)
+	if err != nil {
+		return fmt.Errorf("invalid hostname: %w", err)
 	}
 
 	if banNumericTLD && len(labels) > 1 && isAllDigits(labels[len(labels)-1]) {
@@ -2562,7 +2579,7 @@ func validateIDNHostnameLabels(s string, banNumericTLD, allowTrailingDot, asciiS
 
 	err := checkBidiRule(decodedLabels)
 	if err != nil {
-		return err
+		return fmt.Errorf("invalid IDN hostname: %w", err)
 	}
 
 	// When banNumericTLD is set, the top-level label of a name of two or more
@@ -2592,7 +2609,8 @@ func validateIDNHostnameLabels(s string, banNumericTLD, allowTrailingDot, asciiS
 // digit ("1host"). A label-by-label call to idna.Lookup applies the rule to
 // one label at a time and never sees the RTL label next door, so the
 // cross-label half is checked here on the decoded labels, the way idna does
-// when handed the whole name.
+// when handed the whole name. The hostname and idn-hostname formats share
+// it, each prefixing the report with its own name.
 func checkBidiRule(labels []string) error {
 	isBidi := false
 
@@ -2610,7 +2628,7 @@ func checkBidiRule(labels []string) error {
 
 	for _, label := range labels {
 		if !bidirule.ValidString(label) {
-			return errors.New("invalid IDN hostname: label violates the Bidi rule")
+			return errors.New("label violates the Bidi rule")
 		}
 	}
 

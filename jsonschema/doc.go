@@ -1665,7 +1665,10 @@
 //     compatibility forms (the "fi" ligature U+FB01 becomes "fi") and drops
 //     default-ignorable code points such as U+200B and U+FEFF, so a label
 //     that spells "ab" with a zero-width space between the letters is
-//     accepted as "ab".
+//     accepted as "ab". Both apply the RFC 5893 Bidi rule across the whole
+//     name once any label is right-to-left, so an A-label decoding to an
+//     Arabic label beside "1host" is refused by hostname as the U-label
+//     spelling is by idn-hostname.
 //
 // # Traversal
 //
