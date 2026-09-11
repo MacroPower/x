@@ -9,6 +9,7 @@ import (
 	"maps"
 	"math"
 	"math/big"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -5388,4 +5389,47 @@ func TestTagReplacesDefinitionKeywordAcceptsMarshaledNull(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.NoError(t, v.ValidateJSON(t.Context(), inst), "the schema accepts the type's own marshaled output")
+}
+
+// TestTagEnumOnHookDeclaredArrayOverStruct pins that an enum on a field
+// whose hook declares an array over a struct, an interface, or a map, kinds
+// with no Go element type, is refused as a shape with no item schema rather
+// than descending into an element the Go type does not have. The element
+// closure used to call Elem on the struct type and panic.
+func TestTagEnumOnHookDeclaredArrayOverStruct(t *testing.T) {
+	t.Parallel()
+
+	type arrayOverStruct struct{ X int }
+
+	type arrayOverMap map[string]int
+
+	type opaque interface{ Marker() }
+
+	array := jsonschema.TypeSchema{Value: &jsonschema.Schema{Type: "array", Items: &jsonschema.Schema{Type: "string"}}}
+
+	tests := map[string]any{
+		"struct": struct {
+			A arrayOverStruct `json:"a" jsonschema:"enum=a|b"`
+		}{},
+		"interface": struct {
+			A opaque `json:"a" jsonschema:"enum=a|b"`
+		}{},
+		"map": struct {
+			A arrayOverMap `json:"a" jsonschema:"enum=a|b"`
+		}{},
+	}
+
+	for name, typ := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := jsonschema.Generate(t.Context(), reflect.TypeOf(typ),
+				jsonschema.WithTypeSchemaFor[arrayOverStruct](array),
+				jsonschema.WithTypeSchemaFor[opaque](array),
+				jsonschema.WithTypeSchemaFor[arrayOverMap](array),
+			)
+			require.ErrorIs(t, err, jsonschema.ErrConstraintUnsupported)
+			assert.ErrorContains(t, err, "no item or value sub-schema")
+		})
+	}
 }

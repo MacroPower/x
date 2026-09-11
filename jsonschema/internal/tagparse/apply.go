@@ -626,6 +626,12 @@ func (s *applyState) target(shape tagmodel.Shape) tagmodel.Target {
 	return t
 }
 
+// sequenceType reports whether t is a slice or an array, the kinds whose
+// element type an element target classifies.
+func sequenceType(t reflect.Type) bool {
+	return t.Kind() == reflect.Slice || t.Kind() == reflect.Array
+}
+
 // newTarget builds a target for a field or element, recursing lazily into
 // element slots. Each element classifies through its own definition seam,
 // so an element of a $defs-extracted type resolves as the field does.
@@ -633,9 +639,11 @@ func newTarget(shape tagmodel.Shape, canvas, payload *jsonschema.Schema, refs []
 	var elems func() []tagmodel.Target
 
 	// A type=array override names a sequence with no Go element type behind it,
-	// so it supplies no element targets and an element rule reports rather than
-	// descending into a shape the tag invented.
-	if shape.Form == tagmodel.FormArray && shape.Elem != nil {
+	// and a hook can declare an array over a struct, an interface, or a map,
+	// whose Go type has no element either; both supply no element targets,
+	// so an element rule reports rather than descending into a shape the
+	// tag or the hook invented.
+	if shape.Form == tagmodel.FormArray && shape.Elem != nil && sequenceType(shape.Elem) {
 		elems = func() []tagmodel.Target {
 			canvases := elementSchemas(canvas)
 			payloads := elementSchemas(payload)
