@@ -6111,6 +6111,45 @@ func TestWithRootTitle(t *testing.T) {
 		assert.Equal(t, "Extended", s.Title, "JSONSchemaExtend title is never overwritten")
 	})
 
+	t.Run("pointer root wrapper titled beside a hook title", func(t *testing.T) {
+		t.Parallel()
+
+		for _, definitions := range []bool{true, false} {
+			s, err := jsonschema.GenerateFor[*rootTitleExtender](t.Context(),
+				jsonschema.WithRootTitle(true),
+				jsonschema.WithDefinitions(definitions),
+			)
+			require.NoError(t, err)
+
+			assert.Equal(t, "rootTitleExtender", s.Title, "the null wrapper takes the namer's answer")
+			require.Len(t, s.AnyOf, 2)
+
+			value := s.AnyOf[0]
+			if definitions {
+				value = s.Defs["rootTitleExtender"]
+			}
+
+			require.NotNil(t, value)
+			assert.Equal(t, "Extended", value.Title, "the hook's title stays on the value")
+		}
+	})
+
+	t.Run("verbatim pointer root keeps its own title", func(t *testing.T) {
+		t.Parallel()
+
+		s, err := jsonschema.GenerateFor[*rootTitleStruct](t.Context(),
+			jsonschema.WithRootTitle(true),
+			jsonschema.WithTypeSchema(
+				reflect.TypeFor[rootTitleStruct](),
+				jsonschema.TypeSchema{Verbatim: &jsonschema.Schema{Type: "object", Title: "Custom"}},
+			),
+		)
+		require.NoError(t, err)
+
+		assert.Equal(t, "Custom", s.Title, "a verbatim declaration renders no wrapper")
+		assert.Empty(t, s.AnyOf)
+	})
+
 	t.Run("custom namer honored", func(t *testing.T) {
 		t.Parallel()
 

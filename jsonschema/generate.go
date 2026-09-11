@@ -345,7 +345,10 @@ func WithDefaultsFrom(instance any) GenerateOption {
 // display text; the package-prefixed key a $defs collision gives the same
 // type belongs to the $defs entry alone and never becomes the title.
 // Unnamed roots (anonymous structs, maps, slices) leave the
-// title unset. Under [Draft7], a self-referential root stays a bare $ref
+// title unset. A pointer root's null wrapper takes the namer's answer even
+// where a hook titles the wrapped type, since that title sits on the value
+// branch or the $defs entry; a [TypeSchema.Verbatim] declaration renders no
+// wrapper. Under [Draft7], a self-referential root stays a bare $ref
 // into definitions, where a sibling title would be ignored; the title is set
 // on the definitions entry instead, shared by every occurrence of the type.
 // Defaults to false.

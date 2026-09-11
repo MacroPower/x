@@ -193,7 +193,11 @@
 // its title while its $defs entry takes the package-prefixed key. Unnamed
 // roots (anonymous structs, unnamed maps and slices)
 // stay untitled, and a title from [WithTypeSchema], [JSONSchemaProvider], or
-// [JSONSchemaExtender] is never overwritten. Under [Draft7], a
+// [JSONSchemaExtender] is never overwritten. A pointer root's null wrapper
+// (anyOf[value, null]) is a schema of its own that no hook titles, so the
+// namer's answer titles the wrapper while the hook's title stays on the
+// value branch or the $defs entry; a [TypeSchema.Verbatim] declaration
+// renders no wrapper, so its title is the root's. Under [Draft7], a
 // self-referential root stays a bare $ref into definitions, where a reader
 // would ignore a sibling title, so the title lands on the definitions entry,
 // shared by every occurrence of the type.
