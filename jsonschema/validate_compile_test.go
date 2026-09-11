@@ -1352,6 +1352,16 @@ func TestParseSchemaNullKeywordReadsAsAbsent(t *testing.T) {
 			schema: `{"items": null, "type": "array"}`,
 			err:    jsonschema.ErrNilSubschema,
 		},
+		"dependentSchemas": {
+			schema:  `{"dependentSchemas": null, "type": "object"}`,
+			valid:   `{"a": 1}`,
+			invalid: `1`,
+		},
+		"allOf": {
+			schema:  `{"allOf": null, "type": "object"}`,
+			valid:   `{}`,
+			invalid: `1`,
+		},
 		"contains inside a property": {
 			schema: `{"properties": {"a": {"contains": null}}}`,
 			err:    jsonschema.ErrNilSubschema,

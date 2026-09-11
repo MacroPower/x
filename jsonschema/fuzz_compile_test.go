@@ -217,12 +217,12 @@ func metaschemaTolerances() []metaschemaTolerance {
 			},
 		},
 		{
-			reason: "a null under any keyword but const, default, and the sub-schema keywords unmarshals as the keyword's absence, as TestParseSchemaNullKeywordReadsAsAbsent pins, so Compile never sees it where the metaschema types the keyword",
+			reason: "a null under any keyword but const, default, and a keyword holding one sub-schema unmarshals as the keyword's absence, a list or map of sub-schemas included, as TestParseSchemaNullKeywordReadsAsAbsent pins, so Compile never sees it where the metaschema types the keyword",
 			catches: func(doc map[string]any) bool {
 				return anyValue(doc, func(key string, val any) bool {
-					_, subschema := subschemaShapes[key]
+					single := slices.Contains(subschemaShapes[key], schemafield.Single)
 
-					return val == nil && key != "const" && key != "default" && !subschema
+					return val == nil && key != "const" && key != "default" && !single
 				})
 			},
 		},
