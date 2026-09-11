@@ -182,14 +182,18 @@
 // text would agree with neither verdict. The refusal keys on the Go kind,
 // under a jsonschema type= pair as much as without one, so a quoted
 // [encoding/json.Number], a string kind whose text go-playground does read,
-// keeps its string validators. A non-string kind that marshals
-// itself as text, such as [time.Time], takes the same refusal, since
-// go-playground runs the validators over reflect's description of the value
-// and panics on json. So does a []byte field for the format and pattern tags
-// and for base64, since go-playground runs them over reflect's description of
-// the slice, which no base64 text equals, and panics on uri and url. The json
-// tag stays on a []byte: it reads the raw bytes there, as contentMediaType
-// reads the decoded content.
+// keeps its string validators. A kind that marshals itself as text takes
+// the same refusal: a non-string one such as [time.Time] because
+// go-playground runs the validators over reflect's description of the
+// value and panics on json, and a string one because go-playground reads
+// the Go string while the schema judges the text MarshalText writes for
+// it, which the length rules on that shape are refused for already. So does
+// a []byte field for the format and pattern tags and for base64, since
+// go-playground runs them over reflect's description of the slice, which no
+// base64 text equals, and panics on uri and url. The json tag stays on a
+// []byte, and on a []byte alone, since go-playground's isJSON switches on
+// the string and slice kinds and panics on a byte array: it reads the raw
+// bytes there, as contentMediaType reads the decoded content.
 //
 // A json:",string" string field double-encodes (the value abc marshals as the
 // JSON string "\"abc\""), so its scalar rules (eq, ne, oneof, and required's

@@ -4049,3 +4049,36 @@ func TestValidateInterpreter_ElementRulesReachAnExtractedSequence(t *testing.T) 
 		assert.Equal(t, []any{"a", "b"}, items.Enum)
 	})
 }
+
+// suffixedText is a string kind whose marshaled text is not the Go string.
+type suffixedText string
+
+func (s suffixedText) MarshalText() ([]byte, error) {
+	return []byte(string(s) + "1"), nil
+}
+
+// TestValidateInterpreter_StringRulesRefusedOnTextMarshalingString pins that
+// a string validator on a string kind marshaling itself as text is refused.
+// Go-playground reads the Go string while the schema judges the marshaled
+// text, so alpha accepted "abc" there and the pattern rejected "abc1" here.
+// The exception used to rest on the two texts agreeing, which nothing
+// forces, and the length rule on the same shape was refused already.
+func TestValidateInterpreter_StringRulesRefusedOnTextMarshalingString(t *testing.T) {
+	t.Parallel()
+
+	for _, tag := range []string{"alpha", "email", "min=3"} {
+		t.Run(tag, func(t *testing.T) {
+			t.Parallel()
+
+			typ := taggedField(t, struct{ V suffixedText }{}, tag)
+
+			_, err := jsonschema.Generate(t.Context(), typ, validateInterp())
+			require.Error(t, err)
+		})
+	}
+
+	typ := taggedField(t, struct{ V suffixedText }{}, "alpha")
+
+	_, err := jsonschema.Generate(t.Context(), typ, validateInterp())
+	require.ErrorIs(t, err, validate.ErrStringRuleKind)
+}
