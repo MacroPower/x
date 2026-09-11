@@ -28,6 +28,7 @@ import (
 	"github.com/google/jsonschema-go/jsonschema"
 
 	"go.jacobcolvin.com/x/jsonschema/internal/jsonptr"
+	"go.jacobcolvin.com/x/jsonschema/internal/jsontag"
 	"go.jacobcolvin.com/x/jsonschema/internal/keyword"
 	"go.jacobcolvin.com/x/jsonschema/internal/schemafield"
 )
@@ -643,19 +644,22 @@ func (c *cloner) reflectStruct(rv reflect.Value) reflect.Value {
 }
 
 // fieldToken addresses a struct field the way [encoding/json] writes it: the
-// name its json tag gives, or the Go field name when the tag names none. Two
-// shapes render approximately rather than exactly, each for its own reason. A
-// field tagged json:"-" leaves no key in the output, so the Go name stands in
-// for a segment the output has none of. An embedded struct writes no key
-// either, since [encoding/json] promotes its fields to the enclosing object,
-// so the Go type name here is one segment more than the output carries.
+// name its json tag gives, read by the tag grammar [jsontag] ports, or the
+// Go field name when the tag names none. Two shapes render approximately
+// rather than exactly, each for its own reason. A field tagged json:"-"
+// leaves no key in the output, so the Go name stands in for a segment the
+// output has none of. An embedded struct writes no key either, since
+// [encoding/json] promotes its fields to the enclosing object, so the Go
+// type name here is one segment more than the output carries.
 func fieldToken(field reflect.StructField) string {
-	name, _, _ := strings.Cut(field.Tag.Get("json"), ",")
-	if name == "" || name == "-" {
+	// A malformed tag leaves JSONName at the field name, the key the
+	// marshal writes, so the refusal changes nothing here.
+	info, _ := jsontag.Parse(field) //nolint:errcheck // See above.
+	if info.JSONName == "" {
 		return field.Name
 	}
 
-	return name
+	return info.JSONName
 }
 
 // reflectSlice copies a slice, recording the copy before filling it so a slice

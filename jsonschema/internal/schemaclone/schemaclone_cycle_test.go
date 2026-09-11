@@ -203,6 +203,26 @@ func TestCloneCheckedReportsCycles(t *testing.T) {
 			},
 			want: &schemaclone.Cycle{Path: "/a/s/b", Target: "/a"},
 		},
+		"a cycle through a user struct addresses the key encoding/json writes": {
+			build: func() *jsonschema.Schema {
+				// The pointer names the field by the key the marshal writes,
+				// read by the ported tag grammar: a "-," tag names the key
+				// "-", and a quoted name the grammar refuses falls back to
+				// the Go name, where a split on the first comma read "-" as
+				// the exclusion and kept the quote.
+				type linked struct {
+					Dash  any `json:"-,"`    //nolint:staticcheck // The "-," spelling is the case under test.
+					Inner any `json:"'a,b'"` //nolint:staticcheck // So is the quoted name.
+				}
+
+				s := &jsonschema.Schema{}
+				val := any(&linked{Dash: s, Inner: "x"})
+				s.Const = &val
+
+				return s
+			},
+			want: &schemaclone.Cycle{Path: "/const/-"},
+		},
 		"a cycle closed around a schema value": {
 			build: func() *jsonschema.Schema {
 				// Upstream's MarshalJSON takes a value receiver, so a schema
