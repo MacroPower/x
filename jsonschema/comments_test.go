@@ -196,6 +196,17 @@ func TestGoCommentProviderCanceledContext(t *testing.T) {
 		jsonschema.WithDescriptionProvider(jsonschema.NewGoCommentProvider()),
 	)
 	require.ErrorIs(t, err, context.Canceled)
+
+	// A warm package cache changes nothing: the check used to sit inside the
+	// load alone, so a provider that had served the package once returned a
+	// schema under a canceled context.
+	warm := jsonschema.NewGoCommentProvider()
+
+	_, err = jsonschema.GenerateFor[alpha.Widget](t.Context(), jsonschema.WithDescriptionProvider(warm))
+	require.NoError(t, err)
+
+	_, err = jsonschema.GenerateFor[alpha.Widget](ctx, jsonschema.WithDescriptionProvider(warm))
+	require.ErrorIs(t, err, context.Canceled, "a cached package reports the canceled context too")
 }
 
 // mapDescriptionProvider is a deterministic DescriptionProvider backed by maps, the

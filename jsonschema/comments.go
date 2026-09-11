@@ -2,6 +2,7 @@ package jsonschema
 
 import (
 	"context"
+	"fmt"
 	"go/ast"
 	"sync"
 
@@ -135,6 +136,13 @@ func (ce *GoCommentProvider) FieldDescription(ctx context.Context, fc FieldConte
 func (ce *GoCommentProvider) sourceFiles(ctx context.Context, pkgPath string) ([]*ast.File, error) {
 	if pkgPath == "" {
 		return nil, nil
+	}
+
+	// A canceled or expired context is reported whatever the cache holds,
+	// so a warm cache does not turn the documented refusal into a success.
+	err := ctx.Err()
+	if err != nil {
+		return nil, fmt.Errorf("load package %s: %w", pkgPath, err)
 	}
 
 	// Fast path: serve a cached result under a short lock.
