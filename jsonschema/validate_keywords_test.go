@@ -337,6 +337,42 @@ func TestValidateEmptyTypeArrayRejectsEverything(t *testing.T) {
 		require.NoError(t, err)
 		require.Error(t, v.Validate(t.Context(), 1))
 	})
+}
+
+// TestValidateEmptyApplicatorArrayConstrainsNothing pins that an empty
+// allOf, anyOf, oneOf, prefixItems, or Draft-07 items array, which the
+// metaschema refuses, compiles and constrains nothing, as the absent keyword
+// does: the Schema marshals an empty slice as the absent keyword, so no
+// other reading survives a round trip. The empty type array is the one
+// empty list with a reading of its own, pinned above.
+func TestValidateEmptyApplicatorArrayConstrainsNothing(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		schema string
+	}{
+		"allOf":       {schema: `{"allOf": []}`},
+		"anyOf":       {schema: `{"anyOf": []}`},
+		"oneOf":       {schema: `{"oneOf": []}`},
+		"prefixItems": {schema: `{"prefixItems": []}`},
+		"draft-07 items": {
+			schema: `{"$schema": "http://json-schema.org/draft-07/schema#", "items": []}`,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			v, err := jsonschema.CompileJSON(t.Context(), []byte(tc.schema))
+			require.NoError(t, err, "an empty applicator array compiles")
+
+			for _, instance := range []string{`1`, `"s"`, `null`, `[1]`, `{}`} {
+				require.NoError(t, v.ValidateJSON(t.Context(), []byte(instance)),
+					"an empty applicator array constrains nothing: %s", instance)
+			}
+		})
+	}
 
 	t.Run("absent keyword still accepts", func(t *testing.T) {
 		t.Parallel()

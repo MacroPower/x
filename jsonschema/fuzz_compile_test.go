@@ -40,6 +40,10 @@ var (
 		"if", "then", "else", "not", "unevaluatedItems", "unevaluatedProperties", "contentSchema",
 	}
 
+	// EmptyApplicatorKeywords are the schema-array keywords whose empty
+	// array the metaschema refuses and Compile reads as the absent keyword.
+	emptyApplicatorKeywords = []string{"allOf", "anyOf", "oneOf", "prefixItems", "items"}
+
 	// MemberKeywords are the keywords whose value is a map of subschemas. A
 	// null member unmarshals as an absent one, as a null subschema does.
 	memberKeywords = []string{"properties", "patternProperties", "$defs", "definitions", "dependentSchemas"}
@@ -158,6 +162,16 @@ func metaschemaTolerances() []metaschemaTolerance {
 					arr, ok := val.([]any)
 
 					return ok && key == "type" && len(arr) == 0
+				})
+			},
+		},
+		{
+			reason: "an empty allOf, anyOf, oneOf, prefixItems, or Draft-07 items array compiles and constrains nothing, as TestValidateEmptyApplicatorArrayConstrainsNothing pins, since the Schema marshals an empty slice as the absent keyword, where the metaschema requires one member",
+			catches: func(doc map[string]any) bool {
+				return anyValue(doc, func(key string, val any) bool {
+					arr, ok := val.([]any)
+
+					return ok && len(arr) == 0 && slices.Contains(emptyApplicatorKeywords, key)
 				})
 			},
 		},
