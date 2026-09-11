@@ -1552,8 +1552,10 @@ func MustCompile(schema *Schema, opts ...ValidateOption) *Validator {
 // an error wrapping [ErrEmptyRef], [ErrInvalidType], or [ErrInvalidAnchor],
 // and a null under a keyword holding one sub-schema (items, not, contains),
 // which unmarshaling reads as the false schema, one wrapping
-// [ErrNilSubschema]. A null under any other keyword but const and default
-// reads as the keyword's absence.
+// [ErrNilSubschema], and a null element of a string list (required, a
+// dependentRequired or dependencies member), which unmarshaling reads as
+// the empty string, one wrapping [ErrKeywordType]. A null under any other
+// keyword but const and default reads as the keyword's absence.
 // A bound keyword outside float64 range or a count keyword outside the int32
 // range returns an error wrapping [ErrKeywordOutOfRange], and a count
 // spelled with an exponent or a decimal point (1E2, 1.0e2) converts to the
@@ -1627,11 +1629,13 @@ func ParseSchemaValue(doc any) (*Schema, error) {
 // register nothing. A null under a keyword holding one sub-schema (items,
 // not, contains, additionalProperties), which reads as the false schema and
 // would silently reject what the keyword reaches, where a null element of
-// a sub-schema list or map is refused by the vet. Each typed node's
-// [Location] segments resolve its source object, the pairing
-// restoreExactValues uses; a boolean source has no members and is skipped.
-// The error names the pointer of the offending node, in the form the
-// compile-time vet reports for the keyword.
+// a sub-schema list or map is refused by the vet. A null element of a
+// string list (required, a dependentRequired or Draft-07 dependencies
+// member), which reads as the empty string and would silently require a
+// property with the empty name. Each typed node's [Location] segments
+// resolve its source object, the pairing restoreExactValues uses; a boolean
+// source has no members and is skipped. The error names the pointer of the
+// offending node, in the form the compile-time vet reports for the keyword.
 func refuseEmptyKeywords(s *Schema, doc map[string]any) error {
 	return Walk(s, func(loc Location, node *Schema) error {
 		src, ok := resolveDocValue(doc, loc.Segments).(map[string]any)
@@ -1649,6 +1653,11 @@ func refuseEmptyKeywords(s *Schema, doc map[string]any) error {
 			}
 		}
 
+		err := refuseNullStrings(src, string(loc.Pointer))
+		if err != nil {
+			return err
+		}
+
 		if typ, present := src[KeywordType]; present && typ == "" {
 			return fmt.Errorf("%w: %q at %s/%s", ErrInvalidType, "", loc.Pointer, KeywordType)
 		}
@@ -1661,6 +1670,32 @@ func refuseEmptyKeywords(s *Schema, doc map[string]any) error {
 
 		return nil
 	})
+}
+
+// refuseNullStrings refuses a null element of a string list the schema
+// object holds under required, or under a member of dependentRequired or
+// Draft-07 dependencies, which the upstream decode reads as the empty
+// string. A member of dependencies holding a schema is a sub-schema the
+// vet judges, not a string list.
+func refuseNullStrings(src map[string]any, pointer string) error {
+	if list, ok := src[KeywordRequired].([]any); ok && slices.Contains(list, nil) {
+		return fmt.Errorf("%w: null in %s/%s", ErrKeywordType, pointer, KeywordRequired)
+	}
+
+	for _, key := range []string{KeywordDependentRequired, KeywordDependencies} {
+		members, ok := src[key].(map[string]any)
+		if !ok {
+			continue
+		}
+
+		for _, name := range slices.Sorted(maps.Keys(members)) {
+			if list, ok := members[name].([]any); ok && slices.Contains(list, nil) {
+				return fmt.Errorf("%w: null in %s/%s/%s", ErrKeywordType, pointer, key, jsonptr.Escape(name))
+			}
+		}
+	}
+
+	return nil
 }
 
 // subschemaForms maps each sub-schema keyword to the container shapes it can

@@ -1340,10 +1340,13 @@
 // reads it as an unknown keyword and judges nothing. A null under a keyword
 // holding one sub-schema (items, not, contains) returns an error wrapping
 // [ErrNilSubschema], since unmarshaling into a [Schema] directly reads it
-// as the false schema. A null under any other keyword but const and default
-// reads as the keyword's absence, as unmarshaling reads it, a list or map
-// of sub-schemas (allOf, properties, dependentSchemas) included, where the
-// metaschema types the keyword and refuses the null.
+// as the false schema, and a null element of a string list (required, a
+// dependentRequired or Draft-07 dependencies member) one wrapping
+// [ErrKeywordType], since unmarshaling reads it as the empty string. A null
+// under any other keyword but const and default reads as the keyword's
+// absence, as unmarshaling reads it, a list or map of sub-schemas (allOf,
+// properties, dependentSchemas) included, where the metaschema types the
+// keyword and refuses the null.
 //
 // All three also return an error wrapping [ErrInvalidType] for a "type": ""
 // and [ErrInvalidAnchor] for an empty $anchor or $dynamicAnchor in any

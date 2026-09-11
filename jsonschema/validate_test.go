@@ -7386,6 +7386,32 @@ func TestParseSchemaValue(t *testing.T) {
 			err:      jsonschema.ErrKeywordType,
 			contains: "required",
 		},
+
+		// A null element of a string list reads as the empty string, so it
+		// is refused rather than requiring a property with the empty name.
+		"null in required": {
+			doc:      map[string]any{"required": []any{"a", nil}},
+			err:      jsonschema.ErrKeywordType,
+			contains: "null in /required",
+		},
+		"null in a dependentRequired member": {
+			doc:      map[string]any{"dependentRequired": map[string]any{"a/b": []any{nil}}},
+			err:      jsonschema.ErrKeywordType,
+			contains: "null in /dependentRequired/a~1b",
+		},
+		"null in a draft-07 dependencies member": {
+			doc: map[string]any{
+				"$schema":      "http://json-schema.org/draft-07/schema#",
+				"dependencies": map[string]any{"a": []any{nil}},
+			},
+			err:      jsonschema.ErrKeywordType,
+			contains: "null in /dependencies/a",
+		},
+		"null inside enum is data": {
+			doc:      map[string]any{"enum": []any{nil, 1}},
+			instance: nil,
+			valid:    true,
+		},
 	}
 
 	for name, tt := range tests {
