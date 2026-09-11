@@ -5705,3 +5705,71 @@ func (conditionalProvider) JSONSchema(context.Context, jsonschema.TypeContext) (
 		Then: &jsonschema.Schema{Const: new(any(5))},
 	}}, nil
 }
+
+// TestTagTypeOverrideOnCyclePlaceholderCopiesTheBody pins that a type=
+// pair or an interpreter's tag on a field whose extracted type is still
+// being built, a reference the cycle guard minted with no body behind it,
+// applies to a copy of the definition once the body exists, as it does on
+// a field met after the body was built. The copy once found no body and
+// the pair rewrote the bare reference, so the same field described one
+// schema under a root that reached it from inside the cycle and another
+// under a root that reached it from outside.
+func TestTagTypeOverrideOnCyclePlaceholderCopiesTheBody(t *testing.T) {
+	t.Parallel()
+
+	interp := jsonschema.WithTagInterpreter("validate", validate.NewInterpreter())
+
+	roots := map[string]func(context.Context) (*jsonschema.Schema, error){
+		"from the list": func(ctx context.Context) (*jsonschema.Schema, error) {
+			return jsonschema.GenerateFor[cycleKids](ctx, interp)
+		},
+		"from the item": func(ctx context.Context) (*jsonschema.Schema, error) {
+			return jsonschema.GenerateFor[cycleItem](ctx, interp)
+		},
+	}
+
+	for name, generate := range roots {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			s, err := generate(t.Context())
+			require.NoError(t, err)
+
+			require.Contains(t, s.Defs, "cycleItem")
+
+			kids := s.Defs["cycleItem"].Properties["kids"]
+			require.NotNil(t, kids)
+
+			assert.Equal(t, "array", kids.Type)
+			assert.Equal(t, "the kids", kids.Description, "the definition's own keyword")
+			require.NotNil(t, kids.Items, "the definition's element schema")
+			assert.Equal(t, "#/$defs/cycleItem", kids.Items.Ref)
+
+			require.Contains(t, s.Defs["cycleItem"].Properties, "more")
+
+			more := s.Defs["cycleItem"].Properties["more"]
+			require.NotNil(t, more.Items, "the interpreted field's element schema")
+			assert.Equal(t, "#/$defs/cycleItem", more.Items.Ref)
+			assert.Equal(t, "the kids", more.Description)
+		})
+	}
+}
+
+// cycleKids is an extracted list of cycleItem, whose field of cycleKids
+// closes the cycle.
+type cycleKids []cycleItem
+
+func (cycleKids) JSONSchemaExtend(
+	_ context.Context, _ jsonschema.TypeContext, ts *jsonschema.TypeSchema,
+) error {
+	ts.Value.Description = "the kids"
+
+	return nil
+}
+
+// cycleItem holds cycleKids under a type= pair and under an interpreter's
+// tag, so each field copies the definition's body.
+type cycleItem struct {
+	Kids cycleKids `json:"kids" jsonschema:"type=array"`
+	More cycleKids `json:"more" validate:"dive,required"`
+}

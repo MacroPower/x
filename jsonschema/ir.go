@@ -475,6 +475,10 @@ func (g *run) defineType(t reflect.Type, body *node, stance Nullability, pointer
 	if e.body == nil {
 		e.body = body
 		body.isBody = true
+
+		// A field tail waiting on this body, or on one beneath it, runs now,
+		// before a later field copies a body holding that field.
+		g.drainBuildDirectives(false)
 	}
 
 	return g.refNode(e, pointer)

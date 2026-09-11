@@ -111,6 +111,9 @@ type run struct {
 	// a mutual A -> B -> A cycle) is reported instead of recursing forever.
 	refAliasing map[reflect.Type]bool
 	defs        []*defEntry // every def entry, in build order
+	// PendingBuilds holds the field tails waiting on a definition body a
+	// cycle has yet to build, in build order.
+	pendingBuilds []buildDirectives
 }
 
 // typeOverrideResult memoizes one [run.resolveTypeSchema] consultation so
@@ -199,6 +202,10 @@ func (g *run) generate(t reflect.Type) (*Schema, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// Every placeholder has its body once the root is built, so the field
+	// tails still waiting are those whose definitions never took one.
+	g.drainBuildDirectives(true)
 
 	// Phase 2: decide the null admission of every node from the facts the
 	// build recorded and the stances the type-level hooks declared. It runs
@@ -1411,28 +1418,16 @@ func (g *run) buildFieldSchema(
 	// rewrites the node. The tag's other directives wait for the null pass.
 	// A malformed tag is reported where the tag is applied, in
 	// [run.applyFieldTag], which parses it again.
-	directives := fieldDirectives(fi)
-
-	g.inlineTaggedRef(fieldNode, directives, g.fieldInterpreted(fi))
-
-	// Allocate the authored canvas for the field and every sequence/map element
-	// beneath it. Field-level processing (the comment provider, the jsonschema
-	// tag, tag interpreters) declares its facts on the canvas rather than mutating
-	// the type-derived payload, so which schema a keyword lives in is its
-	// provenance and reconcileField composes the two at render.
-	allocCanvasTree(fieldNode, g.draft)
-
-	// Record the field position on the node and on every element beneath it, so
-	// checkCanvasLiterals can name the field a late-refused null literal sits in.
-	assignFieldOrigins(fieldNode, &fieldOrigin{
-		parent: parentType,
-		typ:    numkind.DerefType(fieldType),
-		field:  fi.JSONName,
-	})
-
-	// The jsonschema tag's type= pair replaces the field's type wholesale, a
-	// fact the null pass needs, so it applies here.
-	applyTypeOverrideDirective(fieldNode, directives)
+	g.applyBuildDirectives(buildDirectives{
+		node:        fieldNode,
+		directives:  fieldDirectives(fi),
+		interpreted: g.fieldInterpreted(fi),
+		origin: &fieldOrigin{
+			parent: parentType,
+			typ:    numkind.DerefType(fieldType),
+			field:  fi.JSONName,
+		},
+	}, false)
 
 	// Encoding/json/v2's omitempty omits a field only when its encoded value
 	// is an empty JSON value (null, "", {}, []), so a field whose type never
@@ -1457,6 +1452,77 @@ func (g *run) buildFieldSchema(
 	})
 
 	return nil
+}
+
+// buildDirectives is the tail of a field's build that the jsonschema tag
+// and a tag interpreter's presence decide: the copy of a definition the tag
+// reaches into, the field's canvases, its origins, and the type= pair.
+type buildDirectives struct {
+	node        *node
+	origin      *fieldOrigin
+	directives  []tagparse.Directive
+	interpreted bool
+}
+
+// applyBuildDirectives runs the tail of a field's build. A tag that reaches
+// into a definition copies the definition's body, which a cycle may not
+// have built yet: a reference minted while its type is still being built
+// names an entry with no body, so the copy would find nothing and the
+// type= pair would rewrite the bare reference, and the same field reached
+// from another root, after the body exists, would keep the definition's
+// keywords. Such a tail waits on the run until [run.defineType] fills the
+// body, in build order, so a body a later field copies already carries the
+// earlier field's copy. Force runs the tail regardless, for the drain at
+// the end of the build.
+func (g *run) applyBuildDirectives(bd buildDirectives, force bool) {
+	if !force && (len(bd.directives) > 0 || bd.interpreted) && awaitsBody(bd.node) {
+		g.pendingBuilds = append(g.pendingBuilds, bd)
+
+		return
+	}
+
+	g.inlineTaggedRef(bd.node, bd.directives, bd.interpreted)
+
+	// Allocate the authored canvas for the field and every sequence/map element
+	// beneath it. Field-level processing (the comment provider, the jsonschema
+	// tag, tag interpreters) declares its facts on the canvas rather than mutating
+	// the type-derived payload, so which schema a keyword lives in is its
+	// provenance and reconcileField composes the two at render.
+	allocCanvasTree(bd.node, g.draft)
+
+	// Record the field position on the node and on every element beneath it, so
+	// checkCanvasLiterals can name the field a late-refused null literal sits in.
+	assignFieldOrigins(bd.node, bd.origin)
+
+	// The jsonschema tag's type= pair replaces the field's type wholesale, a
+	// fact the null pass needs, so it applies here.
+	applyTypeOverrideDirective(bd.node, bd.directives)
+}
+
+// drainBuildDirectives runs every waiting field tail whose definitions have
+// bodies, in build order, and requeues the rest. Force runs them all.
+func (g *run) drainBuildDirectives(force bool) {
+	pending := g.pendingBuilds
+	g.pendingBuilds = nil
+
+	for _, bd := range pending {
+		g.applyBuildDirectives(bd, force)
+	}
+}
+
+// awaitsBody reports whether a reference at or beneath the node, through
+// the bodies it references, names a definition whose body a cycle has yet
+// to build.
+func awaitsBody(n *node) bool {
+	pending := false
+
+	walkNodes(n, map[*defEntry]bool{}, func(n *node) {
+		if n.kind == kindRef && n.def.body == nil {
+			pending = true
+		}
+	})
+
+	return pending
 }
 
 // fieldDirectives parses the key=value directives of a field's jsonschema
