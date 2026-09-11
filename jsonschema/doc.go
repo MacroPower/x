@@ -396,8 +396,9 @@
 //     encoding.
 //   - [TypeSchema.Ref] aliases the whole type to another Go type and renders
 //     as a $ref to it. A Ref alias may itself name an aliased type; along
-//     such a chain the target type's stance applies first, then the stance
-//     of the outermost alias that declares one.
+//     such a chain a stance the target type declares wins over every alias,
+//     and where the target declares none the outermost alias that declares
+//     one wins.
 //
 // An extender receives the same envelope with [TypeSchema.Value] set to the
 // reflection-generated schema to mutate in place, and may set

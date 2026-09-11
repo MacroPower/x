@@ -116,9 +116,9 @@ type TypeSchema struct {
 	// as authored. A pointer type names its element type:
 	// the pointer level is no occurrence fact, so only the occurrence's own
 	// pointer-ness and the stances decide whether the alias admits null. A
-	// Ref alias may itself name an aliased type; along such a chain the
-	// target type's stance applies first, then the stance of the outermost
-	// alias that declares one.
+	// Ref alias may itself name an aliased type; along such a chain a
+	// stance the target type declares wins over every alias, and where the
+	// target declares none the outermost alias that declares one wins.
 	Ref reflect.Type
 	// Nullability is the type's null-admission stance (see [Nullability]). It
 	// decorates Value (and Ref); it is ignored for Verbatim.
