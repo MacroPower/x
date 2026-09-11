@@ -10,11 +10,11 @@ import (
 	"math/big"
 	"reflect"
 	"slices"
-	"strconv"
 	"time"
 
 	jsonv2 "encoding/json/v2"
 
+	"go.jacobcolvin.com/x/jsonschema/internal/constraint"
 	"go.jacobcolvin.com/x/jsonschema/internal/content"
 	"go.jacobcolvin.com/x/jsonschema/internal/fieldset"
 	"go.jacobcolvin.com/x/jsonschema/internal/jsonprobe"
@@ -1605,8 +1605,9 @@ func tagOverridesType(directives []tagparse.Directive) bool {
 
 // tagReplacesKeyword reports whether the tag's directives set a replacing
 // keyword (format, pattern, multipleOf) to a value other than the one def
-// declares. A multipleOf the tag misspells replaces nothing here; the tag's
-// application refuses it later.
+// declares. A multipleOf is read by the decimal spelling policy the tag's
+// application reads it by, so a spelling that policy refuses (inf, a hex
+// float, a digit separator) replaces nothing here and is refused later.
 func tagReplacesKeyword(directives []tagparse.Directive, def *Schema) bool {
 	for _, d := range directives {
 		switch d.Key {
@@ -1621,7 +1622,7 @@ func tagReplacesKeyword(directives []tagparse.Directive, def *Schema) bool {
 			}
 
 		case keyword.MultipleOf:
-			v, err := strconv.ParseFloat(d.Value, 64)
+			v, err := constraint.ParseDecimalFloat(d.Value)
 			if err == nil && def.MultipleOf != nil && v != *def.MultipleOf {
 				return true
 			}
