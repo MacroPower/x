@@ -344,7 +344,7 @@ func (g *run) schemaForType(t reflect.Type, pointer bool) (*node, error) {
 	}
 
 	if ok {
-		return g.handleOverrideType(t, ts, pointer)
+		return g.finishTypeOverride(t, ts, pointer)
 	}
 
 	// 2. JSONSchemaProvider interface.
@@ -514,14 +514,6 @@ func (g *run) resolveTypeSchemaUncached(t reflect.Type) (TypeSchema, bool, error
 	}
 
 	return TypeSchema{}, false, nil
-}
-
-// handleOverrideType processes a type resolved by a registered
-// TypeSchemaProvider (WithTypeSchemaProvider or WithTypeSchema). A zero
-// TypeSchema marks the type unrestricted, mirroring a JSONSchemaProvider
-// returning a zero TypeSchema.
-func (g *run) handleOverrideType(t reflect.Type, ts TypeSchema, pointer bool) (*node, error) {
-	return g.finishTypeOverride(t, ts, pointer)
 }
 
 // finishTypeOverride turns a resolved [TypeSchema] into an IR node. It is the
