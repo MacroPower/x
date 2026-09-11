@@ -67,6 +67,10 @@ var (
 		{"a schema field the same keyword names twice through an extension", jsonschema.ErrConflictingSchemaFields},
 		{"a format name no draft this package implements defines", jsonschema.ErrUnknownFormat},
 		{
+			"an $anchor or $dynamicAnchor outside the plain-name grammar under Draft-07, where the keyword is unknown and the metaschema judges nothing",
+			jsonschema.ErrInvalidAnchor,
+		},
+		{
 			"a bound outside float64 range or a count outside the int32 range, which the Schema's fields cannot hold and the metaschema's number type admits",
 			jsonschema.ErrKeywordOutOfRange,
 		},
