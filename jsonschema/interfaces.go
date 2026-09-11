@@ -689,6 +689,26 @@ type FieldContext struct {
 	// for a context the generator builds. A caller-built context has no node
 	// and reads the flag from StructField instead.
 	quoted bool
+	// The scratch field marks a copy [FieldContext.Scratch] made, whose
+	// element contexts write onto fresh canvases rather than the elements'
+	// own.
+	scratch bool
+}
+
+// Scratch returns a copy of the context whose writes reach the schema no
+// further: a fresh canvas, no parent, and element contexts over fresh
+// canvases of their own, nested to any depth. The type, base, shape, and
+// draft stay, so a rule an interpreter runs on the copy is judged as it
+// would be on the field, and only what it writes is discarded. The built-in
+// validate dialect checks the later alternatives of an OR group this way,
+// since go-playground runs them whenever the ones before fail and refuses
+// a tag the schema then leaves alone.
+func (fc FieldContext) Scratch() FieldContext {
+	fc.Canvas = &Schema{}
+	fc.Parent = nil
+	fc.scratch = true
+
+	return fc
 }
 
 // ElementContexts returns a FieldContext for each element schema of a sequence
@@ -717,12 +737,18 @@ func (fc FieldContext) ElementContexts() []FieldContext {
 	elemType := elementType(fc.Type)
 
 	build := func(child *node) FieldContext {
+		canvas := child.authored
+		if fc.scratch {
+			canvas = &Schema{}
+		}
+
 		return FieldContext{
-			Type:   elemType,
-			Canvas: child.authored,
-			Base:   child.view(fc.Draft),
-			Draft:  fc.Draft,
-			node:   child,
+			Type:    elemType,
+			Canvas:  canvas,
+			Base:    child.view(fc.Draft),
+			Draft:   fc.Draft,
+			node:    child,
+			scratch: fc.scratch,
 		}
 	}
 
@@ -900,9 +926,9 @@ func (fc FieldContext) target() tagmodel.Target {
 func (fc FieldContext) targetOf(shape tagmodel.Shape) tagmodel.Target {
 	var elems func() []tagmodel.Target
 
-	if node, typ, draft := fc.node, fc.Type, fc.Draft; node != nil {
+	if node, typ, draft, scratch := fc.node, fc.Type, fc.Draft, fc.scratch; node != nil {
 		elems = func() []tagmodel.Target {
-			children := FieldContext{node: node, Type: typ, Draft: draft}.ElementContexts()
+			children := FieldContext{node: node, Type: typ, Draft: draft, scratch: scratch}.ElementContexts()
 
 			out := make([]tagmodel.Target, len(children))
 			for i := range children {

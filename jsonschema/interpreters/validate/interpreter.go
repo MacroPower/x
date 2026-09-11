@@ -299,13 +299,13 @@ func applyParts(parts []string, field jsonschema.FieldContext, d descent) error 
 // cannot read there, or a rule the field's kind refuses, panics on some
 // value; the interpreter refuses the tag the way it would refuse the same
 // spelling as a bare part. Only the first alternative is interpreted, so the
-// schema stays the stricter side. A structural key was refused by
-// firstAlternative already, and a cross-field validator is registered there
-// and skipped here as it is at the top level.
+// schema stays the stricter side. The copy's element contexts write onto
+// fresh canvases too, so a oneof that retargets onto a sequence's elements
+// reaches the real items no more than a rule on the field does. A
+// structural key was refused by firstAlternative already, and a cross-field
+// validator is registered there and skipped here as it is at the top level.
 func checkAlternatives(raw string, field jsonschema.FieldContext) error {
-	scratch := field
-	scratch.Canvas = &jsonschema.Schema{}
-	scratch.Parent = nil
+	scratch := field.Scratch()
 
 	first := true
 

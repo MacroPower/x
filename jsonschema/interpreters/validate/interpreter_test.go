@@ -3959,3 +3959,43 @@ func TestValidateInterpreter_KindRulesReadTheGoKindUnderTypeOverride(t *testing.
 		})
 	}
 }
+
+// TestValidateInterpreter_LaterAlternativeWritesNoElement pins that a later
+// OR alternative whose rule retargets onto a sequence's elements leaves the
+// real element schemas alone. The scratch copy used to swap the field's
+// canvas only, and the element seam built element contexts from the node
+// beneath, so oneof in a second alternative wrote its enum onto the items
+// while go-playground accepted any value the first alternative admitted.
+func TestValidateInterpreter_LaterAlternativeWritesNoElement(t *testing.T) {
+	t.Parallel()
+
+	type sliceForm struct {
+		Tags []string `json:"tags" validate:"min=1|oneof=a b"`
+	}
+
+	type arrayForm struct {
+		Pair [2]string `json:"pair" validate:"len=2|oneof=x y"`
+	}
+
+	t.Run("slice", func(t *testing.T) {
+		t.Parallel()
+
+		s, err := jsonschema.GenerateFor[sliceForm](t.Context(), validateInterp())
+		require.NoError(t, err)
+
+		tags := s.Properties["tags"]
+		require.NotNil(t, tags.MinItems, "the first alternative reaches the schema")
+		assert.Empty(t, tags.Items.Enum, "a later alternative writes no element enum")
+	})
+
+	t.Run("array", func(t *testing.T) {
+		t.Parallel()
+
+		s, err := jsonschema.GenerateFor[arrayForm](t.Context(), validateInterp())
+		require.NoError(t, err)
+
+		for _, item := range s.Properties["pair"].PrefixItems {
+			assert.Empty(t, item.Enum, "a later alternative writes no element enum")
+		}
+	})
+}

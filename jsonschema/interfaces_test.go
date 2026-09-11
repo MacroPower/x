@@ -457,6 +457,43 @@ func TestFieldContextElementContextsCyclicPointer(t *testing.T) {
 	require.Empty(t, elems)
 }
 
+// TestFieldContextScratchElementsWriteNowhere pins that a scratch copy's
+// element contexts carry fresh canvases: a rule an interpreter applies
+// through them is judged against the elements' shapes and reaches the
+// real element schemas no more than a rule on the copy itself does.
+func TestFieldContextScratchElementsWriteNowhere(t *testing.T) {
+	t.Parallel()
+
+	type host struct {
+		Tags []string `json:"tags" mytag:"x"`
+	}
+
+	interp := jsonschema.TagInterpreterFunc(
+		func(_ context.Context, field jsonschema.FieldContext, _ jsonschema.Tag) error {
+			scratch := field.Scratch()
+			require.NoError(t, scratch.Constraints().Apply(jsonschema.OpFloorIncl, jsonschema.AxisAuto, "1"))
+
+			for _, elem := range scratch.ElementContexts() {
+				require.NoError(t, elem.Constraints().SetEnum([]any{"a", "b"}))
+			}
+
+			elem := field.ElementContexts()[0]
+			require.NoError(t, elem.Constraints().Apply(jsonschema.OpFloorIncl, jsonschema.AxisAuto, "2"))
+
+			return nil
+		},
+	)
+
+	s, err := jsonschema.GenerateFor[host](t.Context(), jsonschema.WithTagInterpreter("mytag", interp))
+	require.NoError(t, err)
+
+	tags := s.Properties["tags"]
+	assert.Nil(t, tags.MinItems, "a write on the scratch copy reaches no schema")
+	assert.Empty(t, tags.Items.Enum, "a write through a scratch element reaches no schema")
+	require.NotNil(t, tags.Items.MinLength, "the field's own element contexts still write")
+	assert.Equal(t, 2, *tags.Items.MinLength)
+}
+
 // TestFieldContextZeroValueSurvives pins the read half of the facade
 // boundary: every exported method on the zero FieldContext, and every method
 // on the zero Constraints, returns rather than panicking, answering as a
@@ -476,6 +513,7 @@ func TestFieldContextZeroValueSurvives(t *testing.T) {
 			assert.NotNil(t, fc.ConstraintsFor(jsonschema.ShapeOf(nil, nil)))
 		},
 		"Shape":            func(t *testing.T) { t.Helper(); assert.Equal(t, jsonschema.FormOpaque, fc.Shape().Form) },
+		"Scratch":          func(t *testing.T) { t.Helper(); assert.NotNil(t, fc.Scratch().Canvas) },
 		"EffectiveFormat":  func(t *testing.T) { t.Helper(); assert.Empty(t, fc.EffectiveFormat()) },
 		"EffectivePattern": func(t *testing.T) { t.Helper(); assert.Empty(t, fc.EffectivePattern()) },
 		"EffectiveContentEncoding": func(t *testing.T) {
