@@ -3331,10 +3331,12 @@ func (NullAdmittingRefProvider) JSONSchema(context.Context, jsonschema.TypeConte
 func TestGenerateFor_NullAdmittingRefFieldConstDropsBounds(t *testing.T) {
 	t.Parallel()
 
-	// When the referenced def is empty (it admits null), the ref carries every
-	// field keyword with no anyOf split. A const still pins the value, so an
-	// authored bound beside the $ref is subsumed and must be dropped, not left to
-	// reject it.
+	// When the referenced def is empty (it admits null), the ref carries its
+	// field keywords without a null branch of its own, except that a const
+	// judges the null, so it rides the value branch of an anyOf whose null
+	// branch keeps the permitted null valid, as it does on the inline form.
+	// A const still pins the value, so an authored bound beside the $ref is
+	// subsumed and must be dropped, not left to reject it.
 	type Container struct {
 		F *NullAdmittingRefProvider `json:"f" jsonschema:"minimum=10,const=3"`
 	}
@@ -3344,15 +3346,16 @@ func TestGenerateFor_NullAdmittingRefFieldConstDropsBounds(t *testing.T) {
 
 	field := s.Properties["f"]
 	require.NotNil(t, field)
-	assert.Nil(t, field.Minimum, "the pinned const subsumes the authored bound")
+	require.Len(t, field.AnyOf, 2, "the const takes the anyOf form beside a null branch")
+	assert.Nil(t, field.AnyOf[0].Minimum, "the pinned const subsumes the authored bound")
 
 	validator, err := jsonschema.Compile(t.Context(), s)
 	require.NoError(t, err)
 
 	assert.NoError(t, validator.ValidateJSON(t.Context(), []byte(`{"f": 3}`)),
 		"the const value must validate even though it is below the dropped minimum")
-	require.Error(t, validator.ValidateJSON(t.Context(), []byte(`{"f": null}`)),
-		"the const rides beside the $ref with no null branch, so it pins out null")
+	require.NoError(t, validator.ValidateJSON(t.Context(), []byte(`{"f": null}`)),
+		"the const rides the value branch, so the permitted null stays valid")
 	assert.Error(t, validator.ValidateJSON(t.Context(), []byte(`{"f": 4}`)),
 		"a non-const value is rejected")
 }

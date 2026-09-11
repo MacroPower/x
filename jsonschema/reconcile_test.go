@@ -467,11 +467,66 @@ func TestReconcileHookApplicatorSparesNull(t *testing.T) {
 		M *hookNotLevels `json:"m"`
 	}
 
+	type nilSliceNotDoc struct {
+		Tags hookNotTags `json:"tags"`
+	}
+
+	type unrestrictedEnumDoc struct {
+		F hookUnrestrictedText `json:"f" jsonschema:"enum=a|b"`
+	}
+
+	type forbidLabelsDoc struct {
+		L hookNilMapLabels `json:"l" nonempty:"true"`
+	}
+
+	forbidEmpty := func(_ context.Context, field jsonschema.FieldContext, _ jsonschema.Tag) error {
+		return field.Constraints().ForbidSchema(&jsonschema.Schema{MaxProperties: new(0)})
+	}
+
+	nonempty := jsonschema.WithTagInterpreter("nonempty", jsonschema.TagInterpreterFunc(forbidEmpty))
+
 	cases := map[string]struct {
 		generate func(defs bool) (*jsonschema.Schema, error)
 		valid    []string
 		invalid  []string
 	}{
+		"a not on a definition body under nil-as-null": {
+			generate: func(defs bool) (*jsonschema.Schema, error) {
+				return jsonschema.GenerateFor[nilSliceNotDoc](t.Context(), jsonschema.WithDefinitions(defs),
+					jsonschema.WithJSONOptions(json.FormatNilSliceAsNull(true)))
+			},
+			valid:   []string{`{"tags":null}`, `{"tags":["a"]}`},
+			invalid: []string{`{"tags":[]}`},
+		},
+		"an enum beside a reference to an unrestricted body": {
+			generate: func(defs bool) (*jsonschema.Schema, error) {
+				return jsonschema.GenerateFor[unrestrictedEnumDoc](t.Context(), jsonschema.WithDefinitions(defs))
+			},
+			valid:   []string{`{"f":null}`, `{"f":"a"}`},
+			invalid: []string{`{"f":"c"}`},
+		},
+		"an interpreter forbid beside a reference to a nil-as-null map": {
+			generate: func(defs bool) (*jsonschema.Schema, error) {
+				return jsonschema.GenerateFor[forbidLabelsDoc](t.Context(), jsonschema.WithDefinitions(defs), nonempty,
+					jsonschema.WithJSONOptions(json.FormatNilMapAsNull(true)))
+			},
+			valid:   []string{`{"l":null}`, `{"l":{"a":"b"}}`},
+			invalid: []string{`{"l":{}}`},
+		},
+		"a not on a pointer root": {
+			generate: func(defs bool) (*jsonschema.Schema, error) {
+				forbidEmptyArray := func(_ context.Context, _ jsonschema.TypeContext, ts *jsonschema.TypeSchema) error {
+					ts.Value.Not = &jsonschema.Schema{MaxItems: new(0)}
+
+					return nil
+				}
+
+				return jsonschema.GenerateFor[*[]string](t.Context(), jsonschema.WithDefinitions(defs),
+					jsonschema.WithTypeSchemaExtenderFor[[]string](jsonschema.TypeSchemaExtenderFunc(forbidEmptyArray)))
+			},
+			valid:   []string{`null`, `["a"]`},
+			invalid: []string{`[]`},
+		},
 		"oneOf": {
 			generate: func(defs bool) (*jsonschema.Schema, error) {
 				return jsonschema.GenerateFor[oneOfDoc](t.Context(), jsonschema.WithDefinitions(defs))
@@ -511,6 +566,38 @@ func TestReconcileHookApplicatorSparesNull(t *testing.T) {
 			})
 		}
 	}
+}
+
+// hookNotTags is a named slice whose extender forbids the empty array, an
+// applicator the array type does not gate, so its null under a nil-as-null
+// format flag must take the anyOf form on the definition body too.
+type hookNotTags []string
+
+func (hookNotTags) JSONSchemaExtend(_ context.Context, _ jsonschema.TypeContext, ts *jsonschema.TypeSchema) error {
+	ts.Value.Not = &jsonschema.Schema{MaxItems: new(0)}
+
+	return nil
+}
+
+// hookUnrestrictedText is a named string whose extender empties the schema,
+// so its extracted definition is the unrestricted body that admits null on
+// its own.
+type hookUnrestrictedText string
+
+func (hookUnrestrictedText) JSONSchemaExtend(
+	_ context.Context, _ jsonschema.TypeContext, ts *jsonschema.TypeSchema,
+) error {
+	*ts.Value = jsonschema.Schema{}
+
+	return nil
+}
+
+// hookNilMapLabels is a named map with a no-op extender, so it is extracted
+// and its definition body carries the null a nil-as-null format flag adds.
+type hookNilMapLabels map[string]string
+
+func (hookNilMapLabels) JSONSchemaExtend(context.Context, jsonschema.TypeContext, *jsonschema.TypeSchema) error {
+	return nil
 }
 
 // hookTypedLevels is a named container whose extender declares the type

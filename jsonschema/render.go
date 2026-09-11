@@ -129,7 +129,11 @@ func (g *run) renderRef(payload *Schema, def *defEntry) *Schema {
 // no branch where the decision says the target already admits null or where
 // an inline leaf is unrestricted (an interface, whose {} admits null). A field
 // or element node never reaches here; render routes it to
-// [run.reconcileField].
+// [run.reconcileField]. A nilable container takes the type-list encoding
+// only when no keyword on it judges the null, by the same rows a field is
+// judged by ([keywordmeta.NullJudging]): a const or enum compares it, and
+// an applicator the type does not gate, such as a hook's not or oneOf,
+// descends into it, so those take the anyOf form that spares the null.
 func (g *run) applyNull(n *node, base *Schema) *Schema {
 	if !n.null.admit {
 		if n.typeListEncoded() {
@@ -139,8 +143,7 @@ func (g *run) applyNull(n *node, base *Schema) *Schema {
 		return base
 	}
 
-	hasConstEnum := base.Const != nil || base.Enum != nil
-	if n.typeListEncoded() && !hasConstEnum {
+	if n.typeListEncoded() && !judgesNull(base, base) {
 		nullTypeList(base, n.containerType())
 
 		return base

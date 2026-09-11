@@ -104,7 +104,13 @@ func (g *run) reconcileField(n *node) *Schema {
 // takes its own Draft-07 sibling wrap in [run.renderRef]. When the
 // referenced definition already admits null (it is empty, or a nilable container
 // whose def body carries the null), the decision says so and the ref carries
-// every keyword with no null branch added.
+// every keyword with no null branch added, unless the canvas holds a
+// value-scoped keyword that judges the null: a const or enum compares it and
+// the allOf a forbidden subschema lands in descends into it, so beside the
+// bare $ref such a keyword would reject the null the definition admits. The
+// null pass runs before any field hook writes the canvas, so that is read
+// here, and the reference then takes the anyOf form its inline counterpart
+// takes, with the keyword on the value branch and the null branch sparing it.
 func (g *run) reconcileRefField(n *node) *Schema {
 	base := schemaclone.Clone(n.payload)
 
@@ -116,7 +122,8 @@ func (g *run) reconcileRefField(n *node) *Schema {
 	// the allOf beside the $ref rather than leaving it as an ignored sibling.
 	g.resolveBounds(n, &merged, base)
 
-	if !n.null.wrap {
+	wrap := n.null.wrap || (n.null.admit && n.authored != nil && judgesNull(n.authored, &Schema{}))
+	if !wrap {
 		return g.renderRef(&merged, n.def)
 	}
 
