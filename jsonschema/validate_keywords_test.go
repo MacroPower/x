@@ -373,6 +373,60 @@ func TestValidateEmptyApplicatorArrayConstrainsNothing(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestValidateDuplicateListMembersReadAsTheSet pins that a duplicate member
+// of a required, type, enum, dependentRequired, or Draft-07 dependencies
+// list, which the metaschema's uniqueItems refuses, compiles and reads as
+// the set the list names, so the duplicate changes nothing.
+func TestValidateDuplicateListMembersReadAsTheSet(t *testing.T) {
+	t.Parallel()
+
+	const draft7 = `"$schema": "http://json-schema.org/draft-07/schema#", `
+
+	tests := map[string]struct {
+		schema  string
+		valid   string
+		invalid string
+	}{
+		"required": {
+			schema:  `{"required": ["a", "a"]}`,
+			valid:   `{"a": 1}`,
+			invalid: `{}`,
+		},
+		"type": {
+			schema:  `{"type": ["string", "string"]}`,
+			valid:   `"s"`,
+			invalid: `1`,
+		},
+		"enum under draft-07": {
+			schema:  `{` + draft7 + `"enum": [1, 1.0]}`,
+			valid:   `1`,
+			invalid: `2`,
+		},
+		"dependentRequired": {
+			schema:  `{"dependentRequired": {"a": ["b", "b"]}}`,
+			valid:   `{"a": 1, "b": 1}`,
+			invalid: `{"a": 1}`,
+		},
+		"dependencies under draft-07": {
+			schema:  `{` + draft7 + `"dependencies": {"a": ["b", "b"]}}`,
+			valid:   `{"a": 1, "b": 1}`,
+			invalid: `{"a": 1}`,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			v, err := jsonschema.CompileJSON(t.Context(), []byte(tc.schema))
+			require.NoError(t, err, "a duplicate list member compiles")
+
+			require.NoError(t, v.ValidateJSON(t.Context(), []byte(tc.valid)))
+			require.Error(t, v.ValidateJSON(t.Context(), []byte(tc.invalid)))
+		})
+	}
 
 	t.Run("absent keyword still accepts", func(t *testing.T) {
 		t.Parallel()

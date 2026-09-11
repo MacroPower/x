@@ -1444,12 +1444,14 @@
 // vocabulary resolution Inline does not run. See Inlining below, where
 // [WithRetrievalBase] and [WithRefFallback] each narrow the rest.
 //
-// Two empty lists the metaschema refuses compile without a sentinel. An
+// Three list shapes the metaschema refuses compile without a sentinel. An
 // empty type array rejects every instance, since no type admits it. An
 // empty allOf, anyOf, oneOf, prefixItems, or Draft-07 items array
 // constrains nothing, as the absent keyword does: the [Schema] marshals an
 // empty slice as the absent keyword, so no other reading survives a round
-// trip.
+// trip. A duplicate member of a required, type, enum, dependentRequired,
+// or Draft-07 dependencies list reads as the set the list names, so the
+// duplicate changes nothing.
 //
 // Compile then resolves every reference reachable from the root ($ref and,
 // under 2020-12, $dynamicRef). A reference that resolves to nothing while its

@@ -40,6 +40,13 @@ var (
 		"if", "then", "else", "not", "unevaluatedItems", "unevaluatedProperties", "contentSchema",
 	}
 
+	// SetKeywords are the keywords whose list the metaschema holds unique
+	// and Compile reads as the set it names, so a duplicate member changes
+	// nothing. Enum is unique under Draft-07 alone; the other two hold
+	// string lists under a member name.
+	setKeywords    = []string{"required", "type", "enum"}
+	setMapKeywords = []string{"dependentRequired", "dependencies"}
+
 	// EmptyApplicatorKeywords are the schema-array keywords whose empty
 	// array the metaschema refuses and Compile reads as the absent keyword.
 	emptyApplicatorKeywords = []string{"allOf", "anyOf", "oneOf", "prefixItems", "items"}
@@ -172,6 +179,26 @@ func metaschemaTolerances() []metaschemaTolerance {
 					arr, ok := val.([]any)
 
 					return ok && len(arr) == 0 && slices.Contains(emptyApplicatorKeywords, key)
+				})
+			},
+		},
+		{
+			reason: "a duplicate member of a required, type, enum, dependentRequired, or Draft-07 dependencies list reads as the set the list names, as TestValidateDuplicateListMembersReadAsTheSet pins, where the metaschema's uniqueItems refuses it",
+			catches: func(doc map[string]any) bool {
+				return anyValue(doc, func(key string, val any) bool {
+					if slices.Contains(setKeywords, key) {
+						return hasDuplicate(val)
+					}
+
+					if members, ok := val.(map[string]any); ok && slices.Contains(setMapKeywords, key) {
+						for _, member := range members {
+							if hasDuplicate(member) {
+								return true
+							}
+						}
+					}
+
+					return false
 				})
 			},
 		},
@@ -327,6 +354,33 @@ func compileDocument(ctx context.Context, data []byte) error {
 	_, err = jsonschema.Compile(ctx, schema, suiteBaseOpts()...)
 
 	return err //nolint:wrapcheck // The sentinel is what the caller classifies.
+}
+
+// hasDuplicate reports whether val is an array holding one JSON value twice,
+// compared by a deterministic encoding, the equality the metaschema's
+// uniqueItems applies over a decoded document.
+func hasDuplicate(val any) bool {
+	list, ok := val.([]any)
+	if !ok {
+		return false
+	}
+
+	seen := make(map[string]bool, len(list))
+
+	for _, elem := range list {
+		data, err := json.Marshal(elem, json.Deterministic(true))
+		if err != nil {
+			return false
+		}
+
+		if seen[string(data)] {
+			return true
+		}
+
+		seen[string(data)] = true
+	}
+
+	return false
 }
 
 // anyValue reports whether pred holds for some member of the document tree,
