@@ -220,8 +220,11 @@
 // Go types map to JSON Schema types by kind:
 //
 //   - The primitive kinds string, bool, int, float32, and float64 map
-//     directly. The bounded integer kinds (int8 through int64, uint8 through
-//     uint64) carry minimum and maximum. The platform-dependent unsigned kinds
+//     directly. The bounded integer kinds int8 through int32 and uint8
+//     through uint32 carry minimum and maximum; int64 and uint64 carry
+//     minimum and exclusiveMaximum, since a float64 cannot name their
+//     largest value and 2^63 or 2^64 as an exclusive bound is the one exact
+//     spelling. The platform-dependent unsigned kinds
 //     uint and uintptr carry minimum: 0 only.
 //   - A pointer *T produces a nullable schema, the base schema wrapped in an
 //     anyOf with a {"type": "null"} branch. Deeper pointers (**T) behave as

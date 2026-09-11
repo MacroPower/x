@@ -134,7 +134,8 @@ how to configure a run.
 | ------------------------------------ | ------------------------------------------------------------------------- |
 | `string`, `bool`, `float64`          | `string`, `boolean`, `number`                                             |
 | `int`                                | `integer`                                                                 |
-| `int8`...`int64`, `uint8`...`uint64` | `integer` with `minimum`/`maximum` bounds                                 |
+| `int8`...`int32`, `uint8`...`uint32` | `integer` with `minimum`/`maximum` bounds                                 |
+| `int64`, `uint64`                    | `integer` with `minimum` and an `exclusiveMaximum` of 2^63 or 2^64        |
 | `uint`, `uintptr`                    | `integer` with `minimum: 0`                                               |
 | `*T`                                 | `anyOf` of the base schema and `{"type":"null"}`                          |
 | `[]T`                                | `array` with an `items` schema                                            |
