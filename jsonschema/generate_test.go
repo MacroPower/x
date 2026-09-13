@@ -1304,7 +1304,7 @@ func TestGenerator(t *testing.T) {
 		})
 	})
 
-	t.Run("GenerateWith is the generic form", func(t *testing.T) {
+	t.Run("Generator.GenerateFor is the generic form", func(t *testing.T) {
 		t.Parallel()
 
 		gen := jsonschema.NewGenerator(
@@ -1313,13 +1313,13 @@ func TestGenerator(t *testing.T) {
 			})),
 		)
 
-		s, err := jsonschema.GenerateWith[UserWithAddress](t.Context(), gen)
+		s, err := gen.GenerateFor[UserWithAddress](t.Context())
 		require.NoError(t, err)
 		assert.NotNil(t, s.Defs["custom_Address"], "the Generator's options apply")
 
 		want, err := gen.Generate(t.Context(), reflect.TypeFor[UserWithAddress]())
 		require.NoError(t, err)
-		assert.Equal(t, want, s, "GenerateWith matches Generator.Generate for the same type")
+		assert.Equal(t, want, s, "Generator.GenerateFor matches Generator.Generate for the same type")
 	})
 }
 
@@ -7908,7 +7908,7 @@ func TestJSONOptionClassificationBehaviour(t *testing.T) {
 
 				// The refusal surfaces from a reusable Generator's runs too.
 				gen := jsonschema.NewGenerator(jsonschema.WithJSONOptions(opt))
-				_, err = jsonschema.GenerateWith[payload](t.Context(), gen)
+				_, err = gen.GenerateFor[payload](t.Context())
 				require.ErrorIs(t, err, jsonschema.ErrUnsupportedJSONOption)
 
 			case jsonopts.ClassIgnored:

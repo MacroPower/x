@@ -41,11 +41,11 @@
 // These one-shot forms apply their options per call. [NewGenerator] applies
 // one option set once and returns a reusable [Generator], the generation-side
 // counterpart of [Compile] and [Validator]. A Generator is safe for concurrent
-// use when its configured hooks are. [GenerateWith] runs GenerateFor under a
-// Generator, since Go methods cannot take type parameters:
+// use when its configured hooks are. [Generator.GenerateFor] is the generic
+// form under a Generator:
 //
 //	gen := jsonschema.NewGenerator(opts...)
-//	schema, err := jsonschema.GenerateWith[MyType](ctx, gen)
+//	schema, err := gen.GenerateFor[MyType](ctx)
 //
 // # Errors
 //

@@ -120,7 +120,7 @@ schema, err := jsonschema.GenerateFor[MyType](ctx, opts...)
 schema, err := jsonschema.Generate(ctx, reflect.TypeFor[MyType](), opts...)
 
 gen := jsonschema.NewGenerator(opts...)
-schema, err := jsonschema.GenerateWith[MyType](ctx, gen)
+schema, err := gen.GenerateFor[MyType](ctx)
 ```
 
 Whether a Go type generates is `encoding/json/v2`'s verdict on a value of that

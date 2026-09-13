@@ -611,11 +611,20 @@ func NewGenerator(opts ...GenerateOption) *Generator {
 
 // Generate generates a JSON Schema for the given [reflect.Type] under the
 // Generator's options. The context follows the [GenerateFor] contract. For
-// a statically known type, [GenerateWith] is the generic form:
-//
-//	jsonschema.GenerateWith[MyType](ctx, gen)
+// a statically known type, [Generator.GenerateFor] is the generic form.
 func (gn *Generator) Generate(ctx context.Context, t reflect.Type) (*Schema, error) {
 	return gn.config.forRun(ctx).generate(t)
+}
+
+// GenerateFor generates a JSON Schema for the type parameter T under the
+// Generator's options, so a caller who built the Generator once keeps the
+// generic entry point instead of spelling out [reflect.TypeFor] at every
+// [Generator.Generate] call. The context follows the [GenerateFor] contract.
+//
+//	gen := jsonschema.NewGenerator(opts...)
+//	schema, err := gen.GenerateFor[MyType](ctx)
+func (gn *Generator) GenerateFor[T any](ctx context.Context) (*Schema, error) {
+	return gn.Generate(ctx, reflect.TypeFor[T]())
 }
 
 // GenerateFor generates a JSON Schema for the type parameter T.
@@ -624,19 +633,7 @@ func (gn *Generator) Generate(ctx context.Context, t reflect.Type) (*Schema, err
 // with every comment lookup, so the built-in provider's package loading can
 // honor cancellation and deadlines.
 func GenerateFor[T any](ctx context.Context, opts ...GenerateOption) (*Schema, error) {
-	return Generate(ctx, reflect.TypeFor[T](), opts...)
-}
-
-// GenerateWith is [GenerateFor] under a reusable [Generator]: gen's options
-// apply and the type comes from the type parameter, so a caller who built
-// the Generator once keeps the generic entry point instead of spelling out
-// [reflect.TypeFor] at every [Generator.Generate] call. It exists as a
-// package function because Go methods cannot take type parameters.
-//
-//	gen := jsonschema.NewGenerator(opts...)
-//	schema, err := jsonschema.GenerateWith[MyType](ctx, gen)
-func GenerateWith[T any](ctx context.Context, gen *Generator) (*Schema, error) {
-	return gen.Generate(ctx, reflect.TypeFor[T]())
+	return NewGenerator(opts...).GenerateFor[T](ctx)
 }
 
 // MustGenerateFor is [GenerateFor] with [context.Background] but panics on
