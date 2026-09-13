@@ -94,7 +94,8 @@ func FromDocument(v any) (Value, bool) {
 	return out, true
 }
 
-// marshalV1 marshals v with [encoding/json] v1 and reports ok=false where the
+// marshalV1 marshals v under the [encoding/json] v1 option bundle, the
+// exact call the v1 entry point makes, and reports ok=false where the
 // marshal returns an error or v's own marshaler panics. A recovered panic
 // leaves the unnamed results at their zero values, nil and false, which is
 // the refusal the caller expects.
@@ -105,7 +106,7 @@ func marshalV1(v any) ([]byte, bool) {
 		}
 	}()
 
-	data, err := jsonv1.Marshal(v)
+	data, err := json.Marshal(v, jsonv1.DefaultOptionsV1())
 
 	return data, err == nil
 }
