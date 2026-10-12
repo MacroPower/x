@@ -8,7 +8,8 @@ referenced remotely as `github.com/MacroPower/x/toolchains/<module>@<ref>`.
 
 - **`security`** — Trivy scanner: `scan-source`/`scan-image` (gate scans that
   fail on findings) and `scan-source-sarif`/`scan-image-sarif` (non-gating,
-  emit SARIF for GitHub Code Scanning).
+  emit SARIF for GitHub Code Scanning). Every scan passes `--config=`, so a
+  `trivy.yaml` in the scanned source cannot change scan options.
 - **`zizmor`** — GitHub Actions workflow linter: `lint` (+check, runs zizmor
   over `.github/workflows`; `--config` is passed only when `config-path` is set,
   otherwise zizmor auto-discovers a config or uses its built-in defaults, so it

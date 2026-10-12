@@ -26,6 +26,12 @@ const (
 
 	// sarifOutput is the in-container path where SARIF results are written.
 	sarifOutput = "/tmp/trivy-results.sarif"
+
+	// noConfigFlag stops Trivy from loading a trivy.yaml from the working
+	// directory. The scanned source mounts there, so without it a change to
+	// the scanned repository could set options such as skip-dirs that weaken
+	// the scan. Trivy still reads a .trivyignore file.
+	noConfigFlag = "--config="
 )
 
 // Security scans source dependencies and container images for known
@@ -122,12 +128,14 @@ func (m *Security) trivyBase() *dagger.Container {
 
 // ScanSource scans source dependencies for known vulnerabilities.
 // Reports the configured severities. Trivy auto-discovers a .trivyignore
-// file in the scanned directory for CVE suppression.
+// file in the scanned directory for CVE suppression, but ignores a trivy.yaml
+// there.
 func (m *Security) ScanSource(ctx context.Context) error {
 	_, err := m.trivyBase().
 		WithMountedDirectory(".", m.Source).
 		WithExec([]string{
 			"trivy", "fs",
+			noConfigFlag,
 			"--scanners=" + m.Scanners,
 			"--pkg-types=" + m.SourcePkgTypes,
 			"--exit-code=1",
@@ -149,6 +157,7 @@ func (m *Security) ScanImage(
 		WithMountedFile("target.tar", target.AsTarball()).
 		WithExec([]string{
 			"trivy", "image",
+			noConfigFlag,
 			"--scanners=" + m.Scanners,
 			"--pkg-types=" + m.ImagePkgTypes,
 			"--exit-code=1",
@@ -172,6 +181,7 @@ func (m *Security) ScanSourceSarif() *dagger.File {
 		WithMountedDirectory(".", m.Source).
 		WithExec([]string{
 			"trivy", "fs",
+			noConfigFlag,
 			"--scanners=" + m.Scanners,
 			"--pkg-types=" + m.SourcePkgTypes,
 			"--severity=" + m.Severity,
@@ -199,6 +209,7 @@ func (m *Security) ScanImageSarif(
 		WithMountedFile("target.tar", target.AsTarball()).
 		WithExec([]string{
 			"trivy", "image",
+			noConfigFlag,
 			"--scanners=" + m.Scanners,
 			"--pkg-types=" + m.ImagePkgTypes,
 			"--severity=" + m.Severity,
