@@ -45,6 +45,12 @@ const (
 	devboxUser = "devbox"
 )
 
+// scanExclude lists the source paths [Ci.Security] and
+// [Ci.SecuritySourceSarif] leave out of the Trivy scan. The Dagger modules
+// there only drive CI and never ship, and their Go SDK dependencies move with
+// `task dagger:update` rather than with the vulnerability database.
+var scanExclude = []string{"ci", "toolchains"}
+
 // Ci provides CI functions for the x repository. Create instances with [New].
 type Ci struct {
 	// Project source directory.
@@ -81,7 +87,7 @@ func New(
 			RemoteURL: repoRemoteURL,
 		}),
 		Scanner: dag.Security(dagger.SecurityOpts{
-			Source:         source,
+			Source:         source.Filter(dagger.DirectoryFilterOpts{Exclude: scanExclude}),
 			CacheNamespace: cacheNamespace + ":security",
 		}),
 		Zizmor: dag.Zizmor(dagger.ZizmorOpts{
@@ -146,9 +152,8 @@ func (m *Ci) TestIntegration(ctx context.Context) error {
 
 // Security scans source dependencies for known vulnerabilities by composing the
 // security toolchain (Trivy) directly, the way the release functions compose
-// the goreleaser toolchain. The scanned source is the `ci` toolchain's source,
-// whose root dagger.json customization already excludes toolchains and
-// .worktrees (where the intentionally-vulnerable test fixtures live).
+// the goreleaser toolchain. The scan covers the project source without the
+// Dagger modules in ci and toolchains, which only drive CI (see scanExclude).
 //
 // +check
 func (m *Ci) Security(ctx context.Context) error {
