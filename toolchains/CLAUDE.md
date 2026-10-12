@@ -63,8 +63,9 @@ referenced remotely as `github.com/MacroPower/x/toolchains/<module>@<ref>`.
 - **`devbox`** — Runs commands inside a project's Devbox (Nix-backed)
   environment so CI uses the same toolchain as local development: `base` (the
   devbox image with the Nix store mounted as a seeded cache volume), `install`
-  (adds the project's `devbox.json` + lockfile and runs `devbox install`, keyed
-  on the lockfile so the package-realisation layer caches), `with-source` (the
+  (adds the project's `devbox.json` or `devbox.jsonc` + lockfile and runs
+  `devbox install`, keyed on the lockfile so the package-realisation layer
+  caches), `with-source` (the
   installed environment with full source overlaid, for chaining or benchmark
   wrapping), and `run` (executes an arbitrary command via `devbox run --`,
   returning stdout). The default image is built in-module on the debian base

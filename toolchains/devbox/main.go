@@ -163,15 +163,15 @@ func (m *Devbox) image() (*dagger.Container, string) {
 	return ctr, "devbox-" + devboxVersion + "-nix-" + nixVersion
 }
 
-// Install returns a container with the project's devbox.json (and lockfile)
-// added and `devbox install` run, so the declared packages are realised into
-// the cached Nix store. Only the manifest is added, so the install layer is
-// keyed on the lockfile rather than on every source change.
+// Install returns a container that holds the project's devbox.json or
+// devbox.jsonc and lockfile, after `devbox install` realises the declared
+// packages into the cached Nix store. It adds only the manifest, so the
+// lockfile keys the install layer rather than every source change.
 func (m *Devbox) Install() *dagger.Container {
 	return m.Base().
 		WithWorkdir(workdir).
 		WithDirectory(workdir, m.Source, dagger.ContainerWithDirectoryOpts{
-			Include: []string{"devbox.json", "devbox.lock", "devbox.d/**"},
+			Include: []string{"devbox.json", "devbox.jsonc", "devbox.lock", "devbox.d/**"},
 			Owner:   containerUser,
 		}).
 		WithExec([]string{"devbox", "install"})
