@@ -17,7 +17,7 @@ su ubuntu <<'EOF'
 EOF
 chown -R ubuntu:ubuntu /nix
 
-export DEVBOX_USE_VERSION="0.13.7"
+export DEVBOX_USE_VERSION="0.18.4" # renovate: datasource=github-releases depName=jetify-com/devbox
 export DEVBOX_USER="ubuntu"
 export PATH="/home/${DEVBOX_USER}/.nix-profile/bin:$PATH"
 
