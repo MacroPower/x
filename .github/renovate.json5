@@ -14,6 +14,25 @@
     "gomodTidy",
     "gomodUpdateImportPaths",
   ],
+  packageRules: [
+    // `task dagger:update` bumps the Dagger CLI in lockstep with every
+    // dagger.json engineVersion and the devbox flake pin, so Renovate must not
+    // move the dagger-for-github version input on its own.
+    {
+      matchManagers: ["github-actions"],
+      matchDepNames: ["dagger"],
+      enabled: false,
+    },
+    // The Dagger Go SDK's telemetry builds only against the OpenTelemetry
+    // versions it pins, and dagger develop rewrites the otel log replace pins
+    // on every run. `task dagger:update` moves these packages with the SDK.
+    {
+      matchManagers: ["gomod"],
+      matchFileNames: ["ci/**", "toolchains/**"],
+      matchPackageNames: ["go.opentelemetry.io/otel", "go.opentelemetry.io/otel/**"],
+      enabled: false,
+    },
+  ],
   customManagers: [
     // Tool and image versions pinned as Go constants in the Dagger toolchain
     // modules and the ci module, annotated with `// renovate:` comments, e.g.:
