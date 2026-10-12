@@ -4,8 +4,8 @@
     "go": "1.27.0",
     "go-task": "3.53.1",
     "lefthook": "2.1.10",
-    "golangci-lint": "2.13.1",
     "prettier": "3.9.6",
+    "golangci-lint": "2.14.0",
     "gcc": {
       "version": "16.2.0",
       "platforms": ["aarch64-linux", "x86_64-linux"]

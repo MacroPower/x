@@ -802,10 +802,10 @@
 //     additionalProperties, or its unevaluatedProperties beside allOf
 //     composition under [Draft2020]. Beside allOf under [Draft7] the object
 //     stays open, the dialect's usual degradation.
-//   - A jsontext.Value fallback leaves the object open, since its members are
-//     arbitrary JSON.
-//   - A nil map, a nil pointer, and an empty jsontext.Value contribute no
-//     members, so a fallback never adds a null branch.
+//   - A [encoding/json/jsontext.Value] fallback leaves the object open, since
+//     its members are arbitrary JSON.
+//   - A nil map, a nil pointer, and an empty [encoding/json/jsontext.Value]
+//     contribute no members, so a fallback never adds a null branch.
 //   - Generation ignores non-json tags on the fallback field, since the field
 //     emits no property for a tag interpreter to constrain.
 //   - One fallback survives per type, on v2's rules. The shallowest wins, and
@@ -848,13 +848,13 @@
 //     annihilating on same-depth ties with ties inside the embed included,
 //     and applying the tag tie-break), even though they never become
 //     properties. The embed's allOf branch carries their assertions. A
-//     composed embed's own fallback (an embedded map or jsontext.Value)
-//     takes part in the fallback dominance the same way, so an embed whose
-//     fallback loses to a shallower one, or to a same-depth tie, is
-//     shadowed and its branch becomes conditional. The parent's
-//     extra-member constraint follows the kept fallback, and opens where
-//     the shadowed embed still promotes a name, as under any partial
-//     shadowing.
+//     composed embed's own fallback (an embedded map or
+//     [encoding/json/jsontext.Value]) takes part in the fallback dominance
+//     the same way, so an embed whose fallback loses to a shallower one, or
+//     to a same-depth tie, is shadowed and its branch becomes conditional.
+//     The parent's extra-member constraint follows the kept fallback, and
+//     opens where the shadowed embed still promotes a name, as under any
+//     partial shadowing.
 //
 // Under allOf composition, [Draft2020] puts unevaluatedProperties: false on
 // the parent in place of additionalProperties: false, and each promoted name

@@ -402,10 +402,9 @@ func sourceName(source coverageSource) string {
 // declaredName reduces a qualified function name to the identifier the source
 // declares, the key the index uses.
 func declaredName(qualified string) string {
-	dot := strings.LastIndex(qualified, ".")
-	if dot < 0 {
-		return qualified
+	if _, name, ok := strings.CutLast(qualified, "."); ok {
+		return name
 	}
 
-	return qualified[dot+1:]
+	return qualified
 }
