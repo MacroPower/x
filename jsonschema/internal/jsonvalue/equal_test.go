@@ -374,7 +374,7 @@ func TestOverLongCanonicallySmallNumbers(t *testing.T) {
 	assert.True(t, jsonvalue.HasDuplicates(instances(t, []any{long1, jsonv1.Number(string(long1))})))
 	assert.False(t, jsonvalue.HasDuplicates(instances(t, []any{long1, long2})))
 
-	assert.Less(t, time.Since(start), 5*time.Second,
+	assertWithin(t, time.Since(start), 5*time.Second,
 		"over-long literals must stay on the linear guarded path")
 }
 
@@ -409,8 +409,21 @@ func TestOverCapExponentRunsCompareLinearly(t *testing.T) {
 	assert.False(t, jsonvalue.HasDuplicates(instances(t, []any{a, b})))
 	assert.True(t, jsonvalue.HasDuplicates(instances(t, []any{c, d})))
 
-	assert.Less(t, time.Since(start), 15*time.Second,
+	assertWithin(t, time.Since(start), 15*time.Second,
 		"over-cap exponent runs must compare in linear time")
+}
+
+// assertWithin checks a wall-clock regression bound. Coverage instrumentation
+// slows these paths several-fold, so the bound applies only when coverage is
+// off. The plain test run still enforces it.
+func assertWithin(t *testing.T, elapsed, limit time.Duration, msg string) {
+	t.Helper()
+
+	if testing.CoverMode() != "" {
+		return
+	}
+
+	assert.Less(t, elapsed, limit, msg)
 }
 
 // TestEqualHandBuiltShapes pins the document view of the container shapes a
