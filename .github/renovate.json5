@@ -44,6 +44,12 @@
       matchPackageNames: ["renovate", "ghcr.io/renovatebot/renovate"],
       groupName: "renovate",
     },
+    // The devbox toolchain module and the Renovate workflow install the same
+    // devbox release.
+    {
+      matchPackageNames: ["jetify-com/devbox"],
+      groupName: "devbox",
+    },
   ],
   customManagers: [
     // Tool and image versions pinned as Go constants in the Dagger toolchain
@@ -71,6 +77,17 @@
         '(?<currentValue>v?[0-9][^\\s#"]*)\\s*#\\s*renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)',
       ],
       versioningTemplate: "{{#if (equals datasource 'docker')}}docker{{else}}semver-coerced{{/if}}",
+    },
+    // Tool versions pinned in shell scripts as quoted values annotated with
+    // `# renovate:`, e.g. the devbox release the Renovate workflow installs:
+    //   export DEVBOX_USE_VERSION="0.18.4" # renovate: datasource=github-releases depName=jetify-com/devbox
+    {
+      customType: "regex",
+      managerFilePatterns: ["/\\.sh$/"],
+      matchStrings: [
+        '"(?<currentValue>v?[0-9][^"]*)"\\s*#\\s*renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)',
+      ],
+      versioningTemplate: "semver-coerced",
     },
   ],
 }
