@@ -3,7 +3,7 @@ module go.jacobcolvin.com/x/jsonschema/interpreters/validate/differentialtest
 go 1.27.0
 
 require (
-	github.com/go-playground/validator/v10 v10.30.4
+	github.com/go-playground/validator/v10 v10.30.5
 	github.com/stretchr/testify v1.12.1
 	go.jacobcolvin.com/x/jsonschema v0.0.0-00010101000000-000000000000
 )
