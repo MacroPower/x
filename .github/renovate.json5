@@ -38,6 +38,12 @@
       matchIsBreaking: true,
       automerge: false,
     },
+    // The workflow's Renovate image and the validator in ci/main.go move
+    // together.
+    {
+      matchPackageNames: ["renovate", "ghcr.io/renovatebot/renovate"],
+      groupName: "renovate",
+    },
   ],
   customManagers: [
     // Tool and image versions pinned as Go constants in the Dagger toolchain
