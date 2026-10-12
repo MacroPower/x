@@ -198,7 +198,7 @@ func (m *Ci) LintRenovate(ctx context.Context) error {
 		WithExec([]string{"npm", "install", "-g", "renovate@" + renovateVersion}).
 		WithMountedFile("/src/"+renovateConfig, m.Source.File(renovateConfig)).
 		WithWorkdir("/src").
-		WithExec([]string{"renovate-config-validator", renovateConfig}).
+		WithExec([]string{"renovate-config-validator", "--strict", "--no-global", renovateConfig}).
 		Sync(ctx)
 	return err
 }
