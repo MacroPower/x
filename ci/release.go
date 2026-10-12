@@ -28,10 +28,10 @@ import (
 
 const (
 	// goreleaserVersion pins the GoReleaser release used for package builds.
-	goreleaserVersion = "v2.18.1" // renovate: datasource=github-releases depName=goreleaser/goreleaser
+	goreleaserVersion = "v2.18.3" // renovate: datasource=github-releases depName=goreleaser/goreleaser
 
 	// ghVersion pins the GitHub CLI used to create GitHub releases.
-	ghVersion = "v2.100.0" // renovate: datasource=github-releases depName=cli/cli
+	ghVersion = "v2.102.0" // renovate: datasource=github-releases depName=cli/cli
 
 	// debianImage is the runtime base for package container images and the
 	// tool-download containers, pulled from Docker's verified publisher space on
