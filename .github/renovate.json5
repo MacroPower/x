@@ -32,6 +32,12 @@
       matchPackageNames: ["go.opentelemetry.io/otel", "go.opentelemetry.io/otel/**"],
       enabled: false,
     },
+    // Renovate treats every 0.x update as breaking, so these updates wait for
+    // review instead of automerging.
+    {
+      matchIsBreaking: true,
+      automerge: false,
+    },
   ],
   customManagers: [
     // Tool and image versions pinned as Go constants in the Dagger toolchain
