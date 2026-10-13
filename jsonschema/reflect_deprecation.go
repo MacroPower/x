@@ -57,40 +57,58 @@ func tagDeprecation(td tagparse.Deprecation) deprecation {
 // A doc with no such paragraph states nothing, and the first paragraph wins
 // over a later one.
 func commentDeprecation(doc string) deprecation {
-	var para []string
-
-	flush := func() (deprecation, bool) {
-		if len(para) == 0 {
-			return deprecation{}, false
-		}
-
-		text := strings.Join(para, " ")
-		para = para[:0]
-
-		rest, ok := strings.CutPrefix(text, deprecatedPrefix)
-		if !ok || (rest != "" && rest[0] != ' ') {
-			return deprecation{}, false
-		}
-
-		return deprecation{message: strings.TrimSpace(rest), stated: true, deprecated: true}, true
+	message, _, _, ok := deprecatedParagraph(doc)
+	if !ok {
+		return deprecation{}
 	}
 
-	for line := range strings.Lines(doc) {
-		line = strings.TrimSpace(line)
-		if line != "" {
-			para = append(para, line)
+	return deprecation{message: message, stated: true, deprecated: true}
+}
+
+// deprecatedParagraph finds the first paragraph of doc that opens with the
+// deprecated prefix and a space, or holds the prefix alone. A paragraph is
+// a span of unindented lines between blank lines, as Go doc comments read
+// one. An indented line starts a code block or a list item, so it ends the
+// paragraph before it and belongs to none. It returns the message of the
+// paragraph, with each line break replaced by a space, and the half-open
+// range of its lines among the lines of doc.
+func deprecatedParagraph(doc string) (string, int, int, bool) {
+	lines := strings.Split(doc, "\n")
+	start := -1
+
+	for i := 0; i <= len(lines); i++ {
+		if i < len(lines) && isParagraphLine(lines[i]) {
+			if start < 0 {
+				start = i
+			}
 
 			continue
 		}
 
-		if d, ok := flush(); ok {
-			return d
+		if start < 0 {
+			continue
 		}
+
+		para := make([]string, 0, i-start)
+		for _, line := range lines[start:i] {
+			para = append(para, strings.TrimSpace(line))
+		}
+
+		rest, ok := strings.CutPrefix(strings.Join(para, " "), deprecatedPrefix)
+		if ok && (rest == "" || rest[0] == ' ') {
+			return strings.TrimSpace(rest), start, i, true
+		}
+
+		start = -1
 	}
 
-	d, _ := flush()
+	return "", 0, 0, false
+}
 
-	return d
+// isParagraphLine reports whether line belongs to a paragraph of a Go doc
+// comment: it holds text and starts with no space or tab.
+func isParagraphLine(line string) bool {
+	return strings.TrimSpace(line) != "" && line[0] != ' ' && line[0] != '\t'
 }
 
 // settleFieldDeprecation decides the deprecation of the field p of the

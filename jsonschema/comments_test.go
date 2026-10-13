@@ -541,6 +541,20 @@ func TestFieldDescriptionDeprecation(t *testing.T) {
 		"prefix without a space": {
 			doc: "Deprecated:use length.",
 		},
+		"code block": {
+			doc: "Size is the size.\n\nExample:\n\n\tDeprecated: this is code",
+		},
+		"code block after a paragraph line": {
+			doc: "Size is the size, as in\n\tDeprecated: this is code",
+		},
+		"list item": {
+			doc: "Size is one of:\n\n  - Deprecated: a list item",
+		},
+		"paragraph after a code block": {
+			doc:        "Size is the size.\n\n\tsize := 1\n\nDeprecated: use length.",
+			message:    "use length.",
+			deprecated: true,
+		},
 	}
 
 	for name, tc := range tests {
