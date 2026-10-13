@@ -32,6 +32,20 @@ type Deprecation struct {
 	Deprecated bool
 }
 
+// state records one deprecated or deprecationMessage pair.
+func (d *Deprecation) state(key, value string) error {
+	if key == keyword.DeprecationMessage {
+		return d.stateMessage(value)
+	}
+
+	b, err := parseFlag(key, value)
+	if err != nil {
+		return err
+	}
+
+	return d.stateFlag(b)
+}
+
 // stateFlag records a deprecated pair.
 func (d *Deprecation) stateFlag(deprecated bool) error {
 	if !deprecated && d.Message != "" {
@@ -61,49 +75,51 @@ func (d *Deprecation) stateMessage(message string) error {
 	return nil
 }
 
+// applyDeprecation applies one deprecated or deprecationMessage pair. A key
+// may appear once in a tag, as every overwriting key may, and the pair joins
+// the deprecation the tag states. The canvas, when the state has one, takes
+// the mark that the deprecation reads.
+func (s *applyState) applyDeprecation(key, value string) error {
+	err := s.checkRepeat(key)
+	if err != nil {
+		return err
+	}
+
+	err = s.deprecation.state(key, value)
+	if err != nil {
+		return err
+	}
+
+	if s.canvas != nil {
+		s.canvas.Deprecated = s.deprecation.Deprecated
+	}
+
+	return nil
+}
+
 // ParseDeprecation reads the deprecation the jsonschema tag of an embedded
 // field states, for the fields that the embed promotes into its parent. It
 // reads the deprecated and deprecationMessage pairs alone, under the rules
 // [Apply] holds them to, and passes over every other pair, which an
 // embedded field that promotes its fields does not apply.
 func ParseDeprecation(tag string) (Deprecation, error) {
-	var d Deprecation
-
 	directives, _, err := Parse(tag)
 	if err != nil {
-		return d, err
+		return Deprecation{}, err
 	}
 
-	seen := map[string]bool{}
+	s := &applyState{seen: map[string]bool{}}
 
 	for _, dir := range directives {
-		switch dir.Key {
-		case keyword.Deprecated, keyword.DeprecationMessage:
-		default:
+		if dir.Key != keyword.Deprecated && dir.Key != keyword.DeprecationMessage {
 			continue
 		}
 
-		if seen[dir.Key] {
-			return d, fmt.Errorf("jsonschema tag: key %q is set twice in one tag", dir.Key)
-		}
-
-		seen[dir.Key] = true
-
-		if dir.Key == keyword.DeprecationMessage {
-			err = d.stateMessage(dir.Value)
-		} else {
-			var b bool
-
-			b, err = parseFlag(dir.Key, dir.Value)
-			if err == nil {
-				err = d.stateFlag(b)
-			}
-		}
-
+		err := s.applyDeprecation(dir.Key, dir.Value)
 		if err != nil {
-			return d, err
+			return Deprecation{}, err
 		}
 	}
 
-	return d, nil
+	return s.deprecation, nil
 }
