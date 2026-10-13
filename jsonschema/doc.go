@@ -1214,9 +1214,11 @@
 //     a JSON name. Its doc comment and its jsonschema tag state its
 //     deprecation, under the same rules, and it gives that deprecation to
 //     each field it promotes that states none of its own. The nearest
-//     embedded field wins over the ones above it. The provider receives
-//     such an embedded field with an empty [FieldContext.Name], because the
-//     field has no JSON name.
+//     embedded field wins over the ones above it. Generation reads every
+//     such field, so a malformed tag on one fails generation even when each
+//     field it promotes states a deprecation of its own. The provider
+//     receives such an embedded field with an empty [FieldContext.Name],
+//     because the field has no JSON name.
 //
 // A field that a composed embed promotes has no property of its own, because
 // the allOf branch of the embed judges it. Generation still reads the doc
