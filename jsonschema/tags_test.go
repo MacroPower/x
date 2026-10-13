@@ -5860,11 +5860,13 @@ func TestTagDeprecation(t *testing.T) {
 // TestTagDeprecationRefused pins the deprecation pairs the jsonschema tag
 // refuses: an empty message, a repeated key, and a message beside
 // deprecated=false, which keeps current the field that the message
-// deprecates.
+// deprecates. That last pair is a conflict that ErrConstraintConflict
+// matches.
 func TestTagDeprecationRefused(t *testing.T) {
 	t.Parallel()
 
 	tests := map[string]struct {
+		is  error
 		tag string
 		err string
 	}{
@@ -5879,10 +5881,12 @@ func TestTagDeprecationRefused(t *testing.T) {
 		"false then message": {
 			tag: "deprecated=false,deprecationMessage=a",
 			err: "deprecated=false keeps current",
+			is:  jsonschema.ErrConstraintConflict,
 		},
 		"message then false": {
 			tag: "deprecationMessage=a,deprecated=false",
 			err: "deprecated=false keeps current",
+			is:  jsonschema.ErrConstraintConflict,
 		},
 	}
 
@@ -5898,6 +5902,10 @@ func TestTagDeprecationRefused(t *testing.T) {
 
 			_, err := jsonschema.Generate(t.Context(), typ)
 			require.ErrorContains(t, err, tc.err)
+
+			if tc.is != nil {
+				require.ErrorIs(t, err, tc.is)
+			}
 		})
 	}
 }
