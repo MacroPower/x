@@ -1214,10 +1214,16 @@
 //     a JSON name. Its doc comment and its jsonschema tag state its
 //     deprecation, under the same rules, and it gives that deprecation to
 //     each field it promotes that states none of its own. The nearest
-//     embedded field wins over the ones above it. The placeholder property
-//     that a name of a composed embed takes counts as a promoted field. The
-//     provider receives such an embedded field with an empty
-//     [FieldContext.Name], because the field has no JSON name.
+//     embedded field wins over the ones above it. The provider receives
+//     such an embedded field with an empty [FieldContext.Name], because the
+//     field has no JSON name.
+//
+// A field that a composed embed promotes has no property of its own, because
+// the allOf branch of the embed judges it. Generation still reads the doc
+// comment and the jsonschema tag of that field, and of each embedded field
+// along its path, under the same rules. A name whose field comes out
+// deprecated gets a placeholder property that asserts nothing and carries
+// the two keywords, under every draft and every close of the object.
 //
 // The keywords mark the field alone. A deprecation that a
 // [JSONSchemaExtender] puts on the type of the field stays in the

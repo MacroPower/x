@@ -593,6 +593,24 @@ type legacyKind struct {
 	Kind string `json:"kind"`
 }
 
+// legacyKinds is a composed embed whose promoted fields state
+// deprecations of their own, which the deprecation of the embed does not
+// replace.
+type legacyKinds struct {
+	Kind  string `json:"kind"  jsonschema:"deprecated=false"`
+	Own   string `json:"own"   jsonschema:"deprecationMessage=own message"`
+	Plain string `json:"plain"`
+}
+
+// legacyNested is a composed embed that embeds legacyFields, so the nearest
+// embedded field inside the composition decides the deprecation of the
+// fields legacyFields promotes.
+type legacyNested struct {
+	legacyFields `jsonschema:"deprecationMessage=the inner fields go away"` //nolint:unused // Embedded only; exercised via reflection.
+
+	Top string `json:"top"`
+}
+
 // wantDeprecation is the deprecation a test expects of one property.
 type wantDeprecation struct {
 	message    string
@@ -724,6 +742,75 @@ func TestGenerateEmbeddedDeprecation(t *testing.T) {
 
 				return jsonschema.GenerateFor[doc](ctx,
 					jsonschema.WithTypeSchemaFor[legacyKind](jsonschema.TypeSchema{}),
+				)
+			},
+			want: map[string]wantDeprecation{
+				"kind": {message: "kinds go away", deprecated: true},
+				"name": {},
+			},
+		},
+		"composed embed keeps the deprecation of each field": {
+			generate: func(ctx context.Context) (*jsonschema.Schema, error) {
+				type doc struct {
+					legacyKinds `jsonschema:"deprecationMessage=kinds go away"` //nolint:unused // Embedded only; exercised via reflection.
+				}
+
+				return jsonschema.GenerateFor[doc](ctx,
+					jsonschema.WithTypeSchemaFor[legacyKinds](jsonschema.TypeSchema{}),
+				)
+			},
+			want: map[string]wantDeprecation{
+				"kind":  {},
+				"own":   {message: "own message", deprecated: true},
+				"plain": {message: "kinds go away", deprecated: true},
+			},
+		},
+		"composed embed reads the embeds inside it": {
+			generate: func(ctx context.Context) (*jsonschema.Schema, error) {
+				type doc struct {
+					legacyNested `jsonschema:"deprecationMessage=nested kinds go away"` //nolint:unused // Embedded only; exercised via reflection.
+				}
+
+				return jsonschema.GenerateFor[doc](ctx,
+					jsonschema.WithTypeSchemaFor[legacyNested](jsonschema.TypeSchema{}),
+				)
+			},
+			want: map[string]wantDeprecation{
+				"top":      {message: "nested kinds go away", deprecated: true},
+				"discount": {message: "the inner fields go away", deprecated: true},
+				"coupon":   {message: "coupons moved", deprecated: true},
+				"kept":     {},
+			},
+		},
+		"composed embed in an open object": {
+			generate: func(ctx context.Context) (*jsonschema.Schema, error) {
+				type doc struct {
+					legacyKind `jsonschema:"deprecationMessage=kinds go away"` //nolint:unused // Embedded only; exercised via reflection.
+
+					Name string `json:"name"`
+				}
+
+				return jsonschema.GenerateFor[doc](ctx,
+					jsonschema.WithTypeSchemaFor[legacyKind](jsonschema.TypeSchema{}),
+					jsonschema.WithAdditionalProperties(true),
+				)
+			},
+			want: map[string]wantDeprecation{
+				"kind": {message: "kinds go away", deprecated: true},
+				"name": {},
+			},
+		},
+		"composed embed under draft-07": {
+			generate: func(ctx context.Context) (*jsonschema.Schema, error) {
+				type doc struct {
+					legacyKind `jsonschema:"deprecationMessage=kinds go away"` //nolint:unused // Embedded only; exercised via reflection.
+
+					Name string `json:"name"`
+				}
+
+				return jsonschema.GenerateFor[doc](ctx,
+					jsonschema.WithTypeSchemaFor[legacyKind](jsonschema.TypeSchema{}),
+					jsonschema.WithDraft(jsonschema.Draft7),
 				)
 			},
 			want: map[string]wantDeprecation{
