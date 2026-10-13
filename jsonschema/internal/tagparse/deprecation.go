@@ -1,16 +1,19 @@
 package tagparse
 
 import (
-	"errors"
 	"fmt"
 
 	"go.jacobcolvin.com/x/jsonschema/internal/keyword"
+	"go.jacobcolvin.com/x/jsonschema/internal/tagmodel"
 )
 
 // errDeprecationConflict reports a deprecationMessage pair beside a
-// deprecated=false pair, which state two opposite intentions.
-var errDeprecationConflict = errors.New(
-	"jsonschema tag: key \"deprecationMessage\" deprecates the field that deprecated=false keeps current",
+// deprecated=false pair, two rules on the field that can never both hold. It
+// wraps [tagmodel.ErrConflict], which the main package exports as
+// ErrConstraintConflict.
+var errDeprecationConflict = fmt.Errorf(
+	"jsonschema tag: key %q deprecates the field that deprecated=false keeps current: %w",
+	keyword.DeprecationMessage, tagmodel.ErrConflict,
 )
 
 // Deprecation is the deprecation a jsonschema tag states for its field,
