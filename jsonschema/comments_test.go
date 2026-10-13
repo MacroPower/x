@@ -9,6 +9,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/x/jsonschema"
 	"go.jacobcolvin.com/x/jsonschema/internal/testtypes/alpha"
@@ -664,10 +665,12 @@ func TestGoCommentProviderDeprecation(t *testing.T) {
 	got, err := json.Marshal(s.Properties["legacyPricing"])
 	require.NoError(t, err)
 
-	assert.JSONEq(t, `{
-		"type": "boolean",
-		"description": "LegacyPricing rounds each price to whole kronor.\n\nDeprecated: legacyPricing has no effect.\nRemove it.",
-		"deprecated": true,
-		"deprecationMessage": "legacyPricing has no effect. Remove it."
-	}`, string(got))
+	assert.JSONEq(t, stringtest.Input(`
+		{
+			"type": "boolean",
+			"description": "LegacyPricing rounds each price to whole kronor.\n\nDeprecated: legacyPricing has no effect.\nRemove it.",
+			"deprecated": true,
+			"deprecationMessage": "legacyPricing has no effect. Remove it."
+		}
+	`), string(got))
 }

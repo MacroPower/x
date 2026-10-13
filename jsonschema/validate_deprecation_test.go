@@ -8,6 +8,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/x/jsonschema"
 )
@@ -91,19 +92,23 @@ func TestValidatorValidateDeprecations(t *testing.T) {
 			want:     []string{`"/a" at "/properties/a", key`},
 		},
 		"ref sibling under draft-07 records nothing": {
-			schema: `{
-				"$schema": "http://json-schema.org/draft-07/schema#",
-				"properties": {"a": {"$ref": "#/definitions/A", "deprecated": true}},
-				"definitions": {"A": {}}
-			}`,
+			schema: stringtest.Input(`
+				{
+					"$schema": "http://json-schema.org/draft-07/schema#",
+					"properties": {"a": {"$ref": "#/definitions/A", "deprecated": true}},
+					"definitions": {"A": {}}
+				}
+			`),
 			instance: `{"a": 1}`,
 		},
 		"ref in allOf under draft-07": {
-			schema: `{
-				"$schema": "http://json-schema.org/draft-07/schema#",
-				"properties": {"a": {"allOf": [{"$ref": "#/definitions/A"}], "deprecated": true}},
-				"definitions": {"A": {}}
-			}`,
+			schema: stringtest.Input(`
+				{
+					"$schema": "http://json-schema.org/draft-07/schema#",
+					"properties": {"a": {"allOf": [{"$ref": "#/definitions/A"}], "deprecated": true}},
+					"definitions": {"A": {}}
+				}
+			`),
 			instance: `{"a": 1}`,
 			want:     []string{`"/a" at "/properties/a", key`},
 		},
@@ -149,11 +154,13 @@ func TestValidatorValidateDeprecations(t *testing.T) {
 			invalid: true,
 		},
 		"if that passes keeps its records and then's": {
-			schema: `{
-				"if": {"const": "wep", "deprecated": true},
-				"then": {"maxLength": 1, "deprecated": true},
-				"else": {"deprecated": true}
-			}`,
+			schema: stringtest.Input(`
+				{
+					"if": {"const": "wep", "deprecated": true},
+					"then": {"maxLength": 1, "deprecated": true},
+					"else": {"deprecated": true}
+				}
+			`),
 			instance: `"wep"`,
 			want: []string{
 				`"" at "/if"`,
@@ -162,11 +169,13 @@ func TestValidatorValidateDeprecations(t *testing.T) {
 			invalid: true,
 		},
 		"if that fails drops its records and keeps else's": {
-			schema: `{
-				"if": {"const": "wep", "deprecated": true},
-				"then": {"deprecated": true},
-				"else": {"deprecated": true}
-			}`,
+			schema: stringtest.Input(`
+				{
+					"if": {"const": "wep", "deprecated": true},
+					"then": {"deprecated": true},
+					"else": {"deprecated": true}
+				}
+			`),
 			instance: `"wpa3"`,
 			want:     []string{`"" at "/else"`},
 		},
@@ -200,10 +209,12 @@ func TestValidatorValidateDeprecations(t *testing.T) {
 			want:     []string{`"" at "/dependentSchemas/a"`},
 		},
 		"legacy dependencies schema": {
-			schema: `{
-				"$schema": "http://json-schema.org/draft-07/schema#",
-				"dependencies": {"a": {"deprecated": true}}
-			}`,
+			schema: stringtest.Input(`
+				{
+					"$schema": "http://json-schema.org/draft-07/schema#",
+					"dependencies": {"a": {"deprecated": true}}
+				}
+			`),
 			instance: `{"a": 1}`,
 			want:     []string{`"" at "/dependencies/a"`},
 		},
@@ -221,10 +232,12 @@ func TestValidatorValidateDeprecations(t *testing.T) {
 			want:     []string{`"" at ""`},
 		},
 		"recursive ref records each level": {
-			schema: `{
-				"$ref": "#/$defs/node",
-				"$defs": {"node": {"deprecated": true, "properties": {"next": {"$ref": "#/$defs/node"}}}}
-			}`,
+			schema: stringtest.Input(`
+				{
+					"$ref": "#/$defs/node",
+					"$defs": {"node": {"deprecated": true, "properties": {"next": {"$ref": "#/$defs/node"}}}}
+				}
+			`),
 			instance: `{"next": {}}`,
 			want: []string{
 				`"" at "/$ref"`,
@@ -284,10 +297,12 @@ func TestValidatorValidateDeprecations(t *testing.T) {
 func TestValidatorValidateDeprecationsSchema(t *testing.T) {
 	t.Parallel()
 
-	v, err := jsonschema.CompileJSON(t.Context(), []byte(`{
-		"properties": {"wifi": {"items": {"$ref": "#/$defs/WiFi"}}},
-		"$defs": {"WiFi": {"deprecated": true, "deprecationMessage": "set wifi.mode"}}
-	}`))
+	v, err := jsonschema.CompileJSON(t.Context(), []byte(stringtest.Input(`
+		{
+			"properties": {"wifi": {"items": {"$ref": "#/$defs/WiFi"}}},
+			"$defs": {"WiFi": {"deprecated": true, "deprecationMessage": "set wifi.mode"}}
+		}
+	`)))
 	require.NoError(t, err)
 
 	got, err := v.ValidateDeprecations(t.Context(), map[string]any{"wifi": []any{"wep"}})
