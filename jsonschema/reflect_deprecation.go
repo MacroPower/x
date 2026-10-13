@@ -105,6 +105,22 @@ func deprecatedParagraph(doc string) (string, int, int, bool) {
 	return "", 0, 0, false
 }
 
+// withoutDeprecatedParagraph returns doc without its first Deprecated:
+// paragraph and one of the blank lines around it.
+func withoutDeprecatedParagraph(doc string) string {
+	_, start, end, ok := deprecatedParagraph(doc)
+	if !ok {
+		return doc
+	}
+
+	lines := strings.Split(doc, "\n")
+	if end < len(lines) && strings.TrimSpace(lines[end]) == "" {
+		end++
+	}
+
+	return strings.TrimSpace(strings.Join(slices.Concat(lines[:start], lines[end:]), "\n"))
+}
+
 // isParagraphLine reports whether line belongs to a paragraph of a Go doc
 // comment: it holds text and starts with no space or tab.
 func isParagraphLine(line string) bool {
@@ -117,6 +133,9 @@ func isParagraphLine(line string) bool {
 // A field that states nothing of its own takes the deprecation of the
 // embedded fields that promote it. The decision lands on the field's
 // canvas, and its message on the field node, for [node.markDeprecation].
+// A tag that keeps current a field whose doc comment deprecates it also
+// takes the Deprecated: paragraph out of the description that the comment
+// gave, so the schema does not describe a current field as deprecated.
 func (g *run) settleFieldDeprecation(
 	root reflect.Type,
 	p *nodeProp,
@@ -125,7 +144,12 @@ func (g *run) settleFieldDeprecation(
 	tagged tagparse.Deprecation,
 	embeds map[string]deprecation,
 ) error {
-	own := commentDeprecation(comment).then(tagDeprecation(tagged))
+	fromComment := commentDeprecation(comment)
+	own := fromComment.then(tagDeprecation(tagged))
+
+	if fromComment.deprecated && !own.deprecated && p.schema.authored.Description == comment {
+		p.schema.authored.Description = withoutDeprecatedParagraph(comment)
+	}
 
 	if !own.stated {
 		path := p.fi.StructField.Index

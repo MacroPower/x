@@ -578,6 +578,58 @@ func TestFieldDescriptionDeprecation(t *testing.T) {
 	}
 }
 
+// TestFieldDescriptionKeptCurrent pins that a deprecated=false tag takes
+// the Deprecated: paragraph out of the description that the doc comment
+// gives the field it keeps current, and leaves the rest of the comment and
+// a description the tag writes alone.
+func TestFieldDescriptionKeptCurrent(t *testing.T) {
+	t.Parallel()
+
+	type doc struct {
+		Label string `json:"label" jsonschema:"deprecated=false"`
+		Named string `json:"named" jsonschema:"deprecated=false,description=from the tag"`
+		Kept  string `json:"kept"  jsonschema:"deprecated=true"`
+	}
+
+	tests := map[string]struct {
+		doc   string
+		label string
+	}{
+		"last paragraph": {
+			doc:   "Label is the text on the board.\n\nDeprecated: call Title.",
+			label: "Label is the text on the board.",
+		},
+		"middle paragraph": {
+			doc:   "Label is the text.\n\nDeprecated: call Title.\n\nIt holds one line.",
+			label: "Label is the text.\n\nIt holds one line.",
+		},
+		"only paragraph": {
+			doc:   "Deprecated: call Title.",
+			label: "",
+		},
+		"no paragraph": {
+			doc:   "Label is the text.",
+			label: "Label is the text.",
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			s, err := jsonschema.GenerateFor[doc](t.Context(),
+				jsonschema.WithDescriptionProvider(fieldDocProvider(func(string) string { return tc.doc })),
+			)
+			require.NoError(t, err)
+
+			assert.Equal(t, tc.label, s.Properties["label"].Description)
+			assert.Equal(t, "from the tag", s.Properties["named"].Description)
+			assert.Equal(t, tc.doc, s.Properties["kept"].Description)
+			assert.False(t, s.Properties["label"].Deprecated)
+		})
+	}
+}
+
 // TestGoCommentProviderDeprecation covers the Deprecated: paragraphs of
 // real doc comments, with the jsonschema tag applied after them and an
 // embedded field that gives its deprecation to the fields it promotes.
