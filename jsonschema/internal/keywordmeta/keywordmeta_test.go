@@ -12,7 +12,9 @@ import (
 )
 
 var (
-	// The allKeywordConstants list enumerates every name in internal/keyword. Go
+	// The allKeywordConstants list enumerates every JSON Schema keyword name in
+	// internal/keyword, which leaves out keyword.DeprecationMessage, a name no
+	// draft defines that lives in Schema.Extra and has no row. Go
 	// cannot reflect over constants, so this is a hand-list: it catches a row that
 	// names something no constant defines, and a constant no row covers, but it
 	// cannot catch a 56th constant added upstream of the list itself.

@@ -265,6 +265,31 @@ schema, err := jsonschema.GenerateFor[MyType](ctx,
 See
 [Descriptions](https://pkg.go.dev/go.jacobcolvin.com/x/jsonschema#hdr-Descriptions).
 
+### Deprecations
+
+A field whose doc comment holds a `Deprecated:` paragraph, the convention the
+Go tools read, gets `deprecated: true`. The text of the paragraph goes to
+`deprecationMessage`, the keyword the JSON language service of VS Code reads.
+The `jsonschema` tag sets the keywords too, after the doc comment, and an
+embedded field gives its deprecation to the fields it promotes:
+
+```go
+type MenuItem struct {
+	// LegacyPricing rounds each price to whole kronor.
+	//
+	// Deprecated: legacyPricing has no effect. Remove it.
+	LegacyPricing bool `json:"legacyPricing,omitzero"`
+
+	Notes string `json:"notes,omitzero" jsonschema:"deprecationMessage=keep notes in the staff wiki"`
+
+	// Deprecated: call Title, which falls back to the name.
+	Label string `json:"label,omitzero" jsonschema:"deprecated=false"`
+}
+```
+
+See
+[Deprecations](https://pkg.go.dev/go.jacobcolvin.com/x/jsonschema#hdr-Deprecations).
+
 ### Definitions and Drafts
 
 Generation extracts named struct types into `$defs` and refers to each through
@@ -371,15 +396,15 @@ target's own module, so the module must be able to resolve this package (via a
 //go:generate go run go.jacobcolvin.com/x/jsonschema/cmd/gen -type Config -o config.schema.json
 ```
 
-| Flag                     | Default    | Description                                        |
-| ------------------------ | ---------- | -------------------------------------------------- |
-| `-type`                  | (required) | Go type name to generate a schema for.             |
-| `-o`                     | stdout     | Output file path.                                  |
-| `-draft`                 | `2020`     | JSON Schema draft: `7` or `2020`.                  |
-| `-comments`              | `false`    | Extract Go doc comments as descriptions.           |
-| `-additional-properties` | `false`    | Allow additional properties.                       |
-| `-indent`                | `"  "`     | JSON indentation string; empty for compact output. |
-| `-validate`              | `false`    | Enable the `validate` tag interpreter.             |
+| Flag                     | Default    | Description                                               |
+| ------------------------ | ---------- | --------------------------------------------------------- |
+| `-type`                  | (required) | Go type name to generate a schema for.                    |
+| `-o`                     | stdout     | Output file path.                                         |
+| `-draft`                 | `2020`     | JSON Schema draft: `7` or `2020`.                         |
+| `-comments`              | `false`    | Extract Go doc comments as descriptions and deprecations. |
+| `-additional-properties` | `false`    | Allow additional properties.                              |
+| `-indent`                | `"  "`     | JSON indentation string; empty for compact output.        |
+| `-validate`              | `false`    | Enable the `validate` tag interpreter.                    |
 
 ## Design Notes
 

@@ -54,6 +54,8 @@ func (g *run) renderBase(n *node) *Schema {
 			base.Properties[n.props[i].name] = g.render(n.props[i].schema)
 		}
 
+		n.markGhosts(base)
+
 		for _, e := range n.embeds {
 			branch := g.render(e.branch)
 			if e.optional {

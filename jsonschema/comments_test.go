@@ -2,6 +2,7 @@ package jsonschema_test
 
 import (
 	"context"
+	"encoding/json/v2"
 	"errors"
 	"reflect"
 	"testing"
@@ -463,4 +464,144 @@ func TestWithDescriptionProvider_PromotedFieldDeclaringType(t *testing.T) {
 
 	require.Contains(t, s.Properties, "size")
 	assert.Equal(t, "embedded size", s.Properties["size"].Description)
+}
+
+// fieldDocProvider is a DescriptionProvider that gives every field the doc
+// comment that doc returns for its Go name, and every type none.
+func fieldDocProvider(doc func(name string) string) jsonschema.DescriptionProvider {
+	return jsonschema.DescriptionProviderFuncs{
+		FieldFunc: func(_ context.Context, fc jsonschema.FieldContext) (string, error) {
+			return doc(fc.StructField.Name), nil
+		},
+	}
+}
+
+// deprecationOf returns the deprecated keyword of s and the message its
+// deprecationMessage keyword holds, or "" when it holds none.
+func deprecationOf(s *jsonschema.Schema) (bool, string) {
+	msg, _ := s.Extra[jsonschema.KeywordDeprecationMessage].(string) //nolint:errcheck // A missing key reads as "".
+
+	return s.Deprecated, msg
+}
+
+// TestFieldDescriptionDeprecation pins how generation reads the Deprecated:
+// paragraph of the description a provider gives a field. The paragraph sets
+// deprecated, and its text sets deprecationMessage, without the prefix and
+// with each line break replaced by a space. A tag description replaces the
+// description alone, so the paragraph still marks a field whose tag
+// describes it.
+func TestFieldDescriptionDeprecation(t *testing.T) {
+	t.Parallel()
+
+	type doc struct {
+		Size  int `json:"size"`
+		Named int `json:"named" jsonschema:"description=from the tag"`
+	}
+
+	tests := map[string]struct {
+		doc        string
+		message    string
+		deprecated bool
+	}{
+		"no paragraph": {
+			doc: "Size is the size.",
+		},
+		"later paragraph": {
+			doc:        "Size is the size.\n\nDeprecated: use length.",
+			message:    "use length.",
+			deprecated: true,
+		},
+		"first paragraph": {
+			doc:        "Deprecated: use length.",
+			message:    "use length.",
+			deprecated: true,
+		},
+		"line breaks": {
+			doc:        "Size is the size.\n\nDeprecated: use length\nor width.\n\nIt counts bytes.",
+			message:    "use length or width.",
+			deprecated: true,
+		},
+		"message on the next line": {
+			doc:        "Deprecated:\nuse length.",
+			message:    "use length.",
+			deprecated: true,
+		},
+		"no message": {
+			doc:        "Size is the size.\n\nDeprecated:",
+			deprecated: true,
+		},
+		"first of two paragraphs": {
+			doc:        "Deprecated: use length.\n\nDeprecated: use width.",
+			message:    "use length.",
+			deprecated: true,
+		},
+		"prefix inside a paragraph": {
+			doc: "Size is the size.\nDeprecated: use length.",
+		},
+		"prefix without a space": {
+			doc: "Deprecated:use length.",
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			s, err := jsonschema.GenerateFor[doc](t.Context(),
+				jsonschema.WithDescriptionProvider(fieldDocProvider(func(string) string { return tc.doc })),
+			)
+			require.NoError(t, err)
+
+			for _, prop := range []string{"size", "named"} {
+				deprecated, message := deprecationOf(s.Properties[prop])
+				assert.Equal(t, tc.deprecated, deprecated, "property %q", prop)
+				assert.Equal(t, tc.message, message, "property %q", prop)
+			}
+
+			assert.Equal(t, tc.doc, s.Properties["size"].Description)
+			assert.Equal(t, "from the tag", s.Properties["named"].Description)
+		})
+	}
+}
+
+// TestGoCommentProviderDeprecation covers the Deprecated: paragraphs of
+// real doc comments, with the jsonschema tag applied after them and an
+// embedded field that gives its deprecation to the fields it promotes.
+func TestGoCommentProviderDeprecation(t *testing.T) {
+	t.Parallel()
+
+	s, err := jsonschema.GenerateFor[alpha.Menu](
+		t.Context(),
+		jsonschema.WithDescriptionProvider(jsonschema.NewGoCommentProvider()),
+	)
+	require.NoError(t, err)
+
+	tests := map[string]struct {
+		message    string
+		deprecated bool
+	}{
+		"legacyPricing": {message: "legacyPricing has no effect. Remove it.", deprecated: true},
+		"label":         {},
+		"notes":         {message: "keep notes in the staff wiki", deprecated: true},
+		"discount":      {message: "cafe 5.0 drops the old menu fields.", deprecated: true},
+		"coupon":        {message: "coupons moved to promotions.", deprecated: true},
+	}
+
+	for prop, want := range tests {
+		require.Contains(t, s.Properties, prop)
+
+		deprecated, message := deprecationOf(s.Properties[prop])
+		assert.Equal(t, want.deprecated, deprecated, "property %q", prop)
+		assert.Equal(t, want.message, message, "property %q", prop)
+	}
+
+	got, err := json.Marshal(s.Properties["legacyPricing"])
+	require.NoError(t, err)
+
+	assert.JSONEq(t, `{
+		"type": "boolean",
+		"description": "LegacyPricing rounds each price to whole kronor.\n\nDeprecated: legacyPricing has no effect.\nRemove it.",
+		"deprecated": true,
+		"deprecationMessage": "legacyPricing has no effect. Remove it."
+	}`, string(got))
 }

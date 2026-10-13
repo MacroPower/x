@@ -58,7 +58,7 @@ func main() {
 	flag.StringVar(&cfg.TypeName, "type", "", "Go type name to generate schema for (required)")
 	flag.StringVar(&cfg.Output, "o", "", "output file path (default: stdout)")
 	flag.StringVar(&cfg.Draft, "draft", "2020", `JSON Schema draft: "7" or "2020"`)
-	flag.BoolVar(&cfg.Comments, "comments", false, "extract Go doc comments as descriptions")
+	flag.BoolVar(&cfg.Comments, "comments", false, "extract Go doc comments as descriptions and deprecations")
 	flag.BoolVar(&cfg.AdditionalProperties, "additional-properties", false, "allow additional properties")
 	flag.StringVar(&cfg.Indent, "indent", "  ", "JSON indentation string (empty for compact output)")
 	flag.BoolVar(&cfg.Validate, "validate", false, "add validate tag interpreter")

@@ -1857,8 +1857,12 @@ func (g *run) hookNodes(n *node, prefix string, seen map[*defEntry]bool) error {
 
 // hookStruct runs the field-level hooks of one object node's fields. A field
 // hooked already (reached through another node sharing its props) is skipped.
+// The deprecation of each field settles once its description and its tag
+// ran, and the deprecation of each name a composed embed won settles after
+// them.
 func (g *run) hookStruct(obj *node, prefix string) error {
 	parentView := obj.view(g.draft)
+	embeds := map[string]deprecation{}
 
 	for i := range obj.props {
 		p := &obj.props[i]
@@ -1866,15 +1870,27 @@ func (g *run) hookStruct(obj *node, prefix string) error {
 			continue
 		}
 
-		err := g.applyFieldDescription(obj.typ, p.fi, p.schema, parentView, p.quoted)
+		comment, err := g.applyFieldDescription(obj.typ, p.fi, p.schema, parentView, p.quoted)
 		if err != nil {
 			return err
 		}
 
-		err = g.applyFieldTag(*p)
+		var tagged tagparse.Deprecation
+
+		err = g.applyFieldTag(*p, &tagged)
 		if err != nil {
 			return fmt.Errorf("%s%s field %q: %w", prefix, obj.typ, p.name, err)
 		}
+
+		err = g.settleFieldDeprecation(obj.typ, p, parentView, comment, tagged, embeds)
+		if err != nil {
+			return fmt.Errorf("%s%s field %q: %w", prefix, obj.typ, p.name, err)
+		}
+	}
+
+	err := g.settleGhostMarks(obj, parentView, embeds)
+	if err != nil {
+		return fmt.Errorf("%s%s: %w", prefix, obj.typ, err)
 	}
 
 	for i := range obj.props {
@@ -1899,8 +1915,8 @@ func (g *run) hookStruct(obj *node, prefix string) error {
 // [run.applyTypeOverrideDirective], replays on a discarded view of the
 // occurrence the pair replaced, so the fold keeps its ordering rules and a
 // directive before the pair classifies against that occurrence and reads its
-// null decision.
-func (g *run) applyFieldTag(p nodeProp) error {
+// null decision. The deprecation the tag states lands in deprecated.
+func (g *run) applyFieldTag(p nodeProp, deprecated *tagparse.Deprecation) error {
 	tag, ok := p.fi.StructField.Tag.Lookup("jsonschema")
 	if !ok {
 		return nil
@@ -1923,7 +1939,8 @@ func (g *run) applyFieldTag(p nodeProp) error {
 		Quoted:    p.quoted,
 		// FieldContext.Shape reads this same decision, so a field's null
 		// admission is one answer whichever site classifies it.
-		Nullable: decided.null.admit,
+		Nullable:    decided.null.admit,
+		Deprecation: deprecated,
 	})
 	// Tagparse errors already carry the "jsonschema tag:" prefix, and their
 	// sentinels are the ones this package exports.
@@ -2456,24 +2473,25 @@ func (g *run) applyTypeDescription(t reflect.Type, s *Schema) error {
 // [reflectkind.DeclaringType]); an empty comment leaves the description unset, and a
 // provider error aborts generation. Quoted is the probe's answer on whether
 // the json:",string" flag took, the same bit the interpreters' context
-// carries, so both contexts classify the field alike.
+// carries, so both contexts classify the field alike. It returns the
+// comment, whose Deprecated: paragraph [run.settleFieldDeprecation] reads.
 func (g *run) applyFieldDescription(
 	parentType reflect.Type, fi fieldset.Field, fieldNode *node, parent *Schema, quoted bool,
-) error {
+) (string, error) {
 	if g.descriptionProvider == nil {
-		return nil
+		return "", nil
 	}
 
 	fc := g.fieldContext(parentType, fi, fieldNode, parent, quoted)
 
 	comment, err := g.descriptionProvider.FieldDescription(g.ctx, fc)
 	if err != nil {
-		return fmt.Errorf("describe field %q of %s: %w", fi.JSONName, parentType, err)
+		return "", fmt.Errorf("describe field %q of %s: %w", fi.JSONName, parentType, err)
 	}
 
 	if comment != "" {
 		fieldNode.authored.Description = comment
 	}
 
-	return nil
+	return comment, nil
 }

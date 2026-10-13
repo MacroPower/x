@@ -3,6 +3,7 @@ package jsonschema
 import (
 	"encoding/json/jsontext"
 	"fmt"
+	"maps"
 	"reflect"
 	"slices"
 	"strconv"
@@ -99,6 +100,15 @@ type node struct {
 	props    []nodeProp  // struct properties, declaration order
 	prefix   []*node     // array elements (prefixItems / itemsArray)
 	embeds   []embedNode // struct allOf/anyOf composition branches
+	// GhostMarks holds, by name, the deprecation each ghost-won name takes
+	// from the composed embed that won it and the embedded fields above that
+	// embed, which render gives the placeholder property of the name. The
+	// field hooks settle it, and a name with no deprecation has no entry.
+	ghostMarks map[string]deprecation
+	// DeprecationMessage is the message of the deprecation that the doc
+	// comment, the jsonschema tag, or the embedding fields of a field node
+	// state, which render writes beside the deprecated keyword of its canvas.
+	deprecationMessage string
 	// GhostWon lists the names a composed embed's promoted field won on an
 	// object node: each appears in the marshaled object under the embed's
 	// allOf branch with no property of its own, so the seed pass can give a
@@ -416,6 +426,8 @@ func (n *node) cloneTree(draft Draft) *node {
 	c.isBody = false
 	c.items = n.items.cloneTree(draft)
 	c.ghostWon = slices.Clone(n.ghostWon)
+	c.ghostMarks = maps.Clone(n.ghostMarks)
+	c.deprecationMessage = ""
 
 	if n.prefix != nil {
 		c.prefix = make([]*node, len(n.prefix))
@@ -895,6 +907,7 @@ func (n *node) overrideType(typeName string) {
 	n.props = nil
 	n.embeds = nil
 	n.ghostWon = nil
+	n.ghostMarks = nil
 	n.fallback = slotNone
 }
 

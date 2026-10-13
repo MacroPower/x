@@ -36,7 +36,9 @@ func TestAssertionKeywordsCoverage(t *testing.T) {
 // without a matching public constant fails here. The one omission is $comment:
 // the constants exist for consumers branching on [jsonschema.ValidationError]'s
 // Keyword or building schema locations, and $comment carries no assertion, so it
-// never appears as either.
+// never appears as either. [jsonschema.KeywordDeprecationMessage] stays out of
+// the comparison, because it names a keyword no draft defines, which has no
+// row in the internal keyword set.
 func TestPublicKeywordConstantsMirrorInternal(t *testing.T) {
 	t.Parallel()
 

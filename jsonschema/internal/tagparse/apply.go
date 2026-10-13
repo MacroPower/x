@@ -97,10 +97,12 @@ type Input struct {
 	Canvas    *jsonschema.Schema
 	Payload   *jsonschema.Schema
 	RefBase   func() *jsonschema.Schema
-	Tag       string
-	Elements  []ElemRef
-	Quoted    bool
-	Nullable  bool
+	// Deprecation, when non-nil, receives the deprecation the tag states.
+	Deprecation *Deprecation
+	Tag         string
+	Elements    []ElemRef
+	Quoted      bool
+	Nullable    bool
 }
 
 // Apply parses and applies a jsonschema struct tag. Value-scoped facts and
@@ -156,6 +158,10 @@ func Apply(in Input) error {
 		}
 	}
 
+	if in.Deprecation != nil {
+		*in.Deprecation = state.deprecation
+	}
+
 	// A null literal the fold already took is wrong once a type= pair lands
 	// after it, since the override replaces the occurrence that admitted the
 	// null. The check runs after the fold rather than as a pre-scan over the
@@ -184,6 +190,9 @@ type applyState struct {
 	elements  []ElemRef
 	groupsSet map[string]bool
 	seen      map[string]bool
+	// The deprecation field is the deprecation the deprecated and
+	// deprecationMessage pairs state (see [Input.Deprecation]).
+	deprecation Deprecation
 	// The nullKeys field names the scalar keys the fold read as the literal
 	// null, in tag order, for the check a later type= pair makes.
 	nullKeys []string
@@ -343,7 +352,7 @@ func valueHasType(v any, typeName string) bool {
 func (s *applyState) applyKey(key, value string) error {
 	switch key {
 	case keyword.Description, keyword.Title, keyword.Default, keyword.Examples,
-		keyword.Deprecated, keyword.ReadOnly, keyword.WriteOnly, keyword.Type:
+		keyword.Deprecated, keyword.DeprecationMessage, keyword.ReadOnly, keyword.WriteOnly, keyword.Type:
 		// The annotation appliers all overwrite, so a repeat in one tag is
 		// two stated intentions with no precedence to pick between. A second
 		// type= pair overwrites too, and drops with the first override the
@@ -384,6 +393,16 @@ func (s *applyState) applyKey(key, value string) error {
 
 	case keyword.Deprecated, keyword.ReadOnly, keyword.WriteOnly:
 		return s.applyFlag(key, value)
+
+	case keyword.DeprecationMessage:
+		err := s.deprecation.stateMessage(value)
+		if err != nil {
+			return err
+		}
+
+		s.canvas.Deprecated = true
+
+		return nil
 
 	case keyword.Default:
 		return s.applyDefault(key, value)
@@ -526,7 +545,13 @@ func (s *applyState) applyFlag(key, value string) error {
 
 	switch key {
 	case keyword.Deprecated:
+		err := s.deprecation.stateFlag(b)
+		if err != nil {
+			return err
+		}
+
 		s.canvas.Deprecated = b
+
 	case keyword.ReadOnly:
 		s.canvas.ReadOnly = b
 	case keyword.WriteOnly:

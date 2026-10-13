@@ -824,3 +824,68 @@ func TestReconcileCanvasNotSubschemaRidesValueBranch(t *testing.T) {
 		})
 	}
 }
+
+// TestReconcileDeprecationMessageBesideDeprecated pins that a field's
+// deprecationMessage lands beside the deprecated keyword of the field. Both
+// ride the anyOf wrapper of a field that admits null and the type list of a
+// nilable container. Beside a $ref, Draft-07 moves the $ref into an allOf,
+// because that draft ignores the siblings of $ref.
+func TestReconcileDeprecationMessageBesideDeprecated(t *testing.T) {
+	t.Parallel()
+
+	type plan struct {
+		Tier string `json:"tier"`
+	}
+
+	type doc struct {
+		Count   *int   `json:"count"   jsonschema:"deprecationMessage=use total"`
+		Plan    plan   `json:"plan"    jsonschema:"deprecationMessage=use tiers"`
+		MaybeOf *plan  `json:"maybeOf" jsonschema:"deprecationMessage=use tiers"`
+		Tags    []int  `json:"tags"    jsonschema:"deprecationMessage=use labels"`
+		Name    string `json:"name"    jsonschema:"deprecationMessage=use title"`
+	}
+
+	tests := map[string]struct {
+		opts []jsonschema.GenerateOption
+		want map[string]string
+	}{
+		"draft 2020-12": {
+			want: map[string]string{
+				"count": `{"deprecated":true,"deprecationMessage":"use total",` +
+					`"anyOf":[{"type":"integer"},{"type":"null"}]}`,
+				"plan": `{"$ref":"#/$defs/plan","deprecated":true,"deprecationMessage":"use tiers"}`,
+				"maybeOf": `{"deprecated":true,"deprecationMessage":"use tiers",` +
+					`"anyOf":[{"$ref":"#/$defs/plan"},{"type":"null"}]}`,
+				"tags": `{"type":["null","array"],"items":{"type":"integer"},` +
+					`"deprecated":true,"deprecationMessage":"use labels"}`,
+				"name": `{"type":"string","deprecated":true,"deprecationMessage":"use title"}`,
+			},
+			opts: []jsonschema.GenerateOption{jsonschema.WithJSONOptions(json.FormatNilSliceAsNull(true))},
+		},
+		"draft 7": {
+			want: map[string]string{
+				"plan": `{"allOf":[{"$ref":"#/definitions/plan"}],` +
+					`"deprecated":true,"deprecationMessage":"use tiers"}`,
+				"maybeOf": `{"deprecated":true,"deprecationMessage":"use tiers",` +
+					`"anyOf":[{"$ref":"#/definitions/plan"},{"type":"null"}]}`,
+			},
+			opts: []jsonschema.GenerateOption{jsonschema.WithDraft(jsonschema.Draft7)},
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			s, err := jsonschema.GenerateFor[doc](t.Context(), tc.opts...)
+			require.NoError(t, err)
+
+			for prop, want := range tc.want {
+				got, err := json.Marshal(s.Properties[prop])
+				require.NoError(t, err)
+
+				assert.JSONEq(t, want, string(got), "property %q", prop)
+			}
+		})
+	}
+}

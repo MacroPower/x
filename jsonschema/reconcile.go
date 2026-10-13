@@ -41,6 +41,8 @@ func (g *run) reconcileField(n *node) *Schema {
 			g.resolveBounds(n, &merged, base)
 		}
 
+		n.markDeprecation(&merged, nil)
+
 		return &merged
 	}
 
@@ -55,6 +57,8 @@ func (g *run) reconcileField(n *node) *Schema {
 		if n.typeListEncoded() {
 			bareContainerType(&merged, n.containerType())
 		}
+
+		n.markDeprecation(&merged, nil)
 
 		return &merged
 	}
@@ -71,6 +75,7 @@ func (g *run) reconcileField(n *node) *Schema {
 	// [keywordmeta.NullJudging].
 	if n.typeListEncoded() && !judgesNull(&merged, base) {
 		nullTypeList(&merged, n.containerType())
+		n.markDeprecation(&merged, nil)
 
 		return &merged
 	}
@@ -79,6 +84,8 @@ func (g *run) reconcileField(n *node) *Schema {
 	// interface field whose canvas constrains nothing) already admits null, so
 	// either returns with its authored keywords inline.
 	if !n.null.wrap || (!n.typeListEncoded() && schemashape.IsEmpty(&merged)) {
+		n.markDeprecation(&merged, nil)
+
 		return &merged
 	}
 
@@ -88,6 +95,7 @@ func (g *run) reconcileField(n *node) *Schema {
 	// subsumption already happened in resolveBounds, so the split only partitions
 	// the resolved keywords.
 	wrapper := splitFieldKeywords(&merged, base)
+	n.markDeprecation(&merged, wrapper)
 
 	if n.typeListEncoded() {
 		bareContainerType(&merged, n.containerType())
@@ -124,10 +132,13 @@ func (g *run) reconcileRefField(n *node) *Schema {
 
 	wrap := n.null.wrap || (n.null.admit && n.authored != nil && judgesNull(n.authored, &Schema{}))
 	if !wrap {
+		n.markDeprecation(&merged, nil)
+
 		return g.renderRef(&merged, n.def)
 	}
 
 	wrapper := splitFieldKeywords(&merged, base)
+	n.markDeprecation(&merged, wrapper)
 
 	value := g.renderRef(&merged, n.def)
 	wrapper.AnyOf = []*Schema{value, {Type: typename.Null}}

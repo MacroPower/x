@@ -881,10 +881,12 @@
 //	Port int `jsonschema:"description=Server port,minimum=1,maximum=65535"`
 //
 // Supported keys: type, description, title, default, examples, deprecated,
-// readOnly, writeOnly, minimum, maximum, exclusiveMinimum, exclusiveMaximum,
-// multipleOf, minLength, maxLength, pattern, format, minItems, maxItems,
-// uniqueItems, minProperties, maxProperties, enum, and const. Pairs apply in
-// order, and an unrecognized key is an error.
+// deprecationMessage, readOnly, writeOnly, minimum, maximum,
+// exclusiveMinimum, exclusiveMaximum, multipleOf, minLength, maxLength,
+// pattern, format, minItems, maxItems, uniqueItems, minProperties,
+// maxProperties, enum, and const. Pairs apply in order, and an unrecognized
+// key is an error. The Deprecations section covers deprecated and
+// deprecationMessage.
 //
 // The tag's syntax has a few rules:
 //
@@ -1186,6 +1188,47 @@
 // Field lookups receive the [FieldContext] tag interpreters get; for a field
 // promoted from an embedded struct, [FieldContext.Owner] is the embedded type,
 // where the field's doc comment lives.
+//
+// # Deprecations
+//
+// Generation marks a deprecated field with the deprecated keyword and
+// writes the reason to the deprecationMessage keyword, which
+// [KeywordDeprecationMessage] names. No draft defines deprecationMessage, so
+// it lives in [Schema.Extra], and the JSON language service of VS Code reads
+// it. The deprecation of a field comes from these sources:
+//
+//   - The description that the [DescriptionProvider] gives the field. A
+//     paragraph of it that starts with "Deprecated: ", the convention the Go
+//     tools read, marks the field. The rest of the paragraph, with each line
+//     break replaced by a space, becomes the message. A description that the
+//     jsonschema tag or a type-level hook sets replaces the description
+//     alone, so the paragraph still marks the field.
+//   - The jsonschema tag, which applies after the description.
+//     deprecationMessage=<text> sets the message and marks the field.
+//     deprecated=true marks the field and keeps the message of the doc
+//     comment. deprecated=false removes the mark and the message, so a
+//     field whose Go API alone is deprecated stays current in the schema. A
+//     tag that holds both deprecated=false and deprecationMessage is an
+//     error.
+//   - An embedded field that promotes its fields, untagged or tagged without
+//     a JSON name. Its doc comment and its jsonschema tag state its
+//     deprecation, under the same rules, and it gives that deprecation to
+//     each field it promotes that states none of its own. The nearest
+//     embedded field wins over the ones above it. The placeholder property
+//     that a name of a composed embed takes counts as a promoted field. The
+//     provider receives such an embedded field with an empty
+//     [FieldContext.Name], because the field has no JSON name.
+//
+// The keywords mark the field alone. A deprecation that a
+// [JSONSchemaExtender] puts on the type of the field stays in the
+// definition of that type, which the field reaches through $ref, whatever
+// the tag of the field says. A doc comment on a type marks nothing, because
+// an instance never names its type, so a type whose every value is
+// deprecated sets Deprecated and the message on [TypeSchema.Value] in its
+// JSONSchemaExtend method. The two keywords land where a description lands:
+// on the anyOf wrapper of a field that admits null, and beside a $ref, which
+// [Draft7] moves into an allOf because that draft ignores the siblings of
+// $ref.
 //
 // # Drafts
 //
