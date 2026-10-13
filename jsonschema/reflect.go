@@ -1863,7 +1863,11 @@ func (g *run) hookNodes(n *node, prefix string, seen map[*defEntry]bool) error {
 // them.
 func (g *run) hookStruct(obj *node, prefix string) error {
 	parentView := obj.view(g.draft)
-	embeds := map[string]deprecation{}
+
+	embeds, err := g.embedDeprecations(obj.typ, parentView)
+	if err != nil {
+		return fmt.Errorf("%s%s: %w", prefix, obj.typ, err)
+	}
 
 	for i := range obj.props {
 		p := &obj.props[i]
@@ -1889,7 +1893,7 @@ func (g *run) hookStruct(obj *node, prefix string) error {
 		}
 	}
 
-	err := g.settleGhostMarks(obj, parentView, embeds)
+	err = g.settleGhostMarks(obj, parentView, embeds)
 	if err != nil {
 		return fmt.Errorf("%s%s: %w", prefix, obj.typ, err)
 	}

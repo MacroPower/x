@@ -611,6 +611,14 @@ type legacyNested struct {
 	Top string `json:"top"`
 }
 
+// legacyStated is an embedded struct whose one field states its own
+// deprecation, so no promoted field reads the deprecation of the embed.
+//
+//nolint:unused // Embedded only; exercised via reflection.
+type legacyStated struct {
+	Old string `json:"old" jsonschema:"deprecated=true"`
+}
+
 // wantDeprecation is the deprecation a test expects of one property.
 type wantDeprecation struct {
 	message    string
@@ -827,6 +835,16 @@ func TestGenerateEmbeddedDeprecation(t *testing.T) {
 				return jsonschema.GenerateFor[doc](ctx)
 			},
 			err: `embedded field legacyFields: jsonschema tag: key "deprecationMessage" requires a non-empty value`,
+		},
+		"refused tag that no promoted field reads": {
+			generate: func(ctx context.Context) (*jsonschema.Schema, error) {
+				type doc struct {
+					legacyStated `jsonschema:"deprecated=maybe"` //nolint:unused // Embedded only; exercised via reflection.
+				}
+
+				return jsonschema.GenerateFor[doc](ctx)
+			},
+			err: `embedded field legacyStated: jsonschema tag:`,
 		},
 	}
 

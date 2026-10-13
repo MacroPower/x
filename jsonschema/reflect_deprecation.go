@@ -7,7 +7,9 @@ import (
 	"slices"
 	"strings"
 
+	"go.jacobcolvin.com/x/jsonschema/internal/jsontag"
 	"go.jacobcolvin.com/x/jsonschema/internal/keyword"
+	"go.jacobcolvin.com/x/jsonschema/internal/reflectkind"
 	"go.jacobcolvin.com/x/jsonschema/internal/tagparse"
 )
 
@@ -179,6 +181,75 @@ func (g *run) settleGhostMarks(obj *node, parent *Schema, embeds map[string]depr
 	}
 
 	return nil
+}
+
+// embedDeprecations returns the deprecation that each embedded field of
+// the struct root states for itself, by the index path of the field, for
+// every embedded field whose fields root promotes. The walk enters each
+// such field's struct but not a composed embed, whose fields reach root as
+// ghost names. It reads every one of these fields, so a malformed tag fails
+// generation whether or not a promoted field takes its deprecation.
+func (g *run) embedDeprecations(root reflect.Type, parent *Schema) (map[string]deprecation, error) {
+	embeds := map[string]deprecation{}
+
+	if root == nil || root.Kind() != reflect.Struct {
+		return embeds, nil
+	}
+
+	var walk func(t reflect.Type, prefix []int, inPath map[reflect.Type]bool) error
+
+	walk = func(t reflect.Type, prefix []int, inPath map[reflect.Type]bool) error {
+		for i := range t.NumField() {
+			f := t.Field(i)
+
+			// An embedded field promotes its fields unless a json tag names
+			// it, and a json:",embed" option promotes those of a named one.
+			info, err := jsontag.Parse(f)
+			promotes := info.Embed || (f.Anonymous && !info.TaggedName)
+
+			if err != nil || info.JSONName == "" || !promotes {
+				continue
+			}
+
+			ft := reflectkind.IndirectType(f.Type)
+			if ft.Kind() != reflect.Struct {
+				continue
+			}
+
+			path := append(slices.Clone(prefix), i)
+
+			d, err := g.embedDeprecation(root, path, parent)
+			if err != nil {
+				return err
+			}
+
+			embeds[fmt.Sprint(path)] = d
+
+			// A type that embeds itself through a pointer ends the walk, as
+			// it ends the walk of encoding/json.
+			if inPath[ft] || g.needsAllOfComposition(ft) {
+				continue
+			}
+
+			inPath[ft] = true
+
+			err = walk(ft, path, inPath)
+			if err != nil {
+				return err
+			}
+
+			delete(inPath, ft)
+		}
+
+		return nil
+	}
+
+	err := walk(root, nil, map[reflect.Type]bool{root: true})
+	if err != nil {
+		return nil, err
+	}
+
+	return embeds, nil
 }
 
 // chainDeprecation returns the deprecation that the embedded fields along
