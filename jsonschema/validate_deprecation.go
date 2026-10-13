@@ -100,6 +100,14 @@ func (c *Validator) ValidateDeprecations(ctx context.Context, instance any) ([]D
 
 	err = c.validateNormalized(ctx, value, log)
 
+	// The walk drops many of the records it makes, so it keeps their
+	// segments alone and the pointers render here for the ones it kept.
+	for i := range log.records {
+		d := &log.records[i]
+		d.InstancePath = segmentsPointer(d.segments)
+		d.SchemaPath = segmentsPointer(d.schemaSegs)
+	}
+
 	return log.records, err
 }
 
@@ -124,8 +132,10 @@ var keyApplicators = map[string]bool{
 }
 
 // recordDeprecation adds the record of schema, which holds "deprecated":
-// true, at the instance and schema locations the walk is at. A run with no
-// log records nothing.
+// true, at the instance and schema locations the walk is at. The record
+// holds the segments of both locations, and
+// [Validator.ValidateDeprecations] renders their pointers once the walk
+// ends. A run with no log records nothing.
 func (v *validator) recordDeprecation(schema *Schema, instancePath instanceLocation, schemaPath schemaLocation) {
 	log := v.deprecations
 	if log == nil {
@@ -133,12 +143,10 @@ func (v *validator) recordDeprecation(schema *Schema, instancePath instanceLocat
 	}
 
 	log.records = append(log.records, Deprecation{
-		Schema:       schema,
-		segments:     cloneSegments(instancePath.segs),
-		schemaSegs:   cloneSegments(schemaPath.segs),
-		InstancePath: instancePath.pointer(),
-		SchemaPath:   schemaPath.pointer(),
-		targetsKey:   log.names > 0 || keyApplicators[schemaPath.keyword],
+		Schema:     schema,
+		segments:   cloneSegments(instancePath.segs),
+		schemaSegs: cloneSegments(schemaPath.segs),
+		targetsKey: log.names > 0 || keyApplicators[schemaPath.keyword],
 	})
 }
 
