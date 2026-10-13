@@ -352,7 +352,7 @@ func valueHasType(v any, typeName string) bool {
 func (s *applyState) applyKey(key, value string) error {
 	switch key {
 	case keyword.Description, keyword.Title, keyword.Default, keyword.Examples,
-		keyword.Deprecated, keyword.DeprecationMessage, keyword.ReadOnly, keyword.WriteOnly, keyword.Type:
+		keyword.ReadOnly, keyword.WriteOnly, keyword.Type:
 		// The annotation appliers all overwrite, so a repeat in one tag is
 		// two stated intentions with no precedence to pick between. A second
 		// type= pair overwrites too, and drops with the first override the
@@ -391,18 +391,11 @@ func (s *applyState) applyKey(key, value string) error {
 
 		return nil
 
-	case keyword.Deprecated, keyword.ReadOnly, keyword.WriteOnly:
+	case keyword.ReadOnly, keyword.WriteOnly:
 		return s.applyFlag(key, value)
 
-	case keyword.DeprecationMessage:
-		err := s.deprecation.stateMessage(value)
-		if err != nil {
-			return err
-		}
-
-		s.canvas.Deprecated = true
-
-		return nil
+	case keyword.Deprecated, keyword.DeprecationMessage:
+		return s.applyDeprecation(key, value)
 
 	case keyword.Default:
 		return s.applyDefault(key, value)
@@ -544,14 +537,6 @@ func (s *applyState) applyFlag(key, value string) error {
 	}
 
 	switch key {
-	case keyword.Deprecated:
-		err := s.deprecation.stateFlag(b)
-		if err != nil {
-			return err
-		}
-
-		s.canvas.Deprecated = b
-
 	case keyword.ReadOnly:
 		s.canvas.ReadOnly = b
 	case keyword.WriteOnly:
