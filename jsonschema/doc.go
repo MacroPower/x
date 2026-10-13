@@ -1199,8 +1199,10 @@
 //
 //   - The description that the [DescriptionProvider] gives the field. A
 //     paragraph of it that starts with "Deprecated: ", the convention the Go
-//     tools read, marks the field. The rest of the paragraph, with each line
-//     break replaced by a space, becomes the message. A description that the
+//     tools read, marks the field. The paragraph is a span of unindented
+//     lines, so an indented code block or list item never marks the field.
+//     The rest of the paragraph, with each line break replaced by a space,
+//     becomes the message. A description that the
 //     jsonschema tag or a type-level hook sets replaces the description
 //     alone, so the paragraph still marks the field.
 //   - The jsonschema tag, which applies after the description.
