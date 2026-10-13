@@ -425,6 +425,11 @@ type validator struct {
 	lateEnums  map[*Schema]*jsonvalue.Set
 	lateConsts map[*Schema]jsonvalue.Value
 
+	// The deprecations log collects the [Deprecation] records of a run that
+	// [Validator.ValidateDeprecations] starts, and is nil on every other run
+	// and on the shared proto, so those runs record nothing.
+	deprecations *deprecationLog
+
 	// The WithDraft override; nil leaves the draft to $schema detection.
 	draftOverride *Draft
 
@@ -628,6 +633,7 @@ func (v *validator) forInstance(ctx context.Context) *validator {
 	rv.ctx = ctx
 	rv.lateEnums = nil
 	rv.lateConsts = nil
+	rv.deprecations = nil
 
 	if !v.refBearing {
 		return &rv
@@ -2196,7 +2202,7 @@ func (c *Validator) Validate(ctx context.Context, instance any) error {
 		return err
 	}
 
-	return c.validateNormalized(ctx, value)
+	return c.validateNormalized(ctx, value, nil)
 }
 
 // normalizeAndCheck converts instance through [jsonvalue.FromGo] and reports
@@ -2220,9 +2226,11 @@ func normalizeAndCheck(instance any) (jsonvalue.Value, error) {
 // validateNormalized validates a converted instance, returning nil on
 // success or the assembled *ValidationError. Every entry point converts its
 // instance exactly once, through [jsonvalue.FromGo] for a Go value or
-// [jsonvalue.Decode] for JSON text, and hands the Value here.
-func (c *Validator) validateNormalized(ctx context.Context, instance jsonvalue.Value) error {
+// [jsonvalue.Decode] for JSON text, and hands the Value here. A non-nil log
+// collects the run's [Deprecation] records.
+func (c *Validator) validateNormalized(ctx context.Context, instance jsonvalue.Value, log *deprecationLog) error {
 	v := c.proto.forInstance(ctx)
+	v.deprecations = log
 
 	// The run context reaches the resolver through the per-run ctx field set
 	// by forInstance: the recursive walk cannot thread a parameter.
@@ -2258,7 +2266,7 @@ func (c *Validator) ValidateJSON(ctx context.Context, data []byte) error {
 		return err //nolint:wrapcheck // Decode already wraps with "JSON decode:".
 	}
 
-	return c.validateNormalized(ctx, instance)
+	return c.validateNormalized(ctx, instance, nil)
 }
 
 // ValidateReader applies [Validator.ValidateJSON]'s discipline to an
@@ -2276,7 +2284,7 @@ func (c *Validator) ValidateReader(ctx context.Context, r io.Reader) error {
 		return err //nolint:wrapcheck // DecodeReader already wraps with "JSON decode:".
 	}
 
-	return c.validateNormalized(ctx, instance)
+	return c.validateNormalized(ctx, instance, nil)
 }
 
 // ValidateValue marshals v with [encoding/json/v2] and validates its JSON
@@ -2362,7 +2370,7 @@ func Validate(ctx context.Context, schema *Schema, instance any, opts ...Validat
 		return err
 	}
 
-	return c.validateNormalized(ctx, value)
+	return c.validateNormalized(ctx, value, nil)
 }
 
 // validate performs the depth-first recursive walk.
@@ -2431,6 +2439,19 @@ func (v *validator) validate(
 		}
 	}
 
+	// Draft-07: a $ref with siblings ignores the siblings, so only the $ref row
+	// runs and a deprecated keyword beside it records nothing. Under Draft
+	// 2020-12 a $ref evaluates alongside its siblings, and a schema with no
+	// $ref runs every active row regardless of draft.
+	onlyRef := !v.profile.honorRefSiblings && schema.Ref != ""
+
+	// The deprecated keyword asserts nothing and no row owns it, so the
+	// record of this evaluation is made here, before the rows walk the
+	// subschemas, in walk order.
+	if schema.Deprecated && !onlyRef {
+		v.recordDeprecation(schema, instancePath, schemaPath)
+	}
+
 	// If this schema uses unevaluated* keywords but the caller didn't provide
 	// annotations, create a local annotations object to track evaluated items.
 	if ann == nil && (schema.UnevaluatedProperties != nil || schema.UnevaluatedItems != nil) {
@@ -2460,11 +2481,6 @@ func (v *validator) validate(
 		v: v, schema: schema, nodeID: nodeID, instance: instance,
 		instancePath: instancePath, schemaPath: schemaPath, ann: ann,
 	}
-
-	// Draft-07: a $ref with siblings ignores the siblings, so only the $ref row
-	// runs. Under Draft 2020-12 a $ref evaluates alongside its siblings, and a
-	// schema with no $ref runs every active row regardless of draft.
-	onlyRef := !v.profile.honorRefSiblings && schema.Ref != ""
 
 	var errs []*ValidationError
 
@@ -2504,13 +2520,15 @@ func evalUnevaluatedProperties(ctx evalContext) []*ValidationError {
 	// outcome, so the per-property loop is skipped: it would only re-validate
 	// each property against the empty schema (always passing) and re-record what
 	// SetAllProperties subsumes.
-	if schemashape.IsEmpty(schema.UnevaluatedProperties) {
+	// A run that collects deprecations walks a deprecated empty schema still,
+	// for the record of each property it reaches.
+	v := ctx.v
+
+	if schemashape.IsEmpty(schema.UnevaluatedProperties) && !v.collectsDeprecations(schema.UnevaluatedProperties) {
 		ann.SetAllProperties()
 
 		return nil
 	}
-
-	v := ctx.v
 
 	var errs []*ValidationError
 
@@ -2565,13 +2583,15 @@ func evalUnevaluatedItems(ctx evalContext) []*ValidationError {
 	// can never fail. The saturation flag fully captures that outcome, so the
 	// per-item loop is skipped: it would only re-validate each item against the
 	// empty schema (always passing) and re-record what SetAllItems subsumes.
-	if schemashape.IsEmpty(schema.UnevaluatedItems) {
+	// A run that collects deprecations walks a deprecated empty schema still,
+	// for the record of each item it reaches.
+	v := ctx.v
+
+	if schemashape.IsEmpty(schema.UnevaluatedItems) && !v.collectsDeprecations(schema.UnevaluatedItems) {
 		ann.SetAllItems()
 
 		return nil
 	}
-
-	v := ctx.v
 
 	var errs []*ValidationError
 
@@ -3296,7 +3316,15 @@ func evalContains(ctx evalContext) []*ValidationError {
 	containsSchemaPath := schemaPath.kw(KeywordContains)
 
 	for i, item := range arr {
+		// An item that does not match drops the deprecations its walk
+		// recorded.
+		mark := v.markDeprecations()
+
 		childErrs := v.validate(schema.Contains, item, instancePath.index(i), containsSchemaPath, nil)
+		if len(childErrs) > 0 {
+			v.dropDeprecations(mark)
+		}
+
 		if len(childErrs) == 0 {
 			matchCount++
 
@@ -3552,6 +3580,13 @@ func evalObjectApplicators(ctx evalContext) []*ValidationError {
 		// once rather than rebuilding it on every iteration.
 		childSchemaPath := schemaPath.kw(KeywordPropertyNames)
 
+		// A deprecation under propertyNames marks the name of each key it
+		// judges.
+		log := v.deprecations
+		if log != nil {
+			log.names++
+		}
+
 		for _, propName := range sortedObjKeys {
 			childPath := instancePath.key(propName)
 			childErrs := v.validate(
@@ -3564,6 +3599,10 @@ func evalObjectApplicators(ctx evalContext) []*ValidationError {
 					fmt.Sprintf("property name %q is invalid", propName), childErrs,
 				))
 			}
+		}
+
+		if log != nil {
+			log.names--
 		}
 	}
 
@@ -3809,6 +3848,7 @@ func evalAnyOf(ctx evalContext) []*ValidationError {
 	for i, sub := range schema.AnyOf {
 		subAnn := ann.Child()
 		childSchemaPath := schemaPath.kw(KeywordAnyOf).idx(i)
+		mark := v.markDeprecations()
 		childErrs := v.validate(sub, ctx.instance, instancePath, childSchemaPath, subAnn)
 
 		if len(childErrs) == 0 {
@@ -3816,6 +3856,9 @@ func evalAnyOf(ctx evalContext) []*ValidationError {
 
 			ann.Merge(subAnn)
 		} else {
+			// A branch the value fails drops its deprecations.
+			v.dropDeprecations(mark)
+
 			allCauses = append(allCauses, childErrs...)
 		}
 	}
@@ -3850,12 +3893,18 @@ func evalOneOf(ctx evalContext) []*ValidationError {
 	for i, sub := range schema.OneOf {
 		subAnn := ann.Child()
 		childSchemaPath := schemaPath.kw(KeywordOneOf).idx(i)
+		mark := v.markDeprecations()
 		childErrs := v.validate(sub, ctx.instance, instancePath, childSchemaPath, subAnn)
 
 		if len(childErrs) == 0 {
 			matchCount++
 			matchedAnn = subAnn
 		} else {
+			// A branch the value fails drops its deprecations. Each branch
+			// it passes keeps them, even when several pass and fail the
+			// keyword.
+			v.dropDeprecations(mark)
+
 			allCauses = append(allCauses, childErrs...)
 		}
 	}
@@ -3886,7 +3935,13 @@ func evalNot(ctx evalContext) []*ValidationError {
 		return nil
 	}
 
+	// The value must fail the schema of not, so its deprecations never
+	// apply.
+	mark := ctx.v.markDeprecations()
 	childErrs := ctx.v.validate(schema.Not, ctx.instance, ctx.instancePath, ctx.schemaPath.kw(KeywordNot), nil)
+
+	ctx.v.dropDeprecations(mark)
+
 	if len(childErrs) == 0 {
 		return []*ValidationError{
 			leafError(ctx.instancePath, ctx.schemaPath, KeywordNot, "should not validate against the schema"),
@@ -3911,8 +3966,15 @@ func evalIfThenElse(ctx evalContext) []*ValidationError {
 	var errs []*ValidationError
 
 	ifAnn := ann.Child()
+	mark := v.markDeprecations()
 	ifErrs := v.validate(schema.If, instance, instancePath, schemaPath.kw(KeywordIf), ifAnn)
 	ifPassed := len(ifErrs) == 0
+
+	// The deprecations under if apply only when the value passes it. Those
+	// under the branch if picks apply whether the value passes it or not.
+	if !ifPassed {
+		v.dropDeprecations(mark)
+	}
 
 	if ifPassed {
 		ann.Merge(ifAnn)
