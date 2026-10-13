@@ -1,6 +1,7 @@
 package jsonschema_test
 
 import (
+	"context"
 	"encoding"
 	"encoding/json/v2"
 	"reflect"
@@ -564,4 +565,239 @@ func TestGenerateShadowedComposedEmbed(t *testing.T) {
 		require.Error(t, v.ValidateJSON(t.Context(), []byte(`{"X":"nope","other":"a"}`)),
 			"a collision-free composition must stay unconditional")
 	})
+}
+
+// legacyFields is an embedded struct whose fields the deprecation of the
+// field that embeds it reaches, for TestGenerateEmbeddedDeprecation.
+//
+//nolint:unused // Embedded only; exercised via reflection.
+type legacyFields struct {
+	Discount int    `json:"discount,omitzero"`
+	Coupon   string `json:"coupon,omitzero"   jsonschema:"deprecationMessage=coupons moved"`
+	Kept     string `json:"kept,omitzero"     jsonschema:"deprecated=false"`
+}
+
+// legacyMiddle embeds legacyFields beside a field of its own, so an outer
+// embed reaches both through it.
+//
+//nolint:unused // Embedded only; exercised via reflection.
+type legacyMiddle struct {
+	legacyFields `jsonschema:"deprecationMessage=the inner fields go away"`
+
+	Mid int `json:"mid,omitzero"`
+}
+
+// legacyKind is a composed embed, whose promoted names reach the parent as
+// placeholder properties beside its allOf branch.
+type legacyKind struct {
+	Kind string `json:"kind"`
+}
+
+// wantDeprecation is the deprecation a test expects of one property.
+type wantDeprecation struct {
+	message    string
+	deprecated bool
+}
+
+// TestGenerateEmbeddedDeprecation pins how an embedded field that promotes
+// its fields gives them its deprecation, from its doc comment or its
+// jsonschema tag. A promoted field with a deprecation of its own keeps it,
+// the nearest embedded field wins, and an embed under a JSON name is a
+// property of its own whose deprecation stays on it. The placeholder
+// property of a composed embed takes the deprecation of the embed too.
+func TestGenerateEmbeddedDeprecation(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		generate func(ctx context.Context) (*jsonschema.Schema, error)
+		want     map[string]wantDeprecation
+		err      string
+	}{
+		"tag": {
+			generate: func(ctx context.Context) (*jsonschema.Schema, error) {
+				type doc struct {
+					legacyFields `jsonschema:"deprecationMessage=the legacy fields go away"` //nolint:unused // Embedded only; exercised via reflection.
+
+					Name string `json:"name"`
+				}
+
+				return jsonschema.GenerateFor[doc](ctx)
+			},
+			want: map[string]wantDeprecation{
+				"discount": {message: "the legacy fields go away", deprecated: true},
+				"coupon":   {message: "coupons moved", deprecated: true},
+				"kept":     {},
+				"name":     {},
+			},
+		},
+		"doc comment": {
+			generate: func(ctx context.Context) (*jsonschema.Schema, error) {
+				type doc struct {
+					legacyFields //nolint:unused // Embedded only; exercised via reflection.
+
+					Name string `json:"name"`
+				}
+
+				return jsonschema.GenerateFor[doc](ctx, jsonschema.WithDescriptionProvider(
+					fieldDocProvider(func(name string) string {
+						if name == "legacyFields" {
+							return "LegacyFields holds the old fields.\n\nDeprecated: cafe 5.0 drops them."
+						}
+
+						return ""
+					}),
+				))
+			},
+			want: map[string]wantDeprecation{
+				"discount": {message: "cafe 5.0 drops them.", deprecated: true},
+				"coupon":   {message: "coupons moved", deprecated: true},
+				"kept":     {},
+				"name":     {},
+			},
+		},
+		"json tag without a name": {
+			generate: func(ctx context.Context) (*jsonschema.Schema, error) {
+				type doc struct {
+					legacyFields `json:",embed" jsonschema:"deprecated=true"` //nolint:unused // Embedded only; exercised via reflection.
+				}
+
+				return jsonschema.GenerateFor[doc](ctx)
+			},
+			want: map[string]wantDeprecation{
+				"discount": {deprecated: true},
+				"coupon":   {message: "coupons moved", deprecated: true},
+			},
+		},
+		"json name": {
+			generate: func(ctx context.Context) (*jsonschema.Schema, error) {
+				type doc struct {
+					legacyFields `json:"legacy" jsonschema:"deprecationMessage=the legacy group goes away"` //nolint:unused // Embedded only; exercised via reflection.
+				}
+
+				return jsonschema.GenerateFor[doc](ctx)
+			},
+			want: map[string]wantDeprecation{
+				"legacy": {message: "the legacy group goes away", deprecated: true},
+			},
+		},
+		"nearest embed": {
+			generate: func(ctx context.Context) (*jsonschema.Schema, error) {
+				type doc struct {
+					legacyMiddle `jsonschema:"deprecationMessage=the middle fields go away"` //nolint:unused // Embedded only; exercised via reflection.
+				}
+
+				return jsonschema.GenerateFor[doc](ctx)
+			},
+			want: map[string]wantDeprecation{
+				"mid":      {message: "the middle fields go away", deprecated: true},
+				"discount": {message: "the inner fields go away", deprecated: true},
+				"coupon":   {message: "coupons moved", deprecated: true},
+			},
+		},
+		"inner embed kept current": {
+			generate: func(ctx context.Context) (*jsonschema.Schema, error) {
+				//nolint:unused // Embedded only; exercised via reflection.
+				type middle struct {
+					legacyFields `jsonschema:"deprecated=false"` //nolint:unused // Embedded only; exercised via reflection.
+
+					Mid int `json:"mid,omitzero"`
+				}
+
+				type doc struct {
+					middle `jsonschema:"deprecationMessage=the middle fields go away"` //nolint:unused // Embedded only; exercised via reflection.
+				}
+
+				return jsonschema.GenerateFor[doc](ctx)
+			},
+			want: map[string]wantDeprecation{
+				"mid":      {message: "the middle fields go away", deprecated: true},
+				"discount": {},
+			},
+		},
+		"composed embed": {
+			generate: func(ctx context.Context) (*jsonschema.Schema, error) {
+				type doc struct {
+					legacyKind `jsonschema:"deprecationMessage=kinds go away"` //nolint:unused // Embedded only; exercised via reflection.
+
+					Name string `json:"name"`
+				}
+
+				return jsonschema.GenerateFor[doc](ctx,
+					jsonschema.WithTypeSchemaFor[legacyKind](jsonschema.TypeSchema{}),
+				)
+			},
+			want: map[string]wantDeprecation{
+				"kind": {message: "kinds go away", deprecated: true},
+				"name": {},
+			},
+		},
+		"refused tag": {
+			generate: func(ctx context.Context) (*jsonschema.Schema, error) {
+				type doc struct {
+					legacyFields `jsonschema:"deprecationMessage="` //nolint:unused // Embedded only; exercised via reflection.
+				}
+
+				return jsonschema.GenerateFor[doc](ctx)
+			},
+			err: `embedded field legacyFields: jsonschema tag: key "deprecationMessage" requires a non-empty value`,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			s, err := tc.generate(t.Context())
+			if tc.err != "" {
+				require.ErrorContains(t, err, tc.err)
+
+				return
+			}
+
+			require.NoError(t, err)
+
+			for prop, want := range tc.want {
+				require.Contains(t, s.Properties, prop, "schema: %s", marshalSchema(t, s))
+
+				deprecated, message := deprecationOf(s.Properties[prop])
+				assert.Equal(t, want.deprecated, deprecated, "property %q", prop)
+				assert.Equal(t, want.message, message, "property %q", prop)
+			}
+		})
+	}
+}
+
+// TestGenerateEmbeddedDeprecationContext pins the FieldContext a
+// description provider receives for an embedded field that promotes its
+// fields: the struct that declares the embed as Owner, the embedded field,
+// and an empty Name, since such a field has no JSON name.
+func TestGenerateEmbeddedDeprecationContext(t *testing.T) {
+	t.Parallel()
+
+	type doc struct {
+		legacyFields //nolint:unused // Embedded only; exercised via reflection.
+
+		Name string `json:"name"`
+	}
+
+	var got []jsonschema.FieldContext
+
+	_, err := jsonschema.GenerateFor[doc](t.Context(),
+		jsonschema.WithDescriptionProvider(jsonschema.DescriptionProviderFuncs{
+			FieldFunc: func(_ context.Context, fc jsonschema.FieldContext) (string, error) {
+				if fc.StructField.Anonymous {
+					got = append(got, fc)
+				}
+
+				return "", nil
+			},
+		}),
+	)
+	require.NoError(t, err)
+
+	require.Len(t, got, 1, "the provider describes the embed once")
+	assert.Equal(t, reflect.TypeFor[doc](), got[0].Owner)
+	assert.Equal(t, "legacyFields", got[0].StructField.Name)
+	assert.Equal(t, []int{0}, got[0].StructField.Index)
+	assert.Empty(t, got[0].Name)
 }

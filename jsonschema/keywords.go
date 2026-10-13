@@ -68,6 +68,15 @@ const (
 	KeywordWriteOnly             = keyword.WriteOnly
 )
 
+// KeywordDeprecationMessage names the keyword that holds the message of a
+// deprecated schema, beside the deprecated keyword. No draft of JSON Schema
+// defines it, so it lives in [Schema.Extra], and the JSON language service of
+// VS Code reads it. Generation writes it from the Deprecated: paragraph of a
+// field's doc comment and from the deprecationMessage key of the jsonschema
+// struct tag. A JSONSchemaExtend method sets it through Schema.Extra under
+// this name.
+const KeywordDeprecationMessage = keyword.DeprecationMessage
+
 // formatDateTime is the format value the generator emits and the validator
 // asserts. (The base64 contentEncoding value lives in internal/content, which
 // owns the content assertion.)

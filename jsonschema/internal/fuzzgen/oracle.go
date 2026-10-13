@@ -76,7 +76,10 @@ var (
 
 	// AnnotationKeys are the keys every class admits, and the keys a type=
 	// pair may follow.
-	annotationKeys = set(keyword.Description, keyword.Title, keyword.Deprecated, keyword.ReadOnly, keyword.WriteOnly)
+	annotationKeys = set(
+		keyword.Description, keyword.Title, keyword.Deprecated, keyword.DeprecationMessage,
+		keyword.ReadOnly, keyword.WriteOnly,
+	)
 
 	// DeclaredClasses maps a type= parameter to the class the keys after it
 	// are judged against. A null override is left unjudged, since its
@@ -167,6 +170,15 @@ func admittedTag(cls tagClass, tag string) bool {
 		}
 	}
 
+	// A deprecationMessage pair deprecates the field that a
+	// deprecated=false pair keeps current, so the tag refuses the two
+	// together.
+	for _, d := range directives {
+		if d.Key == keyword.Deprecated && d.Value == "false" && seen[keyword.DeprecationMessage] {
+			return false
+		}
+	}
+
 	return true
 }
 
@@ -177,6 +189,8 @@ func admits(cls tagClass, key, param string) bool {
 		return true
 	case keyword.Deprecated, keyword.ReadOnly, keyword.WriteOnly:
 		return admittedFlags[param]
+	case keyword.DeprecationMessage:
+		return param != ""
 	}
 
 	switch cls {

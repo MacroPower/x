@@ -96,3 +96,38 @@ type KnotRoot struct {
 	A Knot      `json:"a" jsonschema:"type=string"`
 	B beta.Knot `json:"b"`
 }
+
+// Menu is a test type whose fields carry Deprecated: paragraphs in their doc
+// comments, for the deprecation that generation reads from them.
+type Menu struct {
+	// Label is the text on the menu board.
+	//
+	// Deprecated: call Title, which falls back to the name.
+	Label string `json:"label,omitzero" jsonschema:"deprecated=false"`
+
+	// Notes holds remarks for the staff.
+	Notes string `json:"notes,omitzero" jsonschema:"deprecationMessage=keep notes in the staff wiki"`
+
+	// LegacyMenu brings in the fields of the old menu.
+	//
+	// Deprecated: cafe 5.0 drops the old menu fields.
+	LegacyMenu
+
+	// LegacyPricing rounds each price to whole kronor.
+	//
+	// Deprecated: legacyPricing has no effect.
+	// Remove it.
+	LegacyPricing bool `json:"legacyPricing,omitzero"`
+}
+
+// LegacyMenu holds the fields that [Menu] promotes from its deprecated
+// embedded field.
+type LegacyMenu struct {
+	// Coupon is the old coupon code.
+	//
+	// Deprecated: coupons moved to promotions.
+	Coupon string `json:"coupon,omitzero"`
+
+	// Discount is the old discount in percent.
+	Discount int `json:"discount,omitzero"`
+}

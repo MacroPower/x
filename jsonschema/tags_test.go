@@ -5773,3 +5773,174 @@ type cycleItem struct {
 	Kids cycleKids `json:"kids" jsonschema:"type=array"`
 	More cycleKids `json:"more" validate:"dive,required"`
 }
+
+// TestTagDeprecation pins the deprecated and deprecationMessage keys of the
+// jsonschema tag, which apply after the Deprecated: paragraph of the doc
+// comment. A deprecationMessage pair sets the message and deprecated, and a
+// deprecated=false pair removes both, so a field whose Go API alone is
+// deprecated stays current in the schema.
+func TestTagDeprecation(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		doc        string
+		tag        string
+		message    string
+		deprecated bool
+	}{
+		"message": {
+			tag:        "deprecationMessage=use length",
+			message:    "use length",
+			deprecated: true,
+		},
+		"flag": {
+			tag:        "deprecated=true",
+			deprecated: true,
+		},
+		"flag keeps the comment message": {
+			doc:        "Deprecated: use length.",
+			tag:        "deprecated=true",
+			message:    "use length.",
+			deprecated: true,
+		},
+		"false removes the comment mark": {
+			doc: "Deprecated: use length.",
+			tag: "deprecated=false",
+		},
+		"message replaces the comment message": {
+			doc:        "Deprecated: use length.",
+			tag:        "deprecationMessage=use width",
+			message:    "use width",
+			deprecated: true,
+		},
+		"flag then message": {
+			tag:        "deprecated=true,deprecationMessage=use width",
+			message:    "use width",
+			deprecated: true,
+		},
+		"message then flag": {
+			tag:        "deprecationMessage=use width,deprecated=true",
+			message:    "use width",
+			deprecated: true,
+		},
+		"escaped comma": {
+			tag:        `deprecationMessage=use width\, not length`,
+			message:    "use width, not length",
+			deprecated: true,
+		},
+		"other keys": {
+			tag:        "minimum=1,deprecationMessage=use width",
+			message:    "use width",
+			deprecated: true,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			typ := reflect.StructOf([]reflect.StructField{{
+				Name: "Size",
+				Type: reflect.TypeFor[int](),
+				Tag:  reflect.StructTag(`json:"size" jsonschema:` + strconv.Quote(tc.tag)),
+			}})
+
+			s, err := jsonschema.Generate(t.Context(), typ,
+				jsonschema.WithDescriptionProvider(fieldDocProvider(func(string) string { return tc.doc })),
+			)
+			require.NoError(t, err)
+
+			deprecated, message := deprecationOf(s.Properties["size"])
+			assert.Equal(t, tc.deprecated, deprecated)
+			assert.Equal(t, tc.message, message)
+		})
+	}
+}
+
+// TestTagDeprecationRefused pins the deprecation pairs the jsonschema tag
+// refuses: an empty message, a repeated key, and a message beside
+// deprecated=false, which keeps current the field that the message
+// deprecates.
+func TestTagDeprecationRefused(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		tag string
+		err string
+	}{
+		"empty message": {
+			tag: "deprecationMessage=",
+			err: `key "deprecationMessage" requires a non-empty value`,
+		},
+		"repeated message": {
+			tag: "deprecationMessage=a,deprecationMessage=b",
+			err: `key "deprecationMessage" is set twice in one tag`,
+		},
+		"false then message": {
+			tag: "deprecated=false,deprecationMessage=a",
+			err: "deprecated=false keeps current",
+		},
+		"message then false": {
+			tag: "deprecationMessage=a,deprecated=false",
+			err: "deprecated=false keeps current",
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			typ := reflect.StructOf([]reflect.StructField{{
+				Name: "Size",
+				Type: reflect.TypeFor[int](),
+				Tag:  reflect.StructTag(`json:"size" jsonschema:` + strconv.Quote(tc.tag)),
+			}})
+
+			_, err := jsonschema.Generate(t.Context(), typ)
+			require.ErrorContains(t, err, tc.err)
+		})
+	}
+}
+
+// retiredPlan is a type whose JSONSchemaExtend method marks every value
+// deprecated, for TestTagDeprecatedFalseKeepsTypeMark.
+type retiredPlan struct {
+	Tier string `json:"tier"`
+}
+
+// JSONSchemaExtend marks every plan deprecated.
+func (retiredPlan) JSONSchemaExtend(_ context.Context, _ jsonschema.TypeContext, ts *jsonschema.TypeSchema) error {
+	ts.Value.Deprecated = true
+	ts.Value.Extra = map[string]any{jsonschema.KeywordDeprecationMessage: "plans retire in v2"}
+
+	return nil
+}
+
+// TestTagDeprecatedFalseKeepsTypeMark pins that deprecated=false clears the
+// mark on the field alone. The mark that a JSONSchemaExtend method puts on
+// the type of the field stays in its definition, which the field reaches
+// through $ref.
+func TestTagDeprecatedFalseKeepsTypeMark(t *testing.T) {
+	t.Parallel()
+
+	type account struct {
+		Plan retiredPlan `json:"plan" jsonschema:"deprecated=false"`
+	}
+
+	s, err := jsonschema.GenerateFor[account](t.Context(),
+		jsonschema.WithDescriptionProvider(fieldDocProvider(func(string) string { return "Deprecated: use tiers." })),
+	)
+	require.NoError(t, err)
+
+	plan := s.Properties["plan"]
+	deprecated, message := deprecationOf(plan)
+	assert.False(t, deprecated)
+	assert.Empty(t, message)
+
+	def := s.Defs[strings.TrimPrefix(plan.Ref, "#/$defs/")]
+	require.NotNil(t, def, "the field must reach the definition of its type: %s", marshalSchema(t, s))
+
+	deprecated, message = deprecationOf(def)
+	assert.True(t, deprecated)
+	assert.Equal(t, "plans retire in v2", message)
+}

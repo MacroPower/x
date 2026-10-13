@@ -65,3 +65,9 @@ const (
 	UniqueItems           = "uniqueItems"
 	WriteOnly             = "writeOnly"
 )
+
+// DeprecationMessage names the keyword that holds the message of a
+// deprecated schema. No draft of JSON Schema defines it, so it lives in
+// the Extra map of a schema and has no row in the keyword semantics
+// table. The JSON language service of VS Code reads it.
+const DeprecationMessage = "deprecationMessage"
