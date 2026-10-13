@@ -287,7 +287,8 @@ type MenuItem struct {
 }
 ```
 
-See
+`ValidateDeprecations` reports each value of an instance that a deprecated
+schema applies to. See
 [Deprecations](https://pkg.go.dev/go.jacobcolvin.com/x/jsonschema#hdr-Deprecations).
 
 ### Definitions and Drafts
@@ -325,6 +326,13 @@ type ValidationError struct {
 	Causes       []*ValidationError // child failures
 }
 ```
+
+`ValidateDeprecations` validates a pre-parsed Go value as `Validate` does. It
+returns the error that `Validate` returns, and a `Deprecation` for each value
+that a schema with `"deprecated": true` applies to. Each record holds the
+instance path, the schema path, and the schema that holds the keyword. Schemas
+report a deprecation only where the value takes their path, so a branch of
+`anyOf` or `oneOf` that the value fails reports none.
 
 `format` is asserted under Draft-07 and annotation-only under Draft 2020-12
 unless the format-assertion vocabulary or `WithFormats(true)` turns it on.

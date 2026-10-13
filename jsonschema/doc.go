@@ -1230,6 +1230,9 @@
 // [Draft7] moves into an allOf because that draft ignores the siblings of
 // $ref.
 //
+// [Validator.ValidateDeprecations] reports each value of an instance that a
+// deprecated schema applies to, as the Validation section describes.
+//
 // # Drafts
 //
 // The package supports [Draft7] and [Draft2020] (the default). [WithDraft]
@@ -1711,6 +1714,21 @@
 //     additionalProperties, propertyNames, minItems, minProperties, and the
 //     like) rather than a value, so a source-mapping consumer can highlight
 //     the key instead of the value.
+//
+// The deprecated keyword asserts nothing, so a validation run passes over
+// it. [Validator.ValidateDeprecations] validates a pre-parsed Go value as
+// [Validator.Validate] does. It returns the error that Validate returns, and
+// a [Deprecation] for each value that a schema with "deprecated": true
+// applies to, whether the value passes or fails. Each record carries its
+// instance and schema paths in both forms and the schema that holds the
+// keyword, so a caller reads a message such as deprecationMessage from that
+// schema. [Deprecation.TargetsKey] reports whether the keyword marks the
+// name of an object member rather than its value.
+//
+// Records drop only where the schema chooses a path that the value does not
+// take. They drop under a branch of anyOf or oneOf that the value fails and
+// under an if that the value fails. They also drop for an item that contains
+// does not match, and under every schema of not.
 //
 // Built-in format checkers cover date-time, date, time, duration, email,
 // idn-email, hostname, idn-hostname, uri, uri-reference, uri-template, iri,
