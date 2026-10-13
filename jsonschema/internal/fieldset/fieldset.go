@@ -62,10 +62,6 @@ type Sighting struct {
 	// GhostOwner names the composed embed type a ghost sighting belongs to;
 	// see [Sighting.Ghost].
 	GhostOwner reflect.Type
-	// GhostEmbed is the index path, from the walk's root type, of the
-	// composed embed a ghost sighting belongs to, nil for any other
-	// sighting.
-	GhostEmbed []int
 	// Info is the field's parsed json tag, recorded once by the walk so
 	// [Classify] does not re-run the tag grammar on each winner. For a
 	// declaration v2 refuses, it holds the recovered reading the walk's error
@@ -232,9 +228,10 @@ type Result struct {
 	// property; the caller models its members as the object's extra-member
 	// constraint.
 	Fallback *Fallback
-	// GhostEmbeds maps each name of GhostWon to the index path, from the
-	// walk's root type, of the composed embed whose promoted field won it.
-	GhostEmbeds map[string][]int
+	// GhostFields maps each name of GhostWon to the field that won it, a
+	// field that a composed embed promotes, with Index the path from the
+	// walk's root type through the embed.
+	GhostFields map[string]reflect.StructField
 	// Fields lists the resolved fields in the order they are declared in the
 	// Go source, a promoted field sorting at its embed's position.
 	Fields []Field
@@ -305,8 +302,6 @@ type embedEntry struct {
 	typ        reflect.Type
 	ghostOwner reflect.Type
 	index      []int
-	// The index path of the composed embed that owns a ghost entry.
-	ghostEmbed []int
 	optional   bool
 	ghost      bool
 }
@@ -561,7 +556,6 @@ func (c *Collector) Collect(t reflect.Type) (Collection, error) {
 						record(f.Name, Sighting{
 							StructField: f, Depth: depth, Optional: e.optional,
 							Info: info, Ghost: e.ghost, GhostOwner: e.ghostOwner,
-							GhostEmbed: e.ghostEmbed,
 						}, dup)
 
 						continue
@@ -621,7 +615,6 @@ func (c *Collector) Collect(t reflect.Type) (Collection, error) {
 									optional:   e.optional || embeddedViaPointer,
 									ghost:      true,
 									ghostOwner: ft,
-									ghostEmbed: fieldIndex,
 								})
 							}
 						}
@@ -642,7 +635,6 @@ func (c *Collector) Collect(t reflect.Type) (Collection, error) {
 							optional:   e.optional || embeddedViaPointer,
 							ghost:      e.ghost,
 							ghostOwner: e.ghostOwner,
-							ghostEmbed: e.ghostEmbed,
 						})
 					}
 
@@ -697,7 +689,7 @@ func (c *Collector) Collect(t reflect.Type) (Collection, error) {
 					Sighting{
 						StructField: f, Depth: depth, Optional: e.optional,
 						Info:  info,
-						Ghost: e.ghost, GhostOwner: e.ghostOwner, GhostEmbed: e.ghostEmbed,
+						Ghost: e.ghost, GhostOwner: e.ghostOwner,
 					},
 					dup,
 				)
@@ -830,11 +822,11 @@ func Classify(res Resolution, promoted map[reflect.Type]Result) Result {
 			outcomes[w.Name] = outcome{depth: w.Depth, ghostOwner: w.GhostOwner}
 			out.GhostWon = append(out.GhostWon, w.Name)
 
-			if out.GhostEmbeds == nil {
-				out.GhostEmbeds = map[string][]int{}
+			if out.GhostFields == nil {
+				out.GhostFields = map[string]reflect.StructField{}
 			}
 
-			out.GhostEmbeds[w.Name] = w.GhostEmbed
+			out.GhostFields[w.Name] = w.StructField
 
 			continue
 		}

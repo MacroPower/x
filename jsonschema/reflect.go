@@ -1153,6 +1153,7 @@ func (g *run) buildStructSchema(t reflect.Type) (*node, Nullability, error) {
 
 	fields, ghostWon := resolved.Fields, resolved.GhostWon
 	obj.ghostWon = ghostWon
+	obj.ghostFields = resolved.GhostFields
 
 	// An embedded fallback's members splice into the marshaled object after
 	// the named fields, so the map form's value schema becomes the object's
@@ -2055,17 +2056,35 @@ func (g *run) fieldContext(
 	parent *Schema,
 	quoted bool,
 ) FieldContext {
+	fc := g.bareFieldContext(parentType, fi.StructField, fi.JSONName, parent)
+	fc.Canvas = fieldNode.authored
+	fc.Base = fieldNode.view(g.draft)
+	fc.node = fieldNode
+	fc.quoted = quoted
+
+	return fc
+}
+
+// bareFieldContext builds the [FieldContext] of the struct field sf of
+// parentType under the JSON name name, with no node behind it. Its Canvas
+// and Base are scratch schemas that generation never reads, for a field the
+// description provider describes but no property renders: an embedded field
+// that promotes its fields, or a field that a composed embed promotes.
+func (g *run) bareFieldContext(
+	parentType reflect.Type,
+	sf reflect.StructField,
+	name string,
+	parent *Schema,
+) FieldContext {
 	return FieldContext{
-		Name:        fi.JSONName,
-		Type:        fi.StructField.Type,
-		Owner:       reflectkind.DeclaringType(parentType, fi.StructField),
-		Canvas:      fieldNode.authored,
-		Base:        fieldNode.view(g.draft),
+		Name:        name,
+		Type:        sf.Type,
+		Owner:       reflectkind.DeclaringType(parentType, sf),
+		Canvas:      &Schema{},
+		Base:        &Schema{},
 		Parent:      parent,
-		StructField: fi.StructField,
+		StructField: sf,
 		Draft:       g.draft,
-		node:        fieldNode,
-		quoted:      quoted,
 	}
 }
 

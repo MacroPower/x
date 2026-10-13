@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"go.jacobcolvin.com/x/jsonschema/internal/keyword"
-	"go.jacobcolvin.com/x/jsonschema/internal/reflectkind"
 	"go.jacobcolvin.com/x/jsonschema/internal/tagparse"
 )
 
@@ -130,35 +129,47 @@ func (g *run) settleFieldDeprecation(
 }
 
 // settleGhostMarks decides the deprecation of each name a composed embed
-// won on the object node obj: the deprecation of that embed and of each
-// embedded field above it, which the placeholder property of the name takes
-// at render.
+// won on the object node obj, under the rules a promoted field follows. The
+// field that won the name states its own deprecation through its doc comment
+// and its jsonschema tag. A field that states none takes the deprecation of
+// the embedded fields along its path, which include the composed embed and
+// every embed inside it. Each deprecated name gets a placeholder property,
+// whatever the close of the object, and the placeholder takes the mark at
+// render.
 func (g *run) settleGhostMarks(obj *node, parent *Schema, embeds map[string]deprecation) error {
 	obj.ghostMarks = nil
 
-	if len(obj.ghostWon) == 0 || obj.typ == nil {
+	if obj.typ == nil {
 		return nil
 	}
 
-	// The field set resolved without error when the object was built, and
-	// the walk is deterministic, so a second resolution names the same
-	// embeds.
-	resolved, _ := g.fields.Of(obj.typ) //nolint:errcheck // See the comment above.
-
 	for _, name := range obj.ghostWon {
-		path, ok := resolved.GhostEmbeds[name]
+		sf, ok := obj.ghostFields[name]
 		if !ok {
 			continue
 		}
 
-		d, err := g.chainDeprecation(obj.typ, path, parent, embeds)
+		d, err := g.statedDeprecation(obj.typ, sf, name, parent)
+		if err != nil {
+			return fmt.Errorf("field %q: %w", name, err)
+		}
+
+		inherited, err := g.chainDeprecation(obj.typ, sf.Index[:len(sf.Index)-1], parent, embeds)
 		if err != nil {
 			return err
+		}
+
+		if !d.stated {
+			d = inherited
 		}
 
 		if !d.deprecated {
 			continue
 		}
+
+		// The placeholder asserts nothing, so the embed's branch still
+		// judges the name through allOf, under every close and draft.
+		punchPlaceholder(obj.payload, name)
 
 		if obj.ghostMarks == nil {
 			obj.ghostMarks = map[string]deprecation{}
@@ -215,22 +226,30 @@ func (g *run) embedDeprecation(root reflect.Type, path []int, parent *Schema) (d
 	sf := root.FieldByIndex(path)
 	sf.Index = slices.Clone(path)
 
+	d, err := g.statedDeprecation(root, sf, "", parent)
+	if err != nil {
+		return deprecation{}, fmt.Errorf("embedded field %s: %w", sf.Name, err)
+	}
+
+	return d, nil
+}
+
+// statedDeprecation returns the deprecation that the field sf of the struct
+// root states for itself under the JSON name name: the Deprecated:
+// paragraph of the doc comment that the description provider gives it, with
+// the deprecation pairs of its jsonschema tag applied over it.
+func (g *run) statedDeprecation(
+	root reflect.Type,
+	sf reflect.StructField,
+	name string,
+	parent *Schema,
+) (deprecation, error) {
 	var d deprecation
 
 	if g.descriptionProvider != nil {
-		fc := FieldContext{
-			Type:        sf.Type,
-			Owner:       reflectkind.DeclaringType(root, sf),
-			Canvas:      &Schema{},
-			Base:        &Schema{},
-			Parent:      parent,
-			StructField: sf,
-			Draft:       g.draft,
-		}
-
-		doc, err := g.descriptionProvider.FieldDescription(g.ctx, fc)
+		doc, err := g.descriptionProvider.FieldDescription(g.ctx, g.bareFieldContext(root, sf, name, parent))
 		if err != nil {
-			return deprecation{}, fmt.Errorf("describe embedded field %s of %s: %w", sf.Name, root, err)
+			return deprecation{}, fmt.Errorf("describe %s of %s: %w", sf.Name, root, err)
 		}
 
 		d = commentDeprecation(doc)
@@ -243,7 +262,7 @@ func (g *run) embedDeprecation(root reflect.Type, path []int, parent *Schema) (d
 
 	td, err := tagparse.ParseDeprecation(tag)
 	if err != nil {
-		return deprecation{}, fmt.Errorf("embedded field %s: %w", sf.Name, err)
+		return deprecation{}, err //nolint:wrapcheck // The tag grammar owns the message and the sentinel.
 	}
 
 	return d.then(tagDeprecation(td)), nil

@@ -1322,14 +1322,15 @@ func TestClassificationPins(t *testing.T) {
 			assert.Equal(t, tc.want, got)
 			assert.Equal(t, tc.ghostWon, out.GhostWon)
 
-			// Each ghost-won name maps to the index path of a composed embed
-			// that the result lists, the embed whose promoted field won it.
-			assert.ElementsMatch(t, out.GhostWon, slices.Collect(maps.Keys(out.GhostEmbeds)))
+			// Each ghost-won name maps to the field that won it, whose index
+			// path runs through a composed embed that the result lists.
+			assert.ElementsMatch(t, out.GhostWon, slices.Collect(maps.Keys(out.GhostFields)))
 
-			for ghost, path := range out.GhostEmbeds {
+			for ghost, sf := range out.GhostFields {
 				assert.True(t, slices.ContainsFunc(out.Fields, func(f Field) bool {
-					return f.ComposeViaAllOf && slices.Equal(f.StructField.Index, path)
-				}), "ghost-won name %q maps to %v, which names no composed embed", ghost, path)
+					return f.ComposeViaAllOf && len(f.StructField.Index) < len(sf.Index) &&
+						slices.Equal(f.StructField.Index, sf.Index[:len(f.StructField.Index)])
+				}), "ghost-won name %q maps to %v, which no composed embed leads to", ghost, sf.Index)
 			}
 
 			if tc.fallback == nil {

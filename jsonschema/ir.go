@@ -100,6 +100,9 @@ type node struct {
 	props    []nodeProp  // struct properties, declaration order
 	prefix   []*node     // array elements (prefixItems / itemsArray)
 	embeds   []embedNode // struct allOf/anyOf composition branches
+	// GhostFields maps each ghost-won name to the field that won it, a field
+	// of the composed embed, with Index the path from typ through the embed.
+	ghostFields map[string]reflect.StructField
 	// GhostMarks holds, by name, the deprecation each ghost-won name takes
 	// from the composed embed that won it and the embedded fields above that
 	// embed, which render gives the placeholder property of the name. The
@@ -426,6 +429,7 @@ func (n *node) cloneTree(draft Draft) *node {
 	c.isBody = false
 	c.items = n.items.cloneTree(draft)
 	c.ghostWon = slices.Clone(n.ghostWon)
+	c.ghostFields = maps.Clone(n.ghostFields)
 	c.ghostMarks = maps.Clone(n.ghostMarks)
 	c.deprecationMessage = ""
 
@@ -907,6 +911,7 @@ func (n *node) overrideType(typeName string) {
 	n.props = nil
 	n.embeds = nil
 	n.ghostWon = nil
+	n.ghostFields = nil
 	n.ghostMarks = nil
 	n.fallback = slotNone
 }
