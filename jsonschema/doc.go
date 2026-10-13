@@ -1209,9 +1209,10 @@
 //     deprecationMessage=<text> sets the message and marks the field.
 //     deprecated=true marks the field and keeps the message of the doc
 //     comment. deprecated=false removes the mark and the message, so a
-//     field whose Go API alone is deprecated stays current in the schema. A
-//     tag that holds both deprecated=false and deprecationMessage is an
-//     error.
+//     field whose Go API alone is deprecated stays current in the schema.
+//     It also removes the Deprecated: paragraph from the description that
+//     the doc comment gives the field. A tag that holds both
+//     deprecated=false and deprecationMessage is an error.
 //   - An embedded field that promotes its fields, untagged or tagged without
 //     a JSON name. Its doc comment and its jsonschema tag state its
 //     deprecation, under the same rules, and it gives that deprecation to
