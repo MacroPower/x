@@ -69,4 +69,4 @@ jobs:
           docker-user: root
           configurationFile: .github/renovate.json5
           token: "${{ steps.app-token.outputs.token }}"
-          renovate-version: 44.151.5
+          renovate-version: 44.166.0
